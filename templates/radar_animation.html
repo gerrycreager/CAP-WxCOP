@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CAP Winds Radar Animation - Phase 1A</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #1a1a1a; color: #fff; }
+        
+        #map { position: absolute; top: 0; left: 0; right: 320px; bottom: 180px; }
+        
+        /* Right sidebar for legends */
+        #legends { position: absolute; top: 0; right: 0; width: 320px; bottom: 180px; background: #2c3e50; overflow-y: auto; padding: 15px; }
+        .legend-section { margin-bottom: 25px; background: #34495e; padding: 12px; border-radius: 8px; }
+        .legend-title { font-size: 16px; font-weight: 600; margin-bottom: 10px; color: #3498db; border-bottom: 2px solid #3498db; padding-bottom: 5px; }
+        .legend-item { display: flex; align-items: center; margin: 6px 0; font-size: 13px; }
+        .legend-color { width: 30px; height: 18px; margin-right: 8px; border: 1px solid #555; border-radius: 3px; }
+        .legend-label { flex: 1; }
+        
+        /* Controls at bottom */
+        #controls { position: absolute; bottom: 0; left: 0; right: 320px; height: 180px; background: linear-gradient(to bottom, #2c3e50, #1a252f); box-shadow: 0 -4px 12px rgba(0,0,0,0.5); padding: 15px 20px; overflow-y: auto; }
+        .control-row { display: flex; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+        label { font-weight: 600; margin-right: 8px; color: #ecf0f1; font-size: 14px; min-width: 80px; }
+        input, select, button { padding: 8px 12px; margin: 4px; font-size: 14px; border: none; border-radius: 6px; transition: all 0.3s ease; }
+        input, select { background: #34495e; color: #ecf0f1; border: 2px solid transparent; }
+        input:focus, select:focus { outline: none; border-color: #3498db; background: #2c3e50; }
+        input[type="text"] { text-transform: uppercase; }
+        input[type="number"] { width: 80px; }
+        
+        button { background: linear-gradient(135deg, #3498db, #2980b9); color: white; cursor: pointer; font-weight: 600; box-shadow: 0 2px 8px rgba(52, 152, 219, 0.3); }
+        button:hover { background: linear-gradient(135deg, #2980b9, #21618c); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(52, 152, 219, 0.5); }
+        button:active { transform: translateY(0); }
+        button:disabled { background: #7f8c8d; cursor: not-allowed; opacity: 0.6; transform: none; }
+        button.play-btn { background: linear-gradient(135deg, #27ae60, #229954); padding: 10px 20px; font-size: 16px; }
+        button.play-btn:hover { background: linear-gradient(135deg, #229954, #1e8449); }
+        button.play-btn.playing { background: linear-gradient(135deg, #e74c3c, #c0392b); }
+        button.toggle-btn { background: linear-gradient(135deg, #9b59b6, #8e44ad); font-size: 12px; padding: 6px 10px; }
+        button.toggle-btn.active { background: linear-gradient(135deg, #27ae60, #229954); }
+        
+        #timeline { width: 100%; height: 8px; -webkit-appearance: none; background: #34495e; border-radius: 4px; outline: none; margin: 10px 0; }
+        #timeline::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 20px; height: 20px; background: #3498db; border-radius: 50%; cursor: pointer; box-shadow: 0 2px 8px rgba(52, 152, 219, 0.6); }
+        #timeline::-moz-range-thumb { width: 20px; height: 20px; background: #3498db; border-radius: 50%; cursor: pointer; border: none; box-shadow: 0 2px 8px rgba(52, 152, 219, 0.6); }
+        
+        #timeLabel { font-size: 16px; font-weight: 600; color: #3498db; margin-left: 15px; display: inline-block; min-width: 120px; }
+        #status { margin-top: 8px; padding: 10px; background: rgba(52, 73, 94, 0.8); border-radius: 6px; font-size: 13px; border-left: 4px solid #3498db; }
+        .status-loading { border-left-color: #f39c12 !important; }
+        .status-error { border-left-color: #e74c3c !important; }
+        .status-success { border-left-color: #27ae60 !important; }
+        
+        select { cursor: pointer; min-width: 120px; }
+        #airportInput { width: 100px; }
+        .divider { margin: 0 15px; color: #7f8c8d; }
+        .update-indicator { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #27ae60; margin-left: 8px; animation: pulse 2s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        
+        /* Airport marker colors */
+        .airport-military { background-color: #e74c3c; }
+        .airport-reporting { background-color: #27ae60; }
+        .airport-basic { background-color: #3498db; }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    
+    <div id="legends">
+        <div class="legend-section">
+            <div class="legend-title">Reflectivity (NCR)</div>
+            <div class="legend-item"><div class="legend-color" style="background: #068d9d;"></div><div class="legend-label">5-20 dBZ - Light</div></div>
+            <div class="legend-item"><div class="legend-color" style="background: #53ba82;"></div><div class="legend-label">20-30 dBZ - Moderate</div></div>
+            <div class="legend-item"><div class="legend-color" style="background: #f7c548;"></div><div class="legend-label">30-40 dBZ - Heavy</div></div>
+            <div class="legend-item"><div class="legend-color" style="background: #ff7f3e;"></div><div class="legend-label">40-50 dBZ - Very Heavy</div></div>
+            <div class="legend-item"><div class="legend-color" style="background: #ea3d2f;"></div><div class="legend-label">50+ dBZ - Extreme</div></div>
+        </div>
+        
+        <div class="legend-section">
+            <div class="legend-title">Hydrometeor (N0H)</div>
+            <div class="legend-item"><div class="legend-color" style="background: #7e7e7e;"></div><div class="legend-label">BI - Biologics</div></div>
+            <div class="legend-item"><div class="legend-color" style="background: #a0522d;"></div><div class="legend-label">GC - Ground Clutter</div></div>
+            <div class="legend-item"><div class="legend-color" style="background: #87ceeb;"></div><div class="legend-label">IC - Ice Crystals</div></div>
+            <div class="legend-item"><div class="legend-color" style="background: #add8e6;"></div><div class="legend-label">DS - Dry Snow</div></div>
+            <div class="legend-item"><div class="legend-color" style="background: #4682b4;"></div><div class="legend-label">WS - Wet Snow</div></div>
+            <div class="legend-item"><div class="legend-color" style="background: #00ff00;"></div><div class="legend-label">RA - Rain</div></div>
+            <div class="legend-item"><div class="legend-color" style="background: #008000;"></div><div class="legend-label">HR - Heavy Rain</div></div>
+            <div class="legend-item"><div class="legend-color" style="background: #ffa500;"></div><div class="legend-label">BD - Big Drops</div></div>
+            <div class="legend-item"><div class="legend-color" style="background: #ff69b4;"></div><div class="legend-label">GR - Graupel</div></div>
+            <div class="legend-item"><div class="legend-color" style="background: #ff00ff;"></div><div class="legend-label">HA - Hail</div></div>
+            <div class="legend-item"><div class="legend-color" style="background: #696969;"></div><div class="legend-label">UK - Unknown</div></div>
+        </div>
+        
+        <div class="legend-section">
+            <div class="legend-title">Airports</div>
+            <div class="legend-item"><div class="legend-color airport-military"></div><div class="legend-label">Military</div></div>
+            <div class="legend-item"><div class="legend-color airport-reporting"></div><div class="legend-label">Weather Reporting</div></div>
+            <div class="legend-item"><div class="legend-color airport-basic"></div><div class="legend-label">General Aviation</div></div>
+        </div>
+        
+        <div class="legend-section">
+            <div class="legend-title">Range Rings</div>
+            <div class="legend-item"><div style="width: 30px; height: 2px; background: #95a5a6; border: 1px dashed #95a5a6; margin-right: 8px;"></div><div class="legend-label">25 nm</div></div>
+            <div class="legend-item"><div style="width: 30px; height: 2px; background: #7f8c8d; border: 1px dashed #7f8c8d; margin-right: 8px;"></div><div class="legend-label">50 nm</div></div>
+            <div class="legend-item"><div style="width: 30px; height: 2px; background: #5d6d7e; margin-right: 8px;"></div><div class="legend-label">100 nm</div></div>
+            <div class="legend-item"><div style="width: 30px; height: 2px; background: #34495e; margin-right: 8px;"></div><div class="legend-label">150 nm</div></div>
+        </div>
+    </div>
+    
+    <div id="controls">
+        <div class="control-row">
+            <label>Airport:</label>
+            <input type="text" id="airportInput" placeholder="KMCO" maxlength="4">
+            <button onclick="findNearestRadar()">🔍 Find Radar</button>
+            <span class="divider">|</span>
+            <label>Radar Site:</label>
+            <select id="siteSelect"><option value="">Select site...</option></select>
+            <label>Product:</label>
+            <select id="productSelect">
+		    <option value="NCR" selected>Composite Reflectivity
+	    </option>
+	    	    <option value="N0H">Hydrometeor Classification (N0H)</option>
+	    	</select>
+            <button onclick="loadRadar()">📡 Load Radar</button>
+            <button class="toggle-btn" id="airportToggle" onclick="toggleAirports()">✈️ Airports</button>
+            <button class="toggle-btn" id="ringsToggle" onclick="toggleRings()">⭕ Rings</button>
+        </div>
+        <div class="control-row">
+            <button id="playBtn" class="play-btn" onclick="togglePlay()" disabled>▶ Play</button>
+            <button onclick="prevFrame()" disabled id="prevBtn">◀ Previous</button>
+            <button onclick="nextFrame()" disabled id="nextBtn">Next ▶</button>
+            <span class="divider">|</span>
+            <label>Speed:</label>
+            <select id="speedSelect">
+                <option value="2000">0.5x</option>
+                <option value="1000" selected>1x</option>
+                <option value="500">2x</option>
+                <option value="250">4x</option>
+            </select>
+            <label>Hours:</label>
+            <select id="hoursSelect">
+                <option value="0.5">30 min</option>
+                <option value="1">1 hour</option>
+                <option value="2" selected>2 hours</option>
+                <option value="6">6 hours</option>
+            </select>
+            <label>Update:</label>
+            <input type="number" id="updateInterval" min="1" max="10" value="5" style="width: 60px;">
+            <span style="font-size: 12px; color: #95a5a6;">min<span class="update-indicator" id="updateIndicator" style="display:none;"></span></span>
+        </div>
+        <div class="control-row" style="align-items: center;">
+            <input type="range" id="timeline" min="0" max="0" value="0" disabled>
+            <span id="timeLabel">--:--Z</span>
+        </div>
+        <div id="status">Status: Ready. Click a radar site on the map or select from dropdown.</div>
+    </div>
+    
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // Global variables
+        let map, radarOverlay, frames = [], currentFrame = 0, isPlaying = false, playInterval, updateInterval;
+        let currentSite = null, currentProduct = null;
+        let radarMarkers = L.layerGroup();
+        let airportMarkers = L.layerGroup();
+        let rangeRings = L.layerGroup();
+        let airportsLoaded = false;
+        let airportsVisible = false;
+        let ringsVisible = false;
+        
+        // Initialize map
+        map = L.map('map').setView([39.8, -98.6], 4);
+        
+        // Base layers
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            attribution: 'Tiles © Esri',
+            maxZoom: 19
+        }).addTo(map);
+        
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}', {
+            maxZoom: 19,
+            opacity: 0.7
+        }).addTo(map);
+        
+        radarMarkers.addTo(map);
+        airportMarkers.addTo(map);
+        rangeRings.addTo(map);
+        
+        // Load radar sites
+        fetch('/cap_winds_app/radar/api/sites').then(r => r.json()).then(data => {
+            const select = document.getElementById('siteSelect');
+            const sites = Object.entries(data.sites).sort((a, b) => a[0].localeCompare(b[0]));
+            
+            sites.forEach(([siteId, siteData]) => {
+                const opt = document.createElement('option');
+                opt.value = siteId;
+                opt.textContent = siteId;
+                select.appendChild(opt);
+                
+                const marker = L.circleMarker([siteData.lat, siteData.lon], {
+                    radius: 5,
+                    fillColor: '#e74c3c',
+                    color: '#fff',
+                    weight: 2,
+                    opacity: 1,
+                    fillOpacity: 0.8
+                });
+                
+                marker.bindPopup(`<b>${siteId}</b><br><button onclick="selectRadarSite('${siteId}')" style="margin-top: 5px; padding: 4px 8px; cursor: pointer;">Load This Radar</button>`);
+                marker.on('click', function() {
+                    document.getElementById('siteSelect').value = siteId;
+                });
+                marker.addTo(radarMarkers);
+            });
+            
+            updateStatus(`Ready. ${sites.length} radar sites available.`, 'success');
+        }).catch(err => updateStatus('Error loading sites: ' + err.message, 'error'));
+        
+        // Load airports when zoom changes
+        map.on('zoomend', function() {
+            if (airportsVisible) {
+                loadAirports();
+            }
+        });
+        
+        function loadAirports() {
+            const zoom = map.getZoom();
+            
+            fetch(`/cap_winds_app/radar/api/airports?zoom=${zoom}`)
+                .then(r => r.json())
+                .then(data => {
+                    airportMarkers.clearLayers();
+                    
+                    data.airports.forEach(airport => {
+                        let color, radius;
+                        if (airport.category === 'military') {
+                            color = '#e74c3c';
+                            radius = 4;
+                        } else if (airport.category === 'reporting') {
+                            color = '#27ae60';
+                            radius = 3;
+                        } else {
+                            color = '#3498db';
+                            radius = 2;
+                        }
+                        
+                        const marker = L.circleMarker([airport.lat, airport.lon], {
+                            radius: radius,
+                            fillColor: color,
+                            color: '#fff',
+                            weight: 1,
+                            opacity: 0.8,
+                            fillOpacity: 0.6
+                        });
+                        
+                        marker.bindTooltip(`<b>${airport.id}</b><br>${airport.name}<br>Runway: ${airport.runway_ft} ft<br>Elev: ${airport.elevation_ft} ft`, {
+                            direction: 'top',
+                            offset: [0, -5]
+                        });
+                        
+                        marker.addTo(airportMarkers);
+                    });
+                    
+                    airportsLoaded = true;
+                })
+                .catch(err => console.error('Error loading airports:', err));
+        }
+        
+        function toggleAirports() {
+            airportsVisible = !airportsVisible;
+            const btn = document.getElementById('airportToggle');
+            
+            if (airportsVisible) {
+                btn.classList.add('active');
+                loadAirports();
+            } else {
+                btn.classList.remove('active');
+                airportMarkers.clearLayers();
+            }
+        }
+        
+        function createRangeRings(lat, lon) {
+            rangeRings.clearLayers();
+            
+            const NM_TO_METERS = 1852;
+            const rings = [
+                { nm: 25, color: '#bdc3c7', weight: 3, dashArray: '8, 4' },
+                { nm: 50, color: '#95a5a6', weight: 3, dashArray: '8, 4' },
+                { nm: 100, color: '#7f8c8d', weight: 4, dashArray: null },
+                { nm: 150, color: '#5d6d7e', weight: 4, dashArray: null }
+	    ];
+            
+            rings.forEach(ring => {
+                const circle = L.circle([lat, lon], {
+                    radius: ring.nm * NM_TO_METERS,
+                    color: ring.color,
+                    weight: ring.weight,
+                    dashArray: ring.dashArray,
+                    fillOpacity: 0,
+                    opacity: 0.6
+                });
+                circle.addTo(rangeRings);
+            });
+        }
+        
+        function toggleRings() {
+            ringsVisible = !ringsVisible;
+            const btn = document.getElementById('ringsToggle');
+            
+            if (ringsVisible) {
+                btn.classList.add('active');
+                if (currentSite) {
+                    const siteData = radarMarkers.getLayers()[0]._latlng; // Get from first marker as example
+                    fetch('/cap_winds_app/radar/api/sites')
+                        .then(r => r.json())
+                        .then(data => {
+                            const site = data.sites[currentSite];
+                            createRangeRings(site.lat, site.lon);
+                        });
+                }
+            } else {
+                btn.classList.remove('active');
+                rangeRings.clearLayers();
+            }
+        }
+        
+        function selectRadarSite(siteId) {
+            document.getElementById('siteSelect').value = siteId;
+            map.closePopup();
+            loadRadar();
+        }
+        
+        async function findNearestRadar() {
+            const airport = document.getElementById('airportInput').value.toUpperCase().trim();
+            if (!airport) {
+                updateStatus('Please enter an airport identifier', 'error');
+                return;
+            }
+            
+            updateStatus('Finding nearest radar to ' + airport + '...', 'loading');
+            
+            try {
+                const response = await fetch(`/cap_winds_app/radar/api/nearest/${airport}`);
+                const data = await response.json();
+                
+                if (data.error) {
+                    updateStatus('Error: ' + data.error, 'error');
+                    return;
+                }
+                
+                if (data.nearest && data.nearest.length > 0) {
+                    const nearest = data.nearest[0];
+                    document.getElementById('siteSelect').value = nearest.site_id;
+                    updateStatus(`Nearest: ${nearest.site_id} (${nearest.distance_nm} nm)`, 'success');
+                    map.setView([nearest.lat, nearest.lon], 7);
+                    
+                    radarMarkers.eachLayer(layer => {
+                        if (layer.getLatLng().lat === nearest.lat && layer.getLatLng().lng === nearest.lon) {
+                            layer.openPopup();
+                        }
+                    });
+                }
+            } catch (error) {
+                updateStatus('Error: ' + error.message, 'error');
+            }
+        }
+        
+        async function loadRadar() {
+            currentSite = document.getElementById('siteSelect').value;
+            currentProduct = document.getElementById('productSelect').value;
+            
+            if (!currentSite) {
+                updateStatus('Please select a radar site', 'error');
+                return;
+            }
+            
+            if (isPlaying) togglePlay();
+            if (radarOverlay) {
+                map.removeLayer(radarOverlay);
+                radarOverlay = null;
+            }
+            
+            updateStatus(`Loading radar images for ${currentSite}...`, 'loading');
+            
+            try {
+                const hours = document.getElementById('hoursSelect').value;
+                const response = await fetch(`/cap_winds_app/radar/api/images/${currentSite}/${currentProduct}?hours=${hours}`);
+                const data = await response.json();
+                
+                if (data.error) {
+                    updateStatus('Error: ' + data.error, 'error');
+                    return;
+                }
+                
+                frames = data.images;
+                
+                if (frames.length === 0) {
+                    updateStatus('No radar data available', 'error');
+                    return;
+                }
+                
+                document.getElementById('timeline').max = frames.length - 1;
+                document.getElementById('timeline').disabled = false;
+                document.getElementById('playBtn').disabled = false;
+                document.getElementById('prevBtn').disabled = false;
+                document.getElementById('nextBtn').disabled = false;
+                
+                updateStatus(`Loaded ${frames.length} frames`, 'success');
+                showFrame(0);
+                startAutoUpdate();
+                
+                // Update range rings if visible
+                if (ringsVisible) {
+                    fetch('/cap_winds_app/radar/api/sites')
+                        .then(r => r.json())
+                        .then(data => {
+                            const site = data.sites[currentSite];
+                            createRangeRings(site.lat, site.lon);
+                        });
+                }
+            } catch (error) {
+                updateStatus('Error: ' + error.message, 'error');
+            }
+        }
+        
+        function startAutoUpdate() {
+            if (updateInterval) clearInterval(updateInterval);
+            document.getElementById('updateIndicator').style.display = 'inline-block';
+            
+            const intervalMinutes = parseInt(document.getElementById('updateInterval').value);
+            const intervalMs = intervalMinutes * 60 * 1000;
+            
+            updateInterval = setInterval(async () => {
+                if (!currentSite) return;
+                
+                try {
+                    const hours = document.getElementById('hoursSelect').value;
+                    const response = await fetch(`/cap_winds_app/radar/api/images/${currentSite}/${currentProduct}?hours=${hours}`);
+                    const data = await response.json();
+                    
+                    if (data.error || data.images.length === 0) return;
+                    
+                    const hoursMs = parseFloat(hours) * 60 * 60 * 1000;
+                    const cutoffTime = Date.now() - hoursMs;
+                    const existingUrls = new Set(frames.map(f => f.url));
+                    const newFrames = data.images.filter(f => !existingUrls.has(f.url));
+                    
+                    if (newFrames.length > 0) {
+                        frames.push(...newFrames);
+                        frames = frames.filter(f => f.timestamp * 1000 >= cutoffTime);
+                        frames.sort((a, b) => a.timestamp - b.timestamp);
+                        document.getElementById('timeline').max = frames.length - 1;
+                        
+                        if (currentFrame >= frames.length) currentFrame = frames.length - 1;
+                        if (!isPlaying && currentFrame === frames.length - 1 - newFrames.length) {
+                            showFrame(frames.length - 1);
+                        }
+                    }
+                } catch (error) {
+                    console.error('Auto-update error:', error);
+                }
+            }, intervalMs);
+        }
+        
+        function showFrame(index) {
+            if (index < 0 || index >= frames.length) return;
+            
+            currentFrame = index;
+            const frame = frames[index];
+            
+            if (radarOverlay) map.removeLayer(radarOverlay);
+            
+            if (frame.bounds) {
+                const b = frame.bounds;
+                radarOverlay = L.imageOverlay(frame.url, [[b.south, b.west], [b.north, b.east]], {
+                    opacity: 0.7,
+                    zIndex: 1000
+                }).addTo(map);
+            }
+            
+            document.getElementById('timeline').value = index;
+            
+            const time = new Date(frame.time);
+            const hours = String(time.getUTCHours()).padStart(2, '0');
+            const minutes = String(time.getUTCMinutes()).padStart(2, '0');
+            document.getElementById('timeLabel').textContent = `${hours}:${minutes}Z`;
+        }
+        
+        function togglePlay() {
+            isPlaying = !isPlaying;
+            const btn = document.getElementById('playBtn');
+            
+            if (isPlaying) {
+                btn.textContent = '⏸ Pause';
+                btn.classList.add('playing');
+                playAnimation();
+            } else {
+                btn.textContent = '▶ Play';
+                btn.classList.remove('playing');
+                if (playInterval) clearInterval(playInterval);
+            }
+        }
+        
+        function playAnimation() {
+            const speed = parseInt(document.getElementById('speedSelect').value);
+            playInterval = setInterval(() => {
+                currentFrame = (currentFrame >= frames.length - 1) ? 0 : currentFrame + 1;
+                showFrame(currentFrame);
+            }, speed);
+        }
+        
+        function prevFrame() {
+            if (currentFrame > 0) showFrame(currentFrame - 1);
+        }
+        
+        function nextFrame() {
+            if (currentFrame < frames.length - 1) showFrame(currentFrame + 1);
+        }
+        
+        function updateStatus(msg, type = '') {
+            const status = document.getElementById('status');
+            status.textContent = 'Status: ' + msg;
+            status.classList.remove('status-loading', 'status-error', 'status-success');
+            if (type) status.classList.add('status-' + type);
+        }
+        
+        document.getElementById('timeline').addEventListener('input', (e) => showFrame(parseInt(e.target.value)));
+        document.getElementById('updateInterval').addEventListener('change', () => {
+            if (currentSite) startAutoUpdate();
+        });
+        
+        document.addEventListener('keydown', (e) => {
+            if (frames.length === 0) return;
+            switch(e.key) {
+                case ' ': case 'k': e.preventDefault(); togglePlay(); break;
+                case 'ArrowLeft': case 'j': e.preventDefault(); prevFrame(); break;
+                case 'ArrowRight': case 'l': e.preventDefault(); nextFrame(); break;
+            }
+        });
+        
+        window.addEventListener('beforeunload', () => {
+            if (updateInterval) clearInterval(updateInterval);
+        });
+    </script>
+</body>
+</html>

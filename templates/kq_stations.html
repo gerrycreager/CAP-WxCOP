@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KQ Station Management - CAP Winds</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 2rem;
+            color: #333;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        header {
+            background: white;
+            padding: 2rem;
+            border-radius: 15px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+            margin-bottom: 2rem;
+        }
+        
+        .header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .header-title h1 {
+            font-size: 2rem;
+            color: #2d3748;
+            margin-bottom: 0.5rem;
+        }
+        
+        .header-title p {
+            color: #718096;
+            font-size: 1rem;
+        }
+        
+        .header-actions {
+            display: flex;
+            gap: 1rem;
+        }
+        
+        .btn {
+            display: inline-block;
+            padding: 0.75rem 1.5rem;
+            background: #667eea;
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            font-size: 0.95rem;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        
+        .btn:hover {
+            background: #5a67d8;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        
+        .btn-home {
+            background: #4a5568;
+        }
+        
+        .btn-home:hover {
+            background: #2d3748;
+        }
+        
+        .btn-secondary {
+            background: #718096;
+            padding: 0.5rem 1rem;
+            font-size: 0.875rem;
+        }
+        
+        .btn-secondary:hover {
+            background: #4a5568;
+        }
+        
+        .btn-success {
+            background: #48bb78;
+            padding: 0.5rem 1rem;
+            font-size: 0.875rem;
+        }
+        
+        .btn-success:hover {
+            background: #38a169;
+        }
+        
+        .btn-danger {
+            background: #f56565;
+            padding: 0.5rem 1rem;
+            font-size: 0.875rem;
+        }
+        
+        .btn-danger:hover {
+            background: #e53e3e;
+        }
+        
+        .content-card {
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+            padding: 2rem;
+        }
+        
+        .alert {
+            padding: 1rem;
+            margin-bottom: 1.5rem;
+            border-radius: 8px;
+            font-size: 0.95rem;
+        }
+        
+        .alert-success {
+            background: #c6f6d5;
+            color: #22543d;
+            border: 1px solid #9ae6b4;
+        }
+        
+        .alert-error {
+            background: #fed7d7;
+            color: #742a2a;
+            border: 1px solid #fc8181;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+        
+        th {
+            background: #f7fafc;
+            padding: 1rem;
+            text-align: left;
+            font-weight: 600;
+            color: #2d3748;
+            border-bottom: 2px solid #e2e8f0;
+            font-size: 0.875rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        
+        td {
+            padding: 1rem;
+            border-bottom: 1px solid #e2e8f0;
+            font-size: 0.95rem;
+        }
+        
+        tr:hover {
+            background: #f7fafc;
+        }
+        
+        .station-id {
+            font-weight: 600;
+            color: #667eea;
+            font-family: 'Courier New', monospace;
+        }
+        
+        .status-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        
+        .status-active {
+            background: #c6f6d5;
+            color: #22543d;
+        }
+        
+        .status-inactive {
+            background: #fed7d7;
+            color: #742a2a;
+        }
+        
+        .actions {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+        }
+        
+        .actions form {
+            display: inline;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 4rem 2rem;
+            color: #718096;
+        }
+        
+        .empty-state-icon {
+            font-size: 4rem;
+            margin-bottom: 1rem;
+            opacity: 0.5;
+        }
+        
+        .empty-state h3 {
+            font-size: 1.5rem;
+            color: #2d3748;
+            margin-bottom: 0.5rem;
+        }
+        
+        .empty-state p {
+            margin-bottom: 2rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="header-content">
+                <div class="header-title">
+                    <h1>KQ Station Management</h1>
+                    <p>Manage temporary weather stations (KQ identifiers)</p>
+                </div>
+                <div class="header-actions">
+                    <a href="http://209.248.90.253" class="btn btn-home">🏠 Home</a>
+                    <a href="{{ url_for('kq_admin.add_station') }}" class="btn">+ Add Station</a>
+                </div>
+            </div>
+        </header>
+        
+        <div class="content-card">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="alert alert-{{ category }}">{{ message }}</div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+
+            {% if stations %}
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Station ID</th>
+                            <th>Name</th>
+                            <th>Coordinates</th>
+                            <th>Elevation</th>
+                            <th>Status</th>
+                            <th>Created</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for station in stations %}
+                        <tr>
+                            <td><span class="station-id">{{ station.station_id }}</span></td>
+                            <td>{{ station.name or '—' }}</td>
+                            <td>{{ "%.4f"|format(station.latitude) }}, {{ "%.4f"|format(station.longitude) }}</td>
+                            <td>{{ station.elevation_ft or '—' }} ft</td>
+                            <td>
+                                {% if station.active %}
+                                    <span class="status-badge status-active">Active</span>
+                                {% else %}
+                                    <span class="status-badge status-inactive">Inactive</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ station.created_at.strftime('%Y-%m-%d') }}</td>
+                            <td>
+                                <div class="actions">
+                                    <a href="{{ url_for('kq_admin.edit_station', station_id=station.station_id) }}" 
+                                       class="btn btn-secondary">Edit</a>
+                                    
+                                    <form method="POST" 
+                                          action="{{ url_for('kq_admin.toggle_station', station_id=station.station_id) }}">
+                                        {% if station.active %}
+                                            <button type="submit" class="btn btn-secondary">Deactivate</button>
+                                        {% else %}
+                                            <button type="submit" class="btn btn-success">Activate</button>
+                                        {% endif %}
+                                    </form>
+                                    
+                                    <form method="POST" 
+                                          action="{{ url_for('kq_admin.delete_station', station_id=station.station_id) }}"
+                                          onsubmit="return confirm('Delete station {{ station.station_id }}?');">
+                                        <button type="submit" class="btn btn-danger">Delete</button>
+                                    </form>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}
+                <div class="empty-state">
+                    <div class="empty-state-icon">📡</div>
+                    <h3>No KQ Stations Yet</h3>
+                    <p>Add your first temporary weather station to get started.</p>
+                    <a href="{{ url_for('kq_admin.add_station') }}" class="btn">+ Add Station</a>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>
+

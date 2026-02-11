@@ -1,0 +1,861 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CAP Wind Constraint Forecast - Interactive Map</title>
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 1rem 2rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .header-left h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+        
+        .header-left p {
+            font-size: 0.9rem;
+            opacity: 0.9;
+            margin-top: 0.25rem;
+        }
+        
+        .btn-home {
+            background: rgba(255,255,255,0.2);
+            color: white;
+            padding: 0.6rem 1.2rem;
+            border-radius: 6px;
+            text-decoration: none;
+            font-weight: 500;
+            transition: background 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .btn-home:hover {
+            background: rgba(255,255,255,0.3);
+        }
+        
+        .controls {
+            background: white;
+            padding: 1rem 2rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        
+        .control-group {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+        }
+        
+        .control-group label {
+            font-weight: 500;
+            font-size: 0.9rem;
+            color: #333;
+        }
+        
+        select, button {
+            padding: 0.5rem 1rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 0.9rem;
+            cursor: pointer;
+        }
+        
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+        
+        button:hover {
+            background: #5568d3;
+        }
+        
+        .label-toggle {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-left: auto;
+        }
+        
+        .label-toggle input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+        
+        #map {
+            height: calc(100vh - 140px);
+            width: 100%;
+        }
+        
+        .legend {
+            background: white;
+            padding: 1rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .legend h4 {
+            margin: 0 0 0.5rem 0;
+            font-size: 0.9rem;
+            color: #333;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin: 0.25rem 0;
+            font-size: 0.85rem;
+        }
+        
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            border: 2px solid #333;
+        }
+        
+        .wind-marker {
+            border-radius: 50%;
+            border: 2px solid #333;
+            width: 12px;
+            height: 12px;
+        }
+        
+        .wind-normal { background-color: #4ade80; }
+        .wind-caution { background-color: #fbbf24; }
+        .wind-nogo { background-color: #ef4444; }
+        
+        /* Airport labels */
+        .airport-label {
+            font-size: 11px;
+            font-weight: 600;
+            color: #1a1a1a;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 2px 6px;
+            border-radius: 3px;
+            border: 1px solid #666;
+            white-space: nowrap;
+            pointer-events: none;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+        }
+        
+        .airport-label-military {
+            background: rgba(255, 100, 100, 0.9);
+            border-color: #cc0000;
+            color: white;
+            font-weight: 700;
+        }
+        
+        .airport-label-major {
+            background: rgba(100, 150, 255, 0.9);
+            border-color: #0044cc;
+            color: white;
+        }
+        
+        .leaflet-popup-content {
+            margin: 0.75rem;
+            min-width: 250px;
+        }
+        
+        .popup-header {
+            font-weight: 600;
+            font-size: 1.1rem;
+            color: #333;
+            margin-bottom: 0.5rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid #667eea;
+        }
+        
+        .popup-section {
+            margin: 0.75rem 0;
+        }
+        
+        .popup-label {
+            font-weight: 500;
+            color: #666;
+            font-size: 0.85rem;
+            margin-bottom: 0.25rem;
+        }
+        
+        .popup-value {
+            font-size: 1rem;
+            color: #333;
+        }
+        
+        .wind-value {
+            font-size: 1.3rem;
+            font-weight: 600;
+        }
+        
+        .category-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 12px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        
+        .category-normal {
+            background: #d1fae5;
+            color: #065f46;
+        }
+        
+        .category-caution {
+            background: #fef3c7;
+            color: #92400e;
+        }
+        
+        .category-nogo {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+        
+        .loading {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+            z-index: 10000;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="header-left">
+            <h1>🛩️ CAP Wind Constraint Forecast Map</h1>
+            <p>Interactive 12-hour wind forecast • CAPR 70-1 Compliance • HRRR/GFS Data</p>
+        </div>
+        <a href="/" class="btn-home">
+            <span>🏠</span>
+            <span>Home</span>
+        </a>
+    </div>
+    
+    <div class="controls">
+        <div class="control-group">
+            <label for="viewType">View:</label>
+            <select id="viewType">
+                <option value="conus">CONUS</option>
+                <option value="region">Region</option>
+                <option value="state">Wing</option>
+            </select>
+        </div>
+        
+        <div class="control-group" id="regionGroup" style="display: none;">
+            <label for="regionSelect">CAP Region:</label>
+            <select id="regionSelect">
+                <option value="NCR">North Central Region (NCR)</option>
+                <option value="GLR">Great Lakes Region (GLR)</option>
+                <option value="MAR">Mid-Atlantic Region (MAR)</option>
+                <option value="NER">Northeast Region (NER)</option>
+                <option value="SER">Southeast Region (SER)</option>
+                <option value="SER-PR">Southeast - Puerto Rico</option>
+                <option value="SWR">Southwest Region (SWR)</option>
+                <option value="RMR">Rocky Mountain Region (RMR)</option>
+                <option value="PCR">Pacific Region (PCR)</option>
+                <option value="PCR-AK">Pacific - Alaska</option>
+                <option value="PCR-HI">Pacific - Hawaii</option>
+                <option value="PCR-GUAM">Pacific - Guam</option>
+            </select>
+        </div>
+        
+        <div class="control-group" id="stateGroup" style="display: none;">
+            <label for="stateSelect">Wing:</label>
+            <select id="stateSelect">
+                {% for state in wing_codes %}
+                <option value="{{ state }}">{{ state }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        
+        <button id="loadBtn">Load Map</button>
+        <button id="refreshBtn">↻ Refresh</button>
+        
+        <div class="label-toggle">
+            <input type="checkbox" id="showLabels" checked>
+            <label for="showLabels">Show Airport Labels</label>
+        </div>
+        
+        <div style="margin-left: auto; font-size: 0.85rem; color: #666;">
+            <span id="airportCount">0 airports</span> | 
+            <span id="dataAge">Loading...</span>
+        </div>
+    </div>
+    
+    <div id="map"></div>
+    
+    <div id="loading" class="loading" style="display: none;">
+        <p>Loading wind forecast data...</p>
+    </div>
+    
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <script>
+        let map;
+        let markersLayer;
+        let labelsLayer;
+        let currentData = null;
+        
+        // Initialize map
+        function initMap() {
+            map = L.map('map').setView([39.8, -98.6], 5);
+            
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors',
+                maxZoom: 18
+            }).addTo(map);
+            
+            markersLayer = L.layerGroup().addTo(map);
+            labelsLayer = L.layerGroup().addTo(map);
+            
+            // Add legend
+            const legend = L.control({position: 'bottomright'});
+            legend.onAdd = function(map) {
+                const div = L.DomUtil.create('div', 'legend');
+                div.innerHTML = `
+                    <h4>Wind Categories</h4>
+                    <div class="legend-item">
+                        <div class="legend-color wind-normal"></div>
+                        <span><strong>Normal:</strong> &lt; 16 kts</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color wind-caution"></div>
+                        <span><strong>Caution:</strong> 16-29 kts</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color wind-nogo"></div>
+                        <span><strong>No-Go:</strong> ≥ 30 kts</span>
+                    </div>
+                    <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #ddd;">
+                        <div style="font-size: 0.8rem; color: #666;">
+                            <strong>Labels:</strong><br>
+                            <span style="color: #cc0000;">■</span> Military<br>
+                            <span style="color: #0044cc;">■</span> Major Airports<br>
+                            Medium airports: zoom in
+                        </div>
+                    </div>
+                `;
+                return div;
+            };
+            legend.addTo(map);
+
+            // Wind Speed Legend
+            const windLegend = L.control({position: 'bottomleft'});
+            windLegend.onAdd = function(map) {
+                const div = L.DomUtil.create('div', 'legend');
+                div.innerHTML = `
+                    <h4>Wind Speed (kts)</h4>
+                    <div class="legend-item">
+                        <div style="background: rgba(0,255,0,0.4); width: 20px; height: 15px; display: inline-block; border: 1px solid #666;"></div>
+                        <span>&lt; 5 kts</span>
+                    </div>
+                    <div class="legend-item">
+                        <div style="background: rgba(173,255,47,0.4); width: 20px; height: 15px; display: inline-block; border: 1px solid #666;"></div>
+                        <span>5-10 kts</span>
+                    </div>
+                    <div class="legend-item">
+                        <div style="background: rgba(255,255,0,0.5); width: 20px; height: 15px; display: inline-block; border: 1px solid #666;"></div>
+                        <span>10-15 kts</span>
+                    </div>
+                    <div class="legend-item">
+                        <div style="background: rgba(255,165,0,0.6); width: 20px; height: 15px; display: inline-block; border: 1px solid #666;"></div>
+                        <span>15-20 kts</span>
+                    </div>
+                    <div class="legend-item">
+                        <div style="background: rgba(255,69,0,0.7); width: 20px; height: 15px; display: inline-block; border: 1px solid #666;"></div>
+                        <span>20-25 kts</span>
+                    </div>
+                    <div class="legend-item">
+                        <div style="background: rgba(255,0,0,0.8); width: 20px; height: 15px; display: inline-block; border: 1px solid #666;"></div>
+                        <span>25+ kts</span>
+                    </div>
+                `;
+                return div;
+            };
+            windLegend.addTo(map);
+            
+            // Update labels on zoom
+            map.on('zoomend', updateLabels);
+        }
+
+        // Wind contour layer global
+        let windContourLayer = null;
+
+        // Color scale for wind speeds (kts)
+        function getWindSpeedColor(windSpeed) {
+            if (windSpeed < 5) return 'rgba(0, 255, 0, 0.3)';
+            if (windSpeed < 10) return 'rgba(173, 255, 47, 0.3)';
+            if (windSpeed < 15) return 'rgba(255, 255, 0, 0.4)';
+            if (windSpeed < 20) return 'rgba(255, 165, 0, 0.5)';
+            if (windSpeed < 25) return 'rgba(255, 69, 0, 0.6)';
+            return 'rgba(255, 0, 0, 0.7)';
+        }
+
+        // Draw wind contours on canvas
+        function drawWindContours(windGrid, bounds) {
+            if (windContourLayer) {
+                map.removeLayer(windContourLayer);
+            }
+            
+            if (!windGrid || !windGrid.lats || !windGrid.lons || !windGrid.winds) {
+                console.log('No wind grid data available');
+                return;
+            }
+            
+            const canvasOverlay = L.DomUtil.create('canvas');
+            canvasOverlay.width = 800;
+            canvasOverlay.height = 600;
+            const ctx = canvasOverlay.getContext('2d');
+            
+            const latMin = Math.min(...windGrid.lats);
+            const latMax = Math.max(...windGrid.lats);
+            const lonMin = Math.min(...windGrid.lons);
+            const lonMax = Math.max(...windGrid.lons);
+            
+            const latRange = latMax - latMin;
+            const lonRange = lonMax - lonMin;
+            
+            const gridRows = windGrid.lats.length;
+            const gridCols = windGrid.lons.length;
+            
+            for (let i = 0; i < gridRows - 1; i++) {
+                for (let j = 0; j < gridCols - 1; j++) {
+                    const windSpeed = windGrid.winds[i][j];
+                    if (isNaN(windSpeed)) continue;
+                    
+                    const lat1 = windGrid.lats[i];
+                    const lat2 = windGrid.lats[i + 1];
+                    const lon1 = windGrid.lons[j];
+                    const lon2 = windGrid.lons[j + 1];
+                    
+                    const x1 = ((lon1 - lonMin) / lonRange) * canvasOverlay.width;
+                    const x2 = ((lon2 - lonMin) / lonRange) * canvasOverlay.width;
+                    const y1 = ((latMax - lat1) / latRange) * canvasOverlay.height;
+                    const y2 = ((latMax - lat2) / latRange) * canvasOverlay.height;
+                    
+                    ctx.fillStyle = getWindSpeedColor(windSpeed);
+                    ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+                }
+            }
+            
+            const imageUrl = canvasOverlay.toDataURL();
+            windContourLayer = L.imageOverlay(imageUrl, [
+                [latMin, lonMin],
+                [latMax, lonMax]
+            ], {
+                opacity: 0.5,
+                interactive: false
+            });
+            
+            windContourLayer.addTo(map);
+            windContourLayer.bringToBack();
+            
+            console.log('Wind contours rendered: ' + gridRows + 'x' + gridCols);
+        }
+
+        // Wind contour layer global
+
+        // Color scale for wind speeds (kts)
+        function getWindSpeedColor(windSpeed) {
+            if (windSpeed < 5) return 'rgba(0, 255, 0, 0.3)';
+            if (windSpeed < 10) return 'rgba(173, 255, 47, 0.3)';
+            if (windSpeed < 15) return 'rgba(255, 255, 0, 0.4)';
+            if (windSpeed < 20) return 'rgba(255, 165, 0, 0.5)';
+            if (windSpeed < 25) return 'rgba(255, 69, 0, 0.6)';
+            return 'rgba(255, 0, 0, 0.7)';
+        }
+
+        // Draw wind contours on canvas
+        function drawWindContours(windGrid, bounds) {
+            if (windContourLayer) {
+                map.removeLayer(windContourLayer);
+            }
+            
+            if (!windGrid || !windGrid.lats || !windGrid.lons || !windGrid.winds) {
+                console.log('No wind grid data available');
+                return;
+            }
+            
+            const canvasOverlay = L.DomUtil.create('canvas');
+            canvasOverlay.width = 800;
+            canvasOverlay.height = 600;
+            const ctx = canvasOverlay.getContext('2d');
+            
+            const latMin = Math.min(...windGrid.lats);
+            const latMax = Math.max(...windGrid.lats);
+            const lonMin = Math.min(...windGrid.lons);
+            const lonMax = Math.max(...windGrid.lons);
+            
+            const latRange = latMax - latMin;
+            const lonRange = lonMax - lonMin;
+            
+            const gridRows = windGrid.lats.length;
+            const gridCols = windGrid.lons.length;
+            
+            for (let i = 0; i < gridRows - 1; i++) {
+                for (let j = 0; j < gridCols - 1; j++) {
+                    const windSpeed = windGrid.winds[i][j];
+                    if (isNaN(windSpeed)) continue;
+                    
+                    const lat1 = windGrid.lats[i];
+                    const lat2 = windGrid.lats[i + 1];
+                    const lon1 = windGrid.lons[j];
+                    const lon2 = windGrid.lons[j + 1];
+                    
+                    const x1 = ((lon1 - lonMin) / lonRange) * canvasOverlay.width;
+                    const x2 = ((lon2 - lonMin) / lonRange) * canvasOverlay.width;
+                    const y1 = ((latMax - lat1) / latRange) * canvasOverlay.height;
+                    const y2 = ((latMax - lat2) / latRange) * canvasOverlay.height;
+                    
+                    ctx.fillStyle = getWindSpeedColor(windSpeed);
+                    ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+                }
+            }
+            
+            const imageUrl = canvasOverlay.toDataURL();
+            windContourLayer = L.imageOverlay(imageUrl, [
+                [latMin, lonMin],
+                [latMax, lonMax]
+            ], {
+                opacity: 0.5,
+                interactive: false
+            });
+            
+            windContourLayer.addTo(map);
+            windContourLayer.bringToBack();
+            
+            console.log('Wind contours rendered: ' + gridRows + 'x' + gridCols);
+        }
+
+        // Wind contour layer global
+
+        // Color scale for wind speeds (kts)
+        function getWindSpeedColor(windSpeed) {
+            if (windSpeed < 5) return 'rgba(0, 255, 0, 0.3)';
+            if (windSpeed < 10) return 'rgba(173, 255, 47, 0.3)';
+            if (windSpeed < 15) return 'rgba(255, 255, 0, 0.4)';
+            if (windSpeed < 20) return 'rgba(255, 165, 0, 0.5)';
+            if (windSpeed < 25) return 'rgba(255, 69, 0, 0.6)';
+            return 'rgba(255, 0, 0, 0.7)';
+        }
+
+        // Draw wind contours on canvas
+        function drawWindContours(windGrid, bounds) {
+            if (windContourLayer) {
+                map.removeLayer(windContourLayer);
+            }
+            
+            if (!windGrid || !windGrid.lats || !windGrid.lons || !windGrid.winds) {
+                console.log('No wind grid data available');
+                return;
+            }
+            
+            const canvasOverlay = L.DomUtil.create('canvas');
+            canvasOverlay.width = 800;
+            canvasOverlay.height = 600;
+            const ctx = canvasOverlay.getContext('2d');
+            
+            const latMin = Math.min(...windGrid.lats);
+            const latMax = Math.max(...windGrid.lats);
+            const lonMin = Math.min(...windGrid.lons);
+            const lonMax = Math.max(...windGrid.lons);
+            
+            const latRange = latMax - latMin;
+            const lonRange = lonMax - lonMin;
+            
+            const gridRows = windGrid.lats.length;
+            const gridCols = windGrid.lons.length;
+            
+            for (let i = 0; i < gridRows - 1; i++) {
+                for (let j = 0; j < gridCols - 1; j++) {
+                    const windSpeed = windGrid.winds[i][j];
+                    if (isNaN(windSpeed)) continue;
+                    
+                    const lat1 = windGrid.lats[i];
+                    const lat2 = windGrid.lats[i + 1];
+                    const lon1 = windGrid.lons[j];
+                    const lon2 = windGrid.lons[j + 1];
+                    
+                    const x1 = ((lon1 - lonMin) / lonRange) * canvasOverlay.width;
+                    const x2 = ((lon2 - lonMin) / lonRange) * canvasOverlay.width;
+                    const y1 = ((latMax - lat1) / latRange) * canvasOverlay.height;
+                    const y2 = ((latMax - lat2) / latRange) * canvasOverlay.height;
+                    
+                    ctx.fillStyle = getWindSpeedColor(windSpeed);
+                    ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+                }
+            }
+            
+            const imageUrl = canvasOverlay.toDataURL();
+            windContourLayer = L.imageOverlay(imageUrl, [
+                [latMin, lonMin],
+                [latMax, lonMax]
+            ], {
+                opacity: 0.5,
+                interactive: false
+            });
+            
+            windContourLayer.addTo(map);
+            windContourLayer.bringToBack();
+            
+            console.log('Wind contours rendered: ' + gridRows + 'x' + gridCols);
+        }
+        
+        // Load wind forecast data
+        async function loadWindData() {
+            const viewType = document.getElementById('viewType').value;
+            let url;
+            
+            if (viewType === 'conus') {
+                url = '/cap_winds_app/api/wind-forecast/conus';
+            } else if (viewType === 'region') {
+                const region = document.getElementById('regionSelect').value;
+                url = `/cap_winds_app/api/wind-forecast/region/${region}`;
+            } else if (viewType === 'state') {
+                const state = document.getElementById('stateSelect').value;
+                url = `/cap_winds_app/api/wind-forecast/state/${state}`;
+            }
+            
+            document.getElementById('loading').style.display = 'block';
+            
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                if (data.error) {
+                    alert('Error loading data: ' + data.error);
+                    return;
+                }
+                
+                currentData = data;
+                displayWindData(data);
+                
+                // Update status
+                document.getElementById('airportCount').textContent = 
+                    `${data.count} airports`;
+                document.getElementById('dataAge').textContent = 
+                    `Updated: ${new Date(data.timestamp).toLocaleTimeString()}`;
+                
+            } catch (error) {
+                console.error('Error loading wind data:', error);
+                alert('Failed to load wind forecast data');
+            } finally {
+                document.getElementById('loading').style.display = 'none';
+            }
+        }
+        
+        // Display wind data on map
+        function displayWindData(data) {
+            // Clear existing markers and labels
+            markersLayer.clearLayers();
+            labelsLayer.clearLayers();
+            
+            // Add markers for each airport
+            data.airports.forEach(airport => {
+                const color = getWindColor(airport.category);
+                const icon = L.divIcon({
+                    className: 'wind-marker ' + color,
+                    iconSize: [12, 12],
+                    iconAnchor: [6, 6]
+                });
+                
+                const marker = L.marker([airport.lat, airport.lon], {icon: icon});
+                
+                // Create popup content
+                const popupContent = createPopup(airport);
+                marker.bindPopup(popupContent);
+                
+                marker.addTo(markersLayer);
+            });
+
+            // Draw wind contours
+            if (data.wind_grid) {
+                drawWindContours(data.wind_grid, data.bounds);
+            }
+
+            // Draw wind contours
+            if (data.wind_grid) {
+                drawWindContours(data.wind_grid, data.bounds);
+            }
+            
+            // Add labels
+            updateLabels();
+            
+            // Fit map to bounds
+            if (data.bounds) {
+                const bounds = [
+                    [data.bounds.south, data.bounds.west],
+                    [data.bounds.north, data.bounds.east]
+                ];
+                map.fitBounds(bounds);
+            }
+        }
+        
+        // Update labels based on zoom level and toggle
+        function updateLabels() {
+            if (!currentData) return;
+            
+            labelsLayer.clearLayers();
+            
+            const showLabels = document.getElementById('showLabels').checked;
+            if (!showLabels) return;
+            
+            const zoom = map.getZoom();
+            
+            currentData.airports.forEach(airport => {
+                const priority = airport.label_priority;
+                
+                // Determine if we should show label
+                let showLabel = false;
+                let labelClass = 'airport-label';
+                
+                if (priority === 1) {
+                    // Military: always show
+                    showLabel = true;
+                    labelClass = 'airport-label airport-label-military';
+                } else if (priority === 2) {
+                    // Major airports: always show
+                    showLabel = true;
+                    labelClass = 'airport-label airport-label-major';
+                } else if (priority === 3 && zoom >= 8) {
+                    // Medium airports: show when zoomed in
+                    showLabel = true;
+                }
+                
+                if (showLabel) {
+                    const label = L.marker([airport.lat, airport.lon], {
+                        icon: L.divIcon({
+                            className: labelClass,
+                            html: airport.station_id,
+                            iconSize: null,
+                            iconAnchor: [0, -8]  // Position above marker
+                        }),
+                        interactive: false
+                    });
+                    label.addTo(labelsLayer);
+                }
+            });
+        }
+        
+        // Get color class based on wind category
+        function getWindColor(category) {
+            if (category === 'NO-GO') return 'wind-nogo';
+            if (category === 'CAUTION') return 'wind-caution';
+            return 'wind-normal';
+        }
+        
+        // Get category badge class
+        function getCategoryClass(category) {
+            if (category === 'NO-GO') return 'category-nogo';
+            if (category === 'CAUTION') return 'category-caution';
+            return 'category-normal';
+        }
+        
+        // Create popup content
+        function createPopup(airport) {
+            const windRange = `${airport.min_wind_kts}-${airport.max_wind_kts} kts`;
+            
+            return `
+                <div class="popup-header">
+                    ${airport.station_id}
+                    <div style="font-size: 0.9rem; font-weight: normal; margin-top: 0.25rem;">
+                        ${airport.name}
+                    </div>
+                </div>
+                
+                <div class="popup-section">
+                    <div class="popup-label">Maximum Wind Speed</div>
+                    <div class="popup-value wind-value">${airport.max_wind_kts} kts</div>
+                </div>
+                
+                ${airport.max_gust_kts ? `
+                <div class="popup-section">
+                    <div class="popup-label">Maximum Gust Speed</div>
+                    <div class="popup-value wind-value">${airport.max_gust_kts} kts</div>
+                </div>
+                ` : ''}
+                
+                <div class="popup-section">
+                    <div class="popup-label">12-Hour Wind Range</div>
+                    <div class="popup-value">${windRange}</div>
+                </div>
+                
+                <div class="popup-section">
+                    <div class="popup-label">CAPR 70-1 Status</div>
+                    <div>
+                        <span class="category-badge ${getCategoryClass(airport.category)}">
+                            ${airport.category}
+                        </span>
+                    </div>
+                </div>
+                
+                ${airport.longest_runway_ft ? `
+                <div class="popup-section">
+                    <div class="popup-label">Longest Runway</div>
+                    <div class="popup-value">${airport.longest_runway_ft} ft</div>
+                </div>
+                ` : ''}
+                
+                <div class="popup-section" style="font-size: 0.8rem; color: #888; border-top: 1px solid #eee; padding-top: 0.5rem; margin-top: 0.5rem;">
+                    Model: ${airport.model}
+                </div>
+            `;
+        }
+        
+        // Event listeners
+        document.getElementById('viewType').addEventListener('change', function() {
+            const value = this.value;
+            document.getElementById('regionGroup').style.display = 
+                value === 'region' ? 'flex' : 'none';
+            document.getElementById('stateGroup').style.display = 
+                value === 'state' ? 'flex' : 'none';
+        });
+        
+        document.getElementById('loadBtn').addEventListener('click', loadWindData);
+        document.getElementById('refreshBtn').addEventListener('click', loadWindData);
+        document.getElementById('showLabels').addEventListener('change', updateLabels);
+        
+        // Initialize
+        initMap();
+        loadWindData();
+    </script>
+</body>
+</html>

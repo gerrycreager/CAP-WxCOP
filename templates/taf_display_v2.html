@@ -1,0 +1,377 @@
+<!-- TAF Display Component v2 - Production Ready -->
+<!-- Add this to your station page template -->
+
+<style>
+/* TAF Display Styles */
+.taf-container {
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    padding: 20px;
+    margin: 20px 0;
+}
+
+.taf-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+    border-bottom: 2px solid #3b82f6;
+    padding-bottom: 10px;
+}
+
+.taf-title {
+    font-size: 1.5rem;
+    font-weight: bold;
+    color: #1e40af;
+}
+
+.taf-info {
+    font-size: 0.875rem;
+    color: #6b7280;
+}
+
+.taf-valid-time {
+    display: flex;
+    gap: 20px;
+    margin-bottom: 15px;
+    padding: 10px;
+    background: #f3f4f6;
+    border-radius: 6px;
+    flex-wrap: wrap;
+}
+
+.taf-time-item {
+    display: flex;
+    flex-direction: column;
+}
+
+.taf-time-label {
+    font-size: 0.75rem;
+    color: #6b7280;
+    text-transform: uppercase;
+    font-weight: 600;
+}
+
+.taf-time-value {
+    font-size: 0.875rem;
+    color: #1f2937;
+    font-weight: 500;
+}
+
+.taf-raw-display {
+    background: #1e293b;
+    color: #e2e8f0;
+    padding: 15px;
+    border-radius: 6px;
+    font-family: 'Courier New', monospace;
+    font-size: 0.875rem;
+    line-height: 1.6;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+.taf-weather-conditions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 15px;
+}
+
+.weather-badge {
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 0.875rem;
+    font-weight: 600;
+}
+
+.weather-vfr {
+    background: #d1fae5;
+    color: #065f46;
+}
+
+.weather-mvfr {
+    background: #dbeafe;
+    color: #1e40af;
+}
+
+.weather-ifr {
+    background: #fecaca;
+    color: #991b1b;
+}
+
+.weather-lifr {
+    background: #e9d5ff;
+    color: #6b21a8;
+}
+
+.taf-error {
+    background: #fee2e2;
+    border: 1px solid #fca5a5;
+    color: #991b1b;
+    padding: 15px;
+    border-radius: 6px;
+    margin: 10px 0;
+}
+
+.taf-loading {
+    text-align: center;
+    padding: 40px;
+    color: #6b7280;
+}
+
+.taf-spinner {
+    border: 3px solid #f3f4f6;
+    border-top: 3px solid #3b82f6;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 15px;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.taf-age {
+    font-size: 0.75rem;
+    color: #9ca3af;
+    margin-top: 5px;
+}
+
+.taf-age.old {
+    color: #dc2626;
+    font-weight: 600;
+}
+
+.taf-refresh-btn {
+    background: #3b82f6;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: background 0.2s;
+}
+
+.taf-refresh-btn:hover {
+    background: #2563eb;
+}
+
+.taf-refresh-btn:disabled {
+    background: #9ca3af;
+    cursor: not-allowed;
+}
+</style>
+
+<div id="taf-display" class="taf-container">
+    <div class="taf-loading">
+        <div class="taf-spinner"></div>
+        <div>Loading TAF...</div>
+    </div>
+</div>
+
+<script>
+// TAF Display JavaScript
+(function() {
+    const TAF_CONTAINER = document.getElementById('taf-display');
+    let currentStationId = null;
+    
+    // Initialize TAF display
+    window.initTafDisplay = function(stationId) {
+        currentStationId = stationId;
+        loadTaf(stationId);
+    };
+    
+    // Load TAF from API
+    async function loadTaf(stationId) {
+        try {
+            showLoading();
+            
+            const response = await fetch(`/api/taf/${stationId}`);
+            const data = await response.json();
+            
+            if (response.ok) {
+                displayTaf(data);
+            } else {
+                displayError(data.message || 'No TAF available');
+            }
+        } catch (error) {
+            displayError('Failed to load TAF: ' + error.message);
+        }
+    }
+    
+    // Display TAF data
+    function displayTaf(taf) {
+        const ageMinutes = taf.age_minutes || 0;
+        const ageHours = Math.floor(ageMinutes / 60);
+        const ageDisplay = ageHours > 0 
+            ? `${ageHours}h ${ageMinutes % 60}m ago`
+            : `${ageMinutes}m ago`;
+        const isOld = ageMinutes > 360; // 6 hours
+        
+        const validFrom = new Date(taf.valid_from);
+        const validTo = new Date(taf.valid_to);
+        const issueTime = new Date(taf.issue_time);
+        
+        TAF_CONTAINER.innerHTML = `
+            <div class="taf-header">
+                <div>
+                    <div class="taf-title">TAF - ${taf.station_id}</div>
+                    <div class="taf-age ${isOld ? 'old' : ''}">
+                        Issued ${ageDisplay}
+                        ${isOld ? '⚠️ TAF may be outdated' : ''}
+                    </div>
+                </div>
+                <button class="taf-refresh-btn" onclick="window.initTafDisplay('${taf.station_id}')">
+                    Refresh
+                </button>
+            </div>
+            
+            <div class="taf-valid-time">
+                <div class="taf-time-item">
+                    <span class="taf-time-label">Issued</span>
+                    <span class="taf-time-value">${formatTime(issueTime)}</span>
+                </div>
+                <div class="taf-time-item">
+                    <span class="taf-time-label">Valid From</span>
+                    <span class="taf-time-value">${formatTime(validFrom)}</span>
+                </div>
+                <div class="taf-time-item">
+                    <span class="taf-time-label">Valid Until</span>
+                    <span class="taf-time-value">${formatTime(validTo)}</span>
+                </div>
+                <div class="taf-time-item">
+                    <span class="taf-time-label">Valid Hours</span>
+                    <span class="taf-time-value">${calculateHours(validFrom, validTo)}h</span>
+                </div>
+            </div>
+            
+            <div class="taf-raw-display">${formatTafText(taf.raw_text)}</div>
+            
+            ${parseWeatherConditions(taf.raw_text)}
+        `;
+    }
+    
+    // Parse and highlight weather conditions
+    function parseWeatherConditions(rawText) {
+        const conditions = [];
+        
+        // Check for various weather phenomena
+        const weatherPatterns = {
+            'Thunderstorm': /\bTS(RA)?\b/g,
+            'Heavy Rain': /\+RA\b/g,
+            'Rain Shower': /SHRA\b/g,
+            'Snow': /\bSN\b/g,
+            'Freezing Rain': /FZRA\b/g,
+            'Fog': /\bFG\b/g,
+            'Mist': /\bBR\b/g,
+            'IFR Conditions': /\b([0-4][0-9]{3}|0[0-9]{3})\b/g  // Vis < 5000m
+        };
+        
+        for (const [condition, pattern] of Object.entries(weatherPatterns)) {
+            if (pattern.test(rawText)) {
+                conditions.push(condition);
+            }
+        }
+        
+        if (conditions.length === 0) {
+            return '';
+        }
+        
+        return `
+            <div class="taf-weather-conditions">
+                ${conditions.map(c => `<span class="weather-badge weather-ifr">${c}</span>`).join('')}
+            </div>
+        `;
+    }
+    
+    // Format TAF text with syntax highlighting
+    function formatTafText(text) {
+        if (!text) return 'No TAF data available';
+        
+        // Basic syntax highlighting
+        return text
+            // Highlight station and time
+            .replace(/^(TAF.*?(\d{6}Z))/gm, '<span style="color: #60a5fa; font-weight: bold;">$1</span>')
+            // Highlight change indicators
+            .replace(/\b(BECMG|TEMPO|FM\d{6}|PROB\d{2})\b/g, '<span style="color: #fbbf24; font-weight: bold;">$1</span>')
+            // Highlight weather
+            .replace(/\b(\+?-?)(TS|RA|SN|SH|FG|BR|FZ)(RA|SN)?\b/g, '<span style="color: #f87171; font-weight: bold;">$1$2$3</span>')
+            // Highlight wind
+            .replace(/\b(\d{3}|VRB)(\d{2,3})(G\d{2,3})?(KT|MPS)\b/g, '<span style="color: #34d399;">$1$2$3$4</span>')
+            // Highlight visibility
+            .replace(/\b(\d{4}|P6SM|9999|CAVOK)\b/g, '<span style="color: #a78bfa;">$1</span>')
+            // Highlight cloud layers
+            .replace(/\b(FEW|SCT|BKN|OVC)(\d{3})(CB|TCU)?\b/g, '<span style="color: #94a3b8;">$1$2$3</span>');
+    }
+    
+    // Format time for display
+    function formatTime(date) {
+        const options = {
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            timeZone: 'UTC',
+            timeZoneName: 'short'
+        };
+        return date.toLocaleString('en-US', options);
+    }
+    
+    // Calculate hours between two dates
+    function calculateHours(from, to) {
+        return Math.round((to - from) / (1000 * 60 * 60));
+    }
+    
+    // Show loading state
+    function showLoading() {
+        TAF_CONTAINER.innerHTML = `
+            <div class="taf-loading">
+                <div class="taf-spinner"></div>
+                <div>Loading TAF...</div>
+            </div>
+        `;
+    }
+    
+    // Display error message
+    function displayError(message) {
+        TAF_CONTAINER.innerHTML = `
+            <div class="taf-header">
+                <div class="taf-title">TAF - ${currentStationId || 'Unknown'}</div>
+            </div>
+            <div class="taf-error">
+                <strong>⚠️ Error:</strong> ${message}
+            </div>
+            <button class="taf-refresh-btn" onclick="window.initTafDisplay('${currentStationId}')">
+                Try Again
+            </button>
+        `;
+    }
+    
+    // Auto-refresh every 15 minutes
+    setInterval(() => {
+        if (currentStationId) {
+            console.log('Auto-refreshing TAF...');
+            loadTaf(currentStationId);
+        }
+    }, 15 * 60 * 1000);
+})();
+</script>
+
+<!-- Usage: Call this when your station page loads -->
+<script>
+// Example: Initialize TAF display for a station
+// Replace 'KMCO' with your station variable
+document.addEventListener('DOMContentLoaded', function() {
+    // Get station ID from page (adjust based on your template)
+    const stationId = '{{ station_id }}' || 'KMCO';
+    window.initTafDisplay(stationId);
+});
+</script>
+

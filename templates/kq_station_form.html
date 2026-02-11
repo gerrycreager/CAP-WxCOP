@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ action }} KQ Station</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            padding: 30px;
+        }
+        h1 { color: #333; margin-bottom: 10px; }
+        .subtitle { color: #666; margin-bottom: 30px; }
+        .form-group { margin-bottom: 20px; }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: #333;
+        }
+        .required { color: #dc3545; }
+        input, textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            font-size: 14px;
+            font-family: inherit;
+        }
+        input:focus, textarea:focus {
+            outline: none;
+            border-color: #007bff;
+            box-shadow: 0 0 0 3px rgba(0,123,255,0.1);
+        }
+        textarea {
+            min-height: 80px;
+            resize: vertical;
+        }
+        .help-text {
+            font-size: 13px;
+            color: #6c757d;
+            margin-top: 5px;
+        }
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 30px;
+        }
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            font-size: 14px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+        }
+        .btn-primary {
+            background: #007bff;
+            color: white;
+        }
+        .btn-primary:hover {
+            background: #0056b3;
+        }
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+        .alert {
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 5px;
+        }
+        .alert-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>{{ action }} KQ Station</h1>
+        <p class="subtitle">{% if station %}Update station {{ station.station_id }}{% else %}Add a new temporary weather station{% endif %}</p>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <form method="POST">
+            <div class="form-group">
+                <label for="station_id">
+                    Station ID <span class="required">*</span>
+                </label>
+                <input type="text" 
+                       id="station_id" 
+                       name="station_id" 
+                       value="{{ station.station_id if station else '' }}"
+                       {% if station %}readonly style="background: #e9ecef;"{% endif %}
+                       required
+                       pattern="[A-Z0-9]{4,10}"
+                       maxlength="10">
+                <div class="help-text">4-10 characters, uppercase (e.g., KQFW, KQTEST)</div>
+            </div>
+
+            <div class="form-group">
+                <label for="name">Station Name</label>
+                <input type="text" 
+                       id="name" 
+                       name="name" 
+                       value="{{ station.name if station else '' }}"
+                       maxlength="200">
+                <div class="help-text">Optional (e.g., "Fire Camp Weather")</div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="latitude">
+                        Latitude <span class="required">*</span>
+                    </label>
+                    <input type="number" 
+                           id="latitude" 
+                           name="latitude" 
+                           value="{{ station.latitude if station else '' }}"
+                           step="0.000001"
+                           min="-90"
+                           max="90"
+                           required>
+                    <div class="help-text">Decimal degrees</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="longitude">
+                        Longitude <span class="required">*</span>
+                    </label>
+                    <input type="number" 
+                           id="longitude" 
+                           name="longitude" 
+                           value="{{ station.longitude if station else '' }}"
+                           step="0.000001"
+                           min="-180"
+                           max="180"
+                           required>
+                    <div class="help-text">Decimal degrees</div>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="elevation_ft">Elevation (feet)</label>
+                <input type="number" 
+                       id="elevation_ft" 
+                       name="elevation_ft" 
+                       value="{{ station.elevation_ft if station and station.elevation_ft else '' }}"
+                       min="-1000"
+                       max="30000">
+                <div class="help-text">Optional field elevation in feet MSL</div>
+            </div>
+
+            <div class="form-group">
+                <label for="notes">Notes</label>
+                <textarea id="notes" 
+                          name="notes">{{ station.notes if station else '' }}</textarea>
+                <div class="help-text">Optional notes (deployment details, contact info, etc.)</div>
+            </div>
+
+            <div class="btn-group">
+                <button type="submit" class="btn btn-primary">{{ action }} Station</button>
+                <a href="{{ url_for('kq_admin.list_stations') }}" class="btn btn-secondary">Cancel</a>
+            </div>
+        </form>
+    </div>
+</body>
+</html>
