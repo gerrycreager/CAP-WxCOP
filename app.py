@@ -53,6 +53,13 @@ try:
 except Exception as e:
     app.logger.warning(f"Could not load Wind Forecast API: {e}")
 
+try:
+    from airmet_sigmet_api import airmet_sigmet_api
+    app.register_blueprint(airmet_sigmet_api, url_prefix='/api/hazards')
+    app.logger.info("✓ AIRMET/SIGMET API registered at /cap_winds_app/api")
+except Exception as e:
+    app.logger.warning(f"Could not load AIRMET/SIGMET API: {e}")
+
 # Radar Animation API - NEW
 try:
     from radar_api import radar_api

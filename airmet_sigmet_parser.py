@@ -16,6 +16,7 @@ import re
 import glob
 from datetime import datetime, timedelta
 from typing import List, Dict, Tuple, Optional
+from datetime import timezone
 
 
 class AirmetSigmetParser:
@@ -148,11 +149,16 @@ class AirmetSigmetParser:
             min_end = int(end_str[4:6])
             
             # Assume current month/year (can be improved)
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             
-            valid_from = datetime(now.year, now.month, day_start, hour_start, min_start)
-            valid_until = datetime(now.year, now.month, day_end, hour_end, min_end)
-            
+### 20260219_1936            
+#            valid_from = datetime(now.year, now.month, day_start, hour_start, min_start)
+#            valid_until = datetime(now.year, now.month, day_end, hour_end, min_end)
+################################################################################
+            valid_from = datetime(now.year, now.month, day_start, hour_start, min_start, tzinfo=timezone.utc)
+            valid_until = datetime(now.year, now.month, day_end, hour_end, min_end, tzinfo=timezone.utc)
+################################################################################
+
             # Handle month rollover
             if valid_until < valid_from:
                 if now.month == 12:
@@ -386,7 +392,7 @@ class AirmetSigmetParser:
             List of active AIRMET dictionaries
         """
         if timestamp is None:
-            timestamp = datetime.utcnow()
+            timestamp = datetime.now(timezone.utc)
         
         airmets = []
         
@@ -422,7 +428,7 @@ class AirmetSigmetParser:
         Get all active SIGMETs at a given time
         """
         if timestamp is None:
-            timestamp = datetime.utcnow()
+            timestamp = datetime.now(timezone.utc)
         
         sigmets = []
         
