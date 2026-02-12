@@ -104,7 +104,6 @@
             display: flex;
             align-items: center;
             gap: 0.5rem;
-            margin-left: auto;
         }
         
         .label-toggle input[type="checkbox"] {
@@ -146,6 +145,33 @@
             border: 2px solid #333;
         }
         
+        .hazard-legend {
+            background: white;
+            padding: 1rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .hazard-legend h4 {
+            margin: 0 0 0.5rem 0;
+            font-size: 0.9rem;
+            color: #333;
+        }
+        
+        .hazard-legend-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin: 0.25rem 0;
+            font-size: 0.85rem;
+        }
+        
+        .hazard-legend-color {
+            width: 15px;
+            height: 15px;
+            border: 1px solid #333;
+        }
+        
         .wind-marker {
             border-radius: 50%;
             border: 2px solid #333;
@@ -157,7 +183,6 @@
         .wind-caution { background-color: #fbbf24; }
         .wind-nogo { background-color: #ef4444; }
         
-        /* Airport labels */
         .airport-label {
             font-size: 11px;
             font-weight: 600;
@@ -313,6 +338,11 @@
             <label for="showLabels">Show Airport Labels</label>
         </div>
         
+        <div class="label-toggle">
+            <input type="checkbox" id="showHazards">
+            <label for="showHazards">☁️ Show AIRMETs/SIGMETs</label>
+        </div>
+        
         <div style="margin-left: auto; font-size: 0.85rem; color: #666;">
             <span id="airportCount">0 airports</span> | 
             <span id="dataAge">Loading...</span>
@@ -332,6 +362,8 @@
         let map;
         let markersLayer;
         let labelsLayer;
+        let windContourLayer = null;
+        let hazardsLayer = null;
         let currentData = null;
         
         // Initialize map
@@ -411,14 +443,51 @@
                 return div;
             };
             windLegend.addTo(map);
+
+            // Weather Hazards Legend
+            const hazardLegend = L.control({position: 'topright'});
+            hazardLegend.onAdd = function(map) {
+                const div = L.DomUtil.create('div', 'hazard-legend');
+                div.style.display = 'none';
+                div.id = 'hazardLegend';
+                div.innerHTML = `
+                    <h4>Weather Hazards</h4>
+                    <div class="hazard-legend-item">
+                        <div class="hazard-legend-color" style="background: #FFA500;"></div>
+                        <span><strong>TURB</strong> - Turbulence</span>
+                    </div>
+                    <div class="hazard-legend-item">
+                        <div class="hazard-legend-color" style="background: #87CEEB;"></div>
+                        <span><strong>ICE</strong> - Icing</span>
+                    </div>
+                    <div class="hazard-legend-item">
+                        <div class="hazard-legend-color" style="background: #808080;"></div>
+                        <span><strong>IFR</strong> - IFR/Vis</span>
+                    </div>
+                    <div class="hazard-legend-item">
+                        <div class="hazard-legend-color" style="background: #696969;"></div>
+                        <span><strong>MTN</strong> - Mtn Obsc</span>
+                    </div>
+                    <div class="hazard-legend-item">
+                        <div class="hazard-legend-color" style="background: #FFD700;"></div>
+                        <span><strong>WIND</strong> - Sfc Wind</span>
+                    </div>
+                    <div class="hazard-legend-item">
+                        <div class="hazard-legend-color" style="background: #FF0000;"></div>
+                        <span><strong>CONV</strong> - Convective</span>
+                    </div>
+                    <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #ddd; font-size: 0.75rem; color: #666;">
+                        Click polygon for details
+                    </div>
+                `;
+                return div;
+            };
+            hazardLegend.addTo(map);
             
             // Update labels on zoom
             map.on('zoomend', updateLabels);
         }
 
-        // Wind contour layer global
-        let windContourLayer = null;
-
         // Color scale for wind speeds (kts)
         function getWindSpeedColor(windSpeed) {
             if (windSpeed < 5) return 'rgba(0, 255, 0, 0.3)';
@@ -491,152 +560,96 @@
             console.log('Wind contours rendered: ' + gridRows + 'x' + gridCols);
         }
 
-        // Wind contour layer global
-
-        // Color scale for wind speeds (kts)
-        function getWindSpeedColor(windSpeed) {
-            if (windSpeed < 5) return 'rgba(0, 255, 0, 0.3)';
-            if (windSpeed < 10) return 'rgba(173, 255, 47, 0.3)';
-            if (windSpeed < 15) return 'rgba(255, 255, 0, 0.4)';
-            if (windSpeed < 20) return 'rgba(255, 165, 0, 0.5)';
-            if (windSpeed < 25) return 'rgba(255, 69, 0, 0.6)';
-            return 'rgba(255, 0, 0, 0.7)';
-        }
-
-        // Draw wind contours on canvas
-        function drawWindContours(windGrid, bounds) {
-            if (windContourLayer) {
-                map.removeLayer(windContourLayer);
-            }
-            
-            if (!windGrid || !windGrid.lats || !windGrid.lons || !windGrid.winds) {
-                console.log('No wind grid data available');
-                return;
-            }
-            
-            const canvasOverlay = L.DomUtil.create('canvas');
-            canvasOverlay.width = 800;
-            canvasOverlay.height = 600;
-            const ctx = canvasOverlay.getContext('2d');
-            
-            const latMin = Math.min(...windGrid.lats);
-            const latMax = Math.max(...windGrid.lats);
-            const lonMin = Math.min(...windGrid.lons);
-            const lonMax = Math.max(...windGrid.lons);
-            
-            const latRange = latMax - latMin;
-            const lonRange = lonMax - lonMin;
-            
-            const gridRows = windGrid.lats.length;
-            const gridCols = windGrid.lons.length;
-            
-            for (let i = 0; i < gridRows - 1; i++) {
-                for (let j = 0; j < gridCols - 1; j++) {
-                    const windSpeed = windGrid.winds[i][j];
-                    if (isNaN(windSpeed)) continue;
-                    
-                    const lat1 = windGrid.lats[i];
-                    const lat2 = windGrid.lats[i + 1];
-                    const lon1 = windGrid.lons[j];
-                    const lon2 = windGrid.lons[j + 1];
-                    
-                    const x1 = ((lon1 - lonMin) / lonRange) * canvasOverlay.width;
-                    const x2 = ((lon2 - lonMin) / lonRange) * canvasOverlay.width;
-                    const y1 = ((latMax - lat1) / latRange) * canvasOverlay.height;
-                    const y2 = ((latMax - lat2) / latRange) * canvasOverlay.height;
-                    
-                    ctx.fillStyle = getWindSpeedColor(windSpeed);
-                    ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+        // Toggle AIRMET/SIGMET hazards
+        function toggleHazards() {
+            const checkbox = document.getElementById('showHazards');
+            const legend = document.getElementById('hazardLegend');
+            if (checkbox.checked) {
+                legend.style.display = 'block';
+                loadWeatherHazards();
+            } else {
+                legend.style.display = 'none';
+                if (hazardsLayer) {
+                    map.removeLayer(hazardsLayer);
+                    hazardsLayer = null;
                 }
             }
-            
-            const imageUrl = canvasOverlay.toDataURL();
-            windContourLayer = L.imageOverlay(imageUrl, [
-                [latMin, lonMin],
-                [latMax, lonMax]
-            ], {
-                opacity: 0.5,
-                interactive: false
-            });
-            
-            windContourLayer.addTo(map);
-            windContourLayer.bringToBack();
-            
-            console.log('Wind contours rendered: ' + gridRows + 'x' + gridCols);
         }
 
-        // Wind contour layer global
-
-        // Color scale for wind speeds (kts)
-        function getWindSpeedColor(windSpeed) {
-            if (windSpeed < 5) return 'rgba(0, 255, 0, 0.3)';
-            if (windSpeed < 10) return 'rgba(173, 255, 47, 0.3)';
-            if (windSpeed < 15) return 'rgba(255, 255, 0, 0.4)';
-            if (windSpeed < 20) return 'rgba(255, 165, 0, 0.5)';
-            if (windSpeed < 25) return 'rgba(255, 69, 0, 0.6)';
-            return 'rgba(255, 0, 0, 0.7)';
-        }
-
-        // Draw wind contours on canvas
-        function drawWindContours(windGrid, bounds) {
-            if (windContourLayer) {
-                map.removeLayer(windContourLayer);
+        // Load weather hazards (AIRMETs/SIGMETs)
+        async function loadWeatherHazards() {
+            try {
+                const response = await fetch('/cap_winds_app/api/hazards/weather-hazards');
+                const geojson = await response.json();
+                if (!geojson || !geojson.features) return;
+                if (hazardsLayer) map.removeLayer(hazardsLayer);
+                
+                hazardsLayer = L.geoJSON(geojson, {
+                    style: function(feature) {
+                        return {
+                            fillColor: feature.properties.color,
+                            weight: 2,
+                            opacity: 1,
+                            color: feature.properties.color,
+                            fillOpacity: 0.3
+                        };
+                    },
+                    onEachFeature: function(feature, layer) {
+                        const props = feature.properties;
+                        const validFrom = new Date(props.valid_from);
+                        const validUntil = new Date(props.valid_until);
+                        
+                        const formatTime = (date) => {
+                            const hours = String(date.getUTCHours()).padStart(2, '0');
+                            const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+                            const day = String(date.getUTCDate()).padStart(2, '0');
+                            return `${day}/${hours}${minutes}Z`;
+                        };
+                        
+                        const phenLabels = {
+                            'TURB': '⚠️ Turbulence',
+                            'ICE': '❄️ Icing',
+                            'IFR': '🌫️ IFR/Low Visibility',
+                            'MTN_OBSC': '🏔️ Mountain Obscuration',
+                            'SFC_WND': '💨 Strong Surface Winds',
+                            'CONVECTIVE': '⛈️ Convective Activity',
+                            'NONCONVECTIVE': '⚠️ SIGMET'
+                        };
+                        
+                        const phenLabel = phenLabels[props.phenomenon] || props.phenomenon;
+                        
+                        const popupContent = `
+                            <div style="min-width: 250px; max-width: 400px;">
+                                <h3 style="margin: 0 0 10px 0; color: ${props.color}; font-size: 1.1rem;">
+                                    ${phenLabel}
+                                </h3>
+                                <div style="margin-bottom: 8px;">
+                                    <strong>Type:</strong> ${props.type}<br>
+                                    <strong>Severity:</strong> ${props.severity}<br>
+                                    <strong>Flight Levels:</strong> ${props.flight_levels}
+                                </div>
+                                <div style="margin-bottom: 8px; padding: 8px; background: #f5f5f5; border-left: 3px solid ${props.color};">
+                                    <strong>Valid:</strong><br>
+                                    ${formatTime(validFrom)} to ${formatTime(validUntil)}
+                                </div>
+                                <div style="margin-top: 10px; padding: 10px; background: #f9f9f9; border-radius: 4px; max-height: 200px; overflow-y: auto;">
+                                    <strong>Full Text:</strong><br>
+                                    <pre style="white-space: pre-wrap; font-size: 0.85rem; margin: 5px 0 0 0; font-family: monospace;">${props.text}</pre>
+                                </div>
+                            </div>
+                        `;
+                        
+                        layer.bindPopup(popupContent, { maxWidth: 450 });
+                        layer.on('mouseover', function() { this.setStyle({ weight: 3, fillOpacity: 0.5 }); });
+                        layer.on('mouseout', function() { this.setStyle({ weight: 2, fillOpacity: 0.3 }); });
+                    }
+                });
+                
+                hazardsLayer.addTo(map);
+                console.log(`Loaded ${geojson.features.length} weather hazards`);
+            } catch (error) {
+                console.error('Error loading weather hazards:', error);
             }
-            
-            if (!windGrid || !windGrid.lats || !windGrid.lons || !windGrid.winds) {
-                console.log('No wind grid data available');
-                return;
-            }
-            
-            const canvasOverlay = L.DomUtil.create('canvas');
-            canvasOverlay.width = 800;
-            canvasOverlay.height = 600;
-            const ctx = canvasOverlay.getContext('2d');
-            
-            const latMin = Math.min(...windGrid.lats);
-            const latMax = Math.max(...windGrid.lats);
-            const lonMin = Math.min(...windGrid.lons);
-            const lonMax = Math.max(...windGrid.lons);
-            
-            const latRange = latMax - latMin;
-            const lonRange = lonMax - lonMin;
-            
-            const gridRows = windGrid.lats.length;
-            const gridCols = windGrid.lons.length;
-            
-            for (let i = 0; i < gridRows - 1; i++) {
-                for (let j = 0; j < gridCols - 1; j++) {
-                    const windSpeed = windGrid.winds[i][j];
-                    if (isNaN(windSpeed)) continue;
-                    
-                    const lat1 = windGrid.lats[i];
-                    const lat2 = windGrid.lats[i + 1];
-                    const lon1 = windGrid.lons[j];
-                    const lon2 = windGrid.lons[j + 1];
-                    
-                    const x1 = ((lon1 - lonMin) / lonRange) * canvasOverlay.width;
-                    const x2 = ((lon2 - lonMin) / lonRange) * canvasOverlay.width;
-                    const y1 = ((latMax - lat1) / latRange) * canvasOverlay.height;
-                    const y2 = ((latMax - lat2) / latRange) * canvasOverlay.height;
-                    
-                    ctx.fillStyle = getWindSpeedColor(windSpeed);
-                    ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
-                }
-            }
-            
-            const imageUrl = canvasOverlay.toDataURL();
-            windContourLayer = L.imageOverlay(imageUrl, [
-                [latMin, lonMin],
-                [latMax, lonMax]
-            ], {
-                opacity: 0.5,
-                interactive: false
-            });
-            
-            windContourLayer.addTo(map);
-            windContourLayer.bringToBack();
-            
-            console.log('Wind contours rendered: ' + gridRows + 'x' + gridCols);
         }
         
         // Load wind forecast data
@@ -705,11 +718,6 @@
                 
                 marker.addTo(markersLayer);
             });
-
-            // Draw wind contours
-            if (data.wind_grid) {
-                drawWindContours(data.wind_grid, data.bounds);
-            }
 
             // Draw wind contours
             if (data.wind_grid) {
@@ -852,6 +860,13 @@
         document.getElementById('loadBtn').addEventListener('click', loadWindData);
         document.getElementById('refreshBtn').addEventListener('click', loadWindData);
         document.getElementById('showLabels').addEventListener('change', updateLabels);
+        document.getElementById('showHazards').addEventListener('change', toggleHazards);
+        
+        // Auto-refresh hazards every 5 minutes
+        setInterval(() => {
+            const checkbox = document.getElementById('showHazards');
+            if (checkbox && checkbox.checked) loadWeatherHazards();
+        }, 5 * 60 * 1000);
         
         // Initialize
         initMap();
@@ -859,3 +874,4 @@
     </script>
 </body>
 </html>
+
