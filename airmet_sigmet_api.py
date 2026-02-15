@@ -6,13 +6,13 @@ Phase 2B: Flask Blueprint for serving weather hazard polygons
 
 from flask import Blueprint, jsonify, request
 from datetime import datetime, timezone
-from airmet_sigmet_parser import AirmetSigmetParser
+from airmet_sigmet_api_fetcher import AviationWeatherAPI
 
 # Create blueprint
 airmet_sigmet_api = Blueprint('airmet_sigmet_api', __name__)
 
 # Initialize parser (singleton)
-parser = AirmetSigmetParser()
+api = AviationWeatherAPI()
 
 
 @airmet_sigmet_api.route('/airmets')
@@ -40,8 +40,8 @@ def get_airmets():
     
     # Get active AIRMETs
     try:
-        airmets = parser.get_active_airmets(timestamp=valid_at)
-        geojson = parser.to_geojson(airmets)
+        airmets = api.get_active_airmets(timestamp=valid_at)
+        geojson = api.to_geojson(airmets)
         
         return jsonify(geojson)
         
@@ -74,8 +74,8 @@ def get_sigmets():
     
     # Get active SIGMETs
     try:
-        sigmets = parser.get_active_sigmets(timestamp=valid_at)
-        geojson = parser.to_geojson(sigmets)
+        sigmets = api.get_active_sigmets(timestamp=valid_at)
+        geojson = api.to_geojson(sigmets)
         
         return jsonify(geojson)
         
@@ -102,12 +102,12 @@ def get_all_hazards():
         valid_at = None
     
     try:
-        airmets = parser.get_active_airmets(timestamp=valid_at)
-        sigmets = parser.get_active_sigmets(timestamp=valid_at)
+        airmets = api.get_active_airmets(timestamp=valid_at)
+        sigmets = api.get_active_sigmets(timestamp=valid_at)
         
         # Combine both
         all_hazards = airmets + sigmets
-        geojson = parser.to_geojson(all_hazards)
+        geojson = api.to_geojson(all_hazards)
         
         return jsonify(geojson)
         

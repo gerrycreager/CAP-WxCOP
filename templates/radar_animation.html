@@ -59,9 +59,31 @@
         .airport-military { background-color: #e74c3c; }
         .airport-reporting { background-color: #27ae60; }
         .airport-basic { background-color: #3498db; }
+
+	.home-btn {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            z-index: 1000;
+            background: linear-gradient(135deg, #3498db, #2980b9);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 600;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            transition: all 0.3s ease;
+        }
+        .home-btn:hover {
+            background: linear-gradient(135deg, #2980b9, #21618c);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(0,0,0,0.5);
+        }
     </style>
 </head>
 <body>
+    <a href="/" class="home-btn">🏠 Home</a>
+
     <div id="map"></div>
     
     <div id="legends">

@@ -279,6 +279,12 @@
             box-shadow: 0 4px 16px rgba(0,0,0,0.2);
             z-index: 10000;
         }
+
+	@keyframes spin {
+	    0% { transform: rotate(0deg); }
+	    100% { transform: rotate(360deg); }
+	}
+
     </style>
 </head>
 <body>
@@ -579,8 +585,15 @@
         // Load weather hazards (AIRMETs/SIGMETs)
         async function loadWeatherHazards() {
             try {
+		const legend = document.getElementById('hazardLegend');
+		const originalHTML = legend.innerHTML;
+		legend.innerHTML = '<div style="padding: 20px; text-align: center;"><div style="border: 3px solid #f3f3f3; border-top: 3px solid #667eea; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin: 0 auto;"></div><p style="margin-top: 10px; font-size: 0.9rem;">Loading hazards...</p></div>';
+
                 const response = await fetch('/cap_winds_app/api/hazards/weather-hazards');
                 const geojson = await response.json();
+		// RESTORE original legend HTML
+		legend.innerHTML = originalHTML;
+		// ... rest of function
                 if (!geojson || !geojson.features) return;
                 if (hazardsLayer) map.removeLayer(hazardsLayer);
                 
