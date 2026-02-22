@@ -105,9 +105,9 @@ def landing_page():
     """Professional CAP Weather COP landing page"""
     return render_template('index.html')
 
-@app.route('/enhanced-weather-map')
-def enhanced_weather_map():
-    """Enhanced weather map with military prioritization and 2500 station capacity"""
+@app.route('/weather-map')
+def weather_map():
+    """Weather map with military prioritization and 2500 station capacity"""
     return render_template('enhanced_weather_map_complete.html')
 
 @app.route('/wind-map')
@@ -119,9 +119,14 @@ def interactive_wind_map():
 # LEGACY ROUTES - Maintain compatibility
 # ============================================================================
 
-@app.route('/enhanced_weather_map.html')
+@app.route('/enhanced-weather-map')
 def enhanced_weather_map_legacy():
-    """Legacy route - redirect to new enhanced weather map"""
+    """Legacy route - redirect to new weather map"""
+    return render_template('enhanced_weather_map_complete.html')
+
+@app.route('/enhanced_weather_map.html')
+def enhanced_weather_map_html_legacy():
+    """Legacy route - redirect to new weather map"""
     return render_template('enhanced_weather_map_complete.html')
 
 @app.route('/weather_map.html')
