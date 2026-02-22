@@ -83,3 +83,4 @@ secrets.py
 pqact_debug.log
 pqact_nexrad3.log
 tree.cap
+.cache/
