@@ -50,19 +50,6 @@ model_data/
 *.grib2.part
 
 # Application specific - EXCLUDE TRANSIENT PRODUCTS
-static/batch_maps/*.png
-static/batch_maps/*.zip
-static/batch_maps/*_wind_constraints.*
-static/batch_maps/cap_winds_*
-static/batch_maps/conus*
-static/batch_maps/glr*
-static/batch_maps/mar*
-static/batch_maps/ncr*
-static/batch_maps/ner*
-static/batch_maps/pcr*
-static/batch_maps/rmr*
-static/batch_maps/ser*
-static/batch_maps/swr*
 static/radar_images/
 uploads/
 temp/
@@ -84,3 +71,19 @@ pqact_debug.log
 pqact_nexrad3.log
 tree.cap
 .cache/
+*.tree
+
+# LDM - Exclude everything except essential configs
+ldm/
+!ldm/etc/
+ldm/etc/archive/
+ldm/etc/*.out
+ldm/etc/registry.xml
+ldm/etc/SDUS51*
+!ldm/etc/ldmd.conf
+!ldm/etc/pqact*.conf
+!ldm/etc/scour.conf
+!ldm/etc/netcheck.conf
+!ldm/etc/radar.lst
+!ldm/etc/*.tbl
+!ldm/etc/*.sh

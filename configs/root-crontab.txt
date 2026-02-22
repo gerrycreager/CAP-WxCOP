@@ -1,0 +1,11 @@
+0 2 * * * psql -U avwx_user -d avwx_data -c "DELETE FROM observations.model_wind_forecasts WHERE model_name = 'HRRR' AND model_run < NOW() - INTERVAL '7 days';" >> /var/log/hrrr_cleanup.log 2>&1
+
+# TFR Data Ingestion from ESRI/FAA - Every 30 minutes
+*/30 * * * * /var/www/cap_winds_app/scripts/ingest_tfr_esri.py >> /var/log/tfr_ingestion.log 2>&1
+*/30 * * * * /var/www/cap_winds_app/scripts/ingest_nda_corrected.py >> /var/log/tfr_ingestion.log 2>&1
+
+# TFR Log rotation - Daily at 2 AM
+0 2 * * * find /var/log -name "tfr_ingestion.log*" -mtime +7 -delete
+
+# Add Stadium TFR updates to cron (daily is sufficient for stadium data)
+0 6 * * * /var/www/cap_winds_app/scripts/ingest_stadium_tfrs.py >> /var/log/stadium_tf

@@ -1,0 +1,59 @@
+# Edit this file to introduce tasks to be run by cron.
+
+# 
+# Each task to run has to be defined through a single line
+# indicating with different fields when the task will be run
+# and what command to run for the task
+# 
+# To define the time you can provide concrete values for
+# minute (m), hour (h), day of month (dom), month (mon),
+# and day of week (dow) or use '*' in these fields (for 'any').
+# 
+# Notice that tasks will be started based on the cron's system
+# daemon's notion of time and timezones.
+# 
+# Output of the crontab jobs (including errors) is sent through
+# email to the user the crontab file belongs to (unless redirected).
+# 
+# For example, you can run a backup of all your user accounts
+# at 5 a.m every week with:
+# 0 5 * * 1 tar -zcf /var/backups/home.tgz /home/
+# 
+# For more information see the manual pages of crontab(5) and cron(8)
+# 
+# m h  dom mon dow   command
+
+# Fetch latest HRRR and GFS each hour (UTC)
+15 * * * * /var/www/cap_winds_app/fetch_models.sh >/dev/null 2>&1
+
+#5 * * * * /var/www/cap_winds_app/batch_generate_maps.py >> /var/log/batch_maps.log 2>&1
+# METAR/SPECI ingest - every 10 minutes
+*/10 * * * * /var/www/cap_winds_app/scripts/ingest_metar.py --recent 20 >> /var/log/metar_ingest.log 2>&1
+
+# TAF ingest - every hour at :05, :35 past the hour
+5,35 * * * * /var/www/cap_winds_app/scripts/ingest_taf.py --recent 90 >> /var/log/taf_ingest.log 2>&1
+
+# Run routine map updates starting at 10m before the hour
+50 * * * * /var/www/cap_winds_app/scripts/batch_generate_maps.py >> /var/log/batch_maps.log 2>&1
+
+
+#15 * * * * /var/www/cap_winds_app/scripts/ingest_model_winds.py >> /var/log/model_winds.log 2>&1
+
+# Grab the map cache daily
+#0 4 * * * /var/www/cap_winds/scripts/update_airport_cache.sh
+
+# Get runway cache daily
+#0 3 * * * /var/www/cap_winds_app/scripts/update_runway_cache.sh
+
+# Download latest airport and runway data from OurAirports
+0 12 * * * /var/www/cap_winds_app/scripts/update_ourairports_cache.sh >> /var/log/ourairports_cache_update.log 2>&1
+
+# Repopulate airports table with updated data (30 minutes after cache update)
+30 12 * * * /var/www/cap_winds_app/scripts/repopulate_airports_table.py >> /var/log/airport_repopulation.log 2>&1
+
+# Ingest Wind model data into postGIS
+15 * * * * /var/www/cap_winds_app/scripts/ingest_model_winds.py >> /var/log/model_winds_ingest.log 2>&1
+20 * * * * /var/www/cap_winds_app/scripts/batch_generate_maps_postgis.py >> /var/log/batch_maps_postgis.log 2>&1
+
+# Add TFR cron (every 30 minutes)
+*/30 * * * * /var/www/cap_winds_app/scripts/ingest_tfr.py >> /var/log/tfr_ingest.log 2>&1
