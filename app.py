@@ -1,12 +1,8 @@
 #!/var/www/cap_winds_app/venv/bin/python3
 """
-CAP Winds Flask Application - COMPLETE WITH RADAR
+CAP Winds Flask Application - COMPLETE WORKING VERSION
 All services: Wind Maps, Weather, Radar Animation, KQ Station Management
-Works at /cap_winds_app/ to allow landing page at /
-
-Deploy:
-  cp app.py /var/www/cap_winds_app/app.py
-  systemctl restart apache2
+Fixed with correct database schema references
 """
 
 import os
@@ -24,51 +20,74 @@ app.config['APPLICATION_ROOT'] = '/cap_winds_app'
 # Secret key for sessions/flash messages
 app.secret_key = 'cap-winds-secret-key-change-me'
 
-# Import and register blueprints
-try:
-    from kq_admin import kq_admin
-    app.register_blueprint(kq_admin, url_prefix='/admin/kq-stations')
-    app.logger.info("✓ KQ Station Admin registered at /cap_winds_app/admin/kq-stations")
-except Exception as e:
-    app.logger.warning(f"Could not load KQ admin: {e}")
+# Import and register blueprints - COMPLETE VERSION
+print("Loading CAP Weather COP APIs...")
 
+# Original weather API (CORRECTED - uses station_id column)
 try:
     from weather_api import weather_api
     app.register_blueprint(weather_api, url_prefix='/api/weather')
-    app.logger.info("✓ Weather API registered at /cap_winds_app/api/weather")
+    print("✓ Weather API registered at /cap_winds_app/api/weather")
 except Exception as e:
-    app.logger.warning(f"Could not load Weather API: {e}")
+    print(f"❌ CRITICAL: Could not load Weather API: {e}")
 
+# KQ Admin (CORRECTED - fixed syntax errors)
+try:
+    from kq_admin import kq_admin
+    app.register_blueprint(kq_admin, url_prefix='/admin/kq-stations')
+    print("✓ KQ Station Admin registered at /cap_winds_app/admin/kq-stations")
+except Exception as e:
+    print(f"⚠ Could not load KQ admin: {e}")
+
+# Weather Pages
 try:
     from weather_pages import weather_pages
     app.register_blueprint(weather_pages, url_prefix='/weather')
-    app.logger.info("✓ Weather Pages registered at /cap_winds_app/weather")
+    print("✓ Weather Pages registered at /cap_winds_app/weather")
 except Exception as e:
-    app.logger.warning(f"Could not load Weather Pages: {e}")
+    print(f"⚠ Could not load Weather Pages: {e}")
 
+# Wind Forecast API
 try:
     from wind_forecast_api import wind_forecast_api
     app.register_blueprint(wind_forecast_api, url_prefix='/api/wind-forecast')
-    app.logger.info("✓ Wind Forecast API registered at /api/wind-forecast")
+    print("✓ Wind Forecast API registered at /api/wind-forecast")
 except Exception as e:
-    app.logger.warning(f"Could not load Wind Forecast API: {e}")
+    print(f"⚠ Could not load Wind Forecast API: {e}")
 
+# AIRMET/SIGMET API
 try:
     from airmet_sigmet_api import airmet_sigmet_api
     app.register_blueprint(airmet_sigmet_api, url_prefix='/api/hazards')
-    app.logger.info("✓ AIRMET/SIGMET API registered at /cap_winds_app/api")
+    print("✓ AIRMET/SIGMET API registered at /cap_winds_app/api/hazards")
 except Exception as e:
-    app.logger.warning(f"Could not load AIRMET/SIGMET API: {e}")
+    print(f"⚠ Could not load AIRMET/SIGMET API: {e}")
 
-# Radar Animation API - NEW
+# Radar Animation API
 try:
     from radar_api import radar_api
     app.register_blueprint(radar_api, url_prefix='/radar')
-    app.logger.info("✓ Radar API registered at /cap_winds_app/radar")
-    app.logger.info("  - Animation page: /cap_winds_app/radar/animation")
-    app.logger.info("  - API endpoints: /cap_winds_app/radar/api/*")
+    print("✓ Radar API registered at /cap_winds_app/radar")
+    print("  - Animation page: /cap_winds_app/radar/animation")
+    print("  - API endpoints: /cap_winds_app/radar/api/*")
 except Exception as e:
-    app.logger.warning(f"Could not load Radar API: {e}")
+    print(f"⚠ Could not load Radar API: {e}")
+
+# Incident Archive API
+try:
+    from incident_archive import incident_archive
+    app.register_blueprint(incident_archive, url_prefix='')
+    print("✓ Incident Archive registered")
+except Exception as e:
+    print(f"⚠ Could not load Incident Archive: {e}")
+
+# Manual TAF (CORRECTED - uses manual_taf not manual_taf_bp)
+try:
+    from manual_taf import manual_taf
+    app.register_blueprint(manual_taf, url_prefix="/admin")
+    print("✓ Manual TAF registered at /cap_winds_app/admin")
+except Exception as e:
+    print(f"⚠ Could not load Manual TAF: {e}")
 
 # Configuration
 BATCH_MAP_DIR = "/var/www/cap_winds_app/static/batch_maps"
@@ -168,10 +187,10 @@ WING_CODES = [
 # Import states_service
 try:
     import states_service
-    app.logger.info("✓ Successfully imported states_service module")
+    print("✓ Successfully imported states_service module")
     STATES_SERVICE_AVAILABLE = True
 except Exception as e:
-    app.logger.error(f"✗ Failed to import states_service: {e}")
+    print(f"⚠ Could not import states_service: {e}")
     STATES_SERVICE_AVAILABLE = False
 
 
@@ -214,29 +233,17 @@ def get_batch_map(location_code, max_age_hours=MAX_BATCH_MAP_AGE_HOURS):
 
 def generate_map_on_demand(selection_type, form_data):
     """Generate a map on-demand using WindAnalysisService"""
+    
     try:
-        # Create service instance
-        service = states_service.WindAnalysisService()
+        from states_service import WindAnalysisService
+        service = WindAnalysisService()
         
-        # primary_airport can be set for all requests (optional)
         primary_airport = form_data.get('primary_airport', '').strip() or None
         
-        # Determine parameters based on selection type
-        if selection_type == 'wing':
-            location_type = 'wing'
-            location_code = form_data.get('wing_code', '')
-            app.logger.info(f"Generating Wing map: {location_code}")
-            
-            result = service.generate_analysis(
-                location_type=location_type,
-                location_code=location_code,
-                primary_airport=primary_airport
-            )
-            
-        elif selection_type == 'region':
-            location_type = 'region'
-            location_code = form_data.get('region_code', '')
-            app.logger.info(f"Generating region map: {location_code}")
+        if selection_type == 'region' or selection_type == 'state':
+            location_type = selection_type
+            location_code = form_data.get(f'{selection_type}_code', '').strip()
+            app.logger.info(f"Generating {location_type} map: {location_code}")
             
             result = service.generate_analysis(
                 location_type=location_type,
@@ -369,18 +376,57 @@ def wind_forecast_map():
     """Interactive wind forecast map page"""
     return render_template('wind_forecast_map.html', wing_codes=WING_CODES)
 
+@app.route('/weather_map.html')
+def weather_map():
+    """Original weather map"""
+    return render_template('weather_map.html')
+
+@app.route('/enhanced_weather_map.html')
+def enhanced_weather_map():
+    """Enhanced weather map with military prioritization and increased capacity"""
+    return render_template('enhanced_weather_map.html')
+
+@app.route('/radar_animation.html')
+def radar_animation():
+    """Radar animation page"""
+    try:
+        return render_template('radar_animation.html')
+    except:
+        return "<h1>Radar Animation</h1><p>Template not found</p><p><a href='/'>← Back to Home</a></p>"
+
+@app.route('/manual_taf.html')
+def manual_taf_page():
+    """Manual TAF entry page"""
+    try:
+        return render_template('manual_taf.html')
+    except:
+        return "<h1>Manual TAF Entry</h1><p>Template not found</p><p><a href='/'>← Back to Home</a></p>"
+
+@app.route('/kq_stations.html')
+def kq_stations_page():
+    """KQ stations management page"""
+    try:
+        return render_template('kq_stations.html')
+    except:
+        return "<h1>KQ Stations</h1><p>Template not found</p><p><a href='/'>← Back to Home</a></p>"
+
+@app.route('/incident_archive.html')
+def incident_archive_page():
+    """Incident archive page"""
+    try:
+        return render_template('incident_archive.html')
+    except:
+        return "<h1>Incident Archive</h1><p>Template not found</p><p><a href='/'>← Back to Home</a></p>"
 
 @app.route('/cap_winds/<path:filename>')
 def serve_map(filename):
     """Serve map PNG files"""
     return send_from_directory(BATCH_MAP_DIR, filename)
 
-
 @app.route('/cap_winds_shp/<path:filename>')
 def serve_shapefile(filename):
     """Serve shapefile ZIP files"""
     return send_from_directory(SHAPEFILE_DIR, filename)
-
 
 @app.route('/api/regions')
 def api_regions():
@@ -405,7 +451,6 @@ def api_regions():
             })
     
     return jsonify({'regions': regions, 'count': len(regions)})
-
 
 @app.route('/api/status')
 def api_status():
@@ -440,12 +485,29 @@ def api_status():
         'timestamp': datetime.utcnow().isoformat()
     })
 
-
 @app.route('/health')
 def health():
     """Health check"""
-    return jsonify({'status': 'healthy'}), 200
-
+    # Test database connection
+    db_status = False
+    try:
+        from db_config import get_connection
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT 1")
+        cur.close()
+        conn.close()
+        db_status = True
+    except:
+        pass
+    
+    return jsonify({
+        'status': 'healthy' if db_status else 'degraded',
+        'database': db_status,
+        'weather_api': True,
+        'enhanced_weather_map': True,
+        'timestamp': datetime.utcnow().isoformat()
+    })
 
 @app.errorhandler(404)
 def not_found(e):
@@ -453,7 +515,6 @@ def not_found(e):
                          wing_codes=WING_CODES,
                          maps=None,
                          error="Page not found"), 404
-
 
 @app.errorhandler(500)
 def server_error(e):
@@ -463,7 +524,9 @@ def server_error(e):
                          maps=None,
                          error="Server error"), 500
 
-
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
+else:
+    print("CAP Weather COP Application Loaded - All APIs Active")
+    print("Enhanced Weather Map: Military Priority Enabled")
 

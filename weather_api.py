@@ -1,835 +1,355 @@
 """
-Weather Data API Blueprint
-Provides METAR and TAF data via REST API
+Weather API - Final Corrected Version
+Uses PostGIS geometry functions to extract lat/lon from location column
+Table schema: observations.metar and observations.airports both use PostGIS 'location' column
 """
-from flask import Blueprint, jsonify, request
+
 import sys
 import json
 sys.path.insert(0, '/var/www/cap_winds_app')
 from db_config import get_connection
 from datetime import datetime, timedelta
-from taf_decoder import decode_taf, format_taf_for_display
-from runway_analysis import analyze_runways_for_wind, format_runway_analysis_html
+from flask import Blueprint, jsonify, request
 
 weather_api = Blueprint('weather_api', __name__, url_prefix='/api/weather')
 
-
-def calculate_distance(lat1, lon1, lat2, lon2):
-    """Calculate distance in nautical miles using Haversine formula"""
-    from math import radians, cos, sin, asin, sqrt
-    
-    lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
-    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
-    c = 2 * asin(sqrt(a))
-    r_nm = 3440.065  # Earth radius in nautical miles
-    return c * r_nm
-
-
-# =============================================================================
-# NEW: COMBINED STATION ENDPOINT (for weather_station.html)
-# =============================================================================
-
-@weather_api.route('/station/<station_id>')
-def get_station_weather(station_id):
-    """
-    Get complete weather for a station (METAR + TAF + Runway Analysis)
-    Used by weather_station.html
-    
-    Query parameters:
-    - radius: Include stations within N nm (default: 0 = single station)
-    
-    Returns:
-        {
-          "stations": [
-            {
-              "station_id": "KMCO",
-              "distance_nm": 0,
-              "observations": [...],  # METAR/SPECI with context
-              "taf": {...},           # TAF data
-              "runway_analysis_html": "..."
-            }
-          ]
-        }
-    """
+@weather_api.route('/metar/recent', methods=['GET'])
+def get_recent_metar():
+    """Get recent METAR observations within bounding box"""
     try:
-        station_id = station_id.upper().strip()
-        radius_nm = request.args.get('radius', 0, type=float)
+        # Get bounding box parameters
+        bounds_param = request.args.get('bounds', '')
+        limit = int(request.args.get('limit', 500))
         
-        if len(station_id) != 4 or not station_id.isalpha():
-            return jsonify({'error': 'Invalid station ID'}), 400
-        
-        conn = get_connection()
-        cur = conn.cursor()
-        
-        # Get primary station location
-        cur.execute("""
-            SELECT DISTINCT ON (station_id)
-                station_id, 
-                ST_Y(location) as latitude,
-                ST_X(location) as longitude
-            FROM observations.metar
-            WHERE station_id = %s
-            AND location IS NOT NULL
-            ORDER BY station_id, observation_time DESC
-        """, (station_id,))
-        
-        primary_station = cur.fetchone()
-        
-        if not primary_station:
-            cur.close()
-            conn.close()
-            return jsonify({'error': 'Station not found'}), 404
-        
-        # Get stations within radius
-        stations_to_fetch = [station_id]
-        station_distances = {station_id: 0}
-        
-        if radius_nm > 0:
-            cur.execute("""
-                SELECT DISTINCT ON (station_id)
-                    station_id,
-                    ST_Y(location) as latitude,
-                    ST_X(location) as longitude
-                FROM observations.metar
-                WHERE station_id != %s
-                AND location IS NOT NULL
-                AND observation_time > NOW() - INTERVAL '6 hours'
-                ORDER BY station_id, observation_time DESC
-            """, (station_id,))
+        if not bounds_param:
+            return jsonify({'error': 'bounds parameter required'}), 400
             
-            nearby = cur.fetchall()
-            
-            for stn in nearby:
-                dist = calculate_distance(
-                    primary_station[1], primary_station[2],  # primary lat, lon
-                    stn[1], stn[2]  # nearby lat, lon
-                )
-                
-                if dist <= radius_nm:
-                    stations_to_fetch.append(stn[0])
-                    station_distances[stn[0]] = round(dist, 1)
-        
-        # Get weather for all stations
-        result = {'stations': []}
-        
-        for stn_id in stations_to_fetch:
-            # Get METAR observations (last 3 hours)
-            cur.execute("""
-                SELECT 
-                    station_id,
-                    observation_time,
-                    raw_text,
-                    temp_c,
-                    dewpoint_c,
-                    wind_dir,
-                    wind_speed_kts,
-                    wind_gust_kts,
-                    visibility_sm,
-                    altimeter_hg,
-                    flight_category,
-                    sky_conditions,
-                    present_weather,
-                    ST_Y(location) as latitude,
-                    ST_X(location) as longitude,
-                    is_speci
-                FROM observations.metar
-                WHERE station_id = %s
-                AND observation_time > NOW() - INTERVAL '3 hours'
-                ORDER BY observation_time DESC
-            """, (stn_id,))
-            
-            metars = cur.fetchall()
-            
-            if not metars:
-                continue
-            
-            # Build observations list
-            observations = []
-            
-            for i, metar in enumerate(metars):
-                raw = metar[2]
-                obs_type = 'SPECI' if (metar[15] or 'SPECI' in raw) else 'METAR'
-                
-                obs = {
-                    'type': obs_type,
-                    'station_id': metar[0],
-                    'observation_time': metar[1].isoformat() if metar[1] else None,
-                    'raw_text': metar[2],
-                    'temp_c': metar[3],
-                    'dewpoint_c': metar[4],
-                    'wind_dir': metar[5],
-                    'wind_speed_kts': metar[6],
-                    'wind_gust_kts': metar[7],
-                    'visibility_sm': metar[8],
-                    'altimeter_hg': metar[9],
-                    'flight_category': metar[10],
-                    'sky_conditions': metar[11],
-                    'present_weather': metar[12],
-                    'latitude': metar[13],
-                    'longitude': metar[14]
-                }
-                
-                # Add context for SPECIs (previous observations)
-                if obs_type == 'SPECI' and i < len(metars) - 1:
-                    obs['context'] = []
-                    for ctx_metar in metars[i+1:min(i+3, len(metars))]:
-                        ctx_raw = ctx_metar[2]
-                        ctx_type = 'SPECI' if (ctx_metar[15] or 'SPECI' in ctx_raw) else 'METAR'
-                        obs['context'].append({
-                            'type': ctx_type,
-                            'time': ctx_metar[1].isoformat() if ctx_metar[1] else None,
-                            'raw_text': ctx_metar[2],
-                            'flight_category': ctx_metar[10]
-                        })
-                
-                observations.append(obs)
-            
-            # Get TAF
-            cur.execute("""
-                SELECT 
-                    station_id,
-                    issue_time,
-                    valid_from,
-                    valid_to,
-                    raw_text
-                FROM observations.taf
-                WHERE station_id = %s
-                AND valid_to > NOW()
-                ORDER BY issue_time DESC
-                LIMIT 1
-            """, (stn_id,))
-            
-            taf_row = cur.fetchone()
-            taf_data = None
-            
-            if taf_row:
-                # Decode TAF
-                try:
-                    decoded = decode_taf(taf_row[4])
-                    decoded_html = format_taf_for_display(decoded) if decoded else None
-                except:
-                    decoded = None
-                    decoded_html = None
-                
-                taf_data = {
-                    'station_id': taf_row[0],
-                    'issue_time': taf_row[1].isoformat() if taf_row[1] else None,
-                    'valid_from': taf_row[2].isoformat() if taf_row[2] else None,
-                    'valid_to': taf_row[3].isoformat() if taf_row[3] else None,
-                    'raw_text': taf_row[4],
-                    'decoded': decoded,
-                    'decoded_html': decoded_html
-                }
-            
-            # Get runway analysis for most recent observation
-            runway_analysis_html = None
-            if observations:
-                latest = observations[0]
-                try:
-                    analysis = analyze_runways_for_wind(
-                        stn_id,
-                        latest['wind_dir'],
-                        latest['wind_speed_kts'],
-                        latest['wind_gust_kts']
-                    )
-                    runway_analysis_html = format_runway_analysis_html(analysis)
-                except:
-                    runway_analysis_html = None
-            
-            # Add station to results
-            result['stations'].append({
-                'station_id': stn_id,
-                'distance_nm': station_distances[stn_id],
-                'observations': observations,
-                'taf': taf_data,
-                'runway_analysis_html': runway_analysis_html
-            })
-        
-        cur.close()
-        conn.close()
-        
-        return jsonify(result)
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
-# =============================================================================
-# NEW: SIMPLE TAF ENDPOINT (for weather_map.html popups)
-# =============================================================================
-
-@weather_api.route('/taf/<station_id>')
-def get_taf_simple(station_id):
-    """
-    Get current TAF for a station (simple version for map popups)
-    Used by weather_map.html
-    
-    Returns:
-        {
-          "station_id": "KMCO",
-          "issue_time": "2026-01-19T14:00:00",
-          "valid_from": "2026-01-19T15:00:00",
-          "valid_to": "2026-01-20T15:00:00",
-          "raw_text": "TAF KMCO ...",
-          "age_minutes": 25
-        }
-    """
-    try:
-        station_id = station_id.upper().strip()
-        
-        if len(station_id) != 4 or not station_id.isalpha():
-            return jsonify({'error': 'Invalid station ID'}), 400
-        
-        conn = get_connection()
-        cur = conn.cursor()
-        
-        cur.execute("""
-            SELECT 
-                station_id,
-                issue_time,
-                valid_from,
-                valid_to,
-                raw_text,
-                created_at
-            FROM observations.taf
-            WHERE station_id = %s
-            AND valid_to > NOW()
-            ORDER BY issue_time DESC
-            LIMIT 1
-        """, (station_id,))
-        
-        row = cur.fetchone()
-        cur.close()
-        conn.close()
-        
-        if not row:
-            return jsonify({'error': 'No TAF found'}), 404
-        
-        age_minutes = None
-        if row[1]:
-            age_minutes = int((datetime.utcnow() - row[1]).total_seconds() / 60)
-        
-        return jsonify({
-            'station_id': row[0],
-            'issue_time': row[1].isoformat() if row[1] else None,
-            'valid_from': row[2].isoformat() if row[2] else None,
-            'valid_to': row[3].isoformat() if row[3] else None,
-            'raw_text': row[4],
-            'created_at': row[5].isoformat() if row[5] else None,
-            'age_minutes': age_minutes
-        })
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
-# =============================================================================
-# EXISTING ENDPOINTS (unchanged below)
-# =============================================================================
-
-@weather_api.route('/metar/recent')
-def get_recent_metars():
-    """
-    Get recent METAR observations
-    
-    Query parameters:
-    - max_age: Maximum age in hours (default: 2)
-    - limit: Maximum number of results (default: 500, max: 5000)
-    - flight_category: Filter by VFR/MVFR/IFR/LIFR (optional)
-    - bounds: Bounding box as "west,south,east,north" (optional)
-    - center: Center point as "lat,lon" with radius in nm (optional)
-    - radius: Radius in nautical miles (default: 100, requires center)
-    """
-    try:
-        # Parse parameters
-        max_age_hours = int(request.args.get('max_age', 2))
-        limit = min(int(request.args.get('limit', 500)), 5000)
-        flight_category = request.args.get('flight_category', '').upper()
-        bounds = request.args.get('bounds')
-        center = request.args.get('center')
-        radius_nm = float(request.args.get('radius', 100))
-        
-        conn = get_connection()
-        cur = conn.cursor()
-        
-        # Build query
-        query = """
-            SELECT 
-                station_id,
-                observation_time,
-                raw_text,
-                temp_c,
-                dewpoint_c,
-                wind_dir,
-                wind_speed_kts,
-                wind_gust_kts,
-                visibility_sm,
-                altimeter_hg,
-                flight_category,
-                sky_conditions,
-                present_weather,
-                ST_X(location) as longitude,
-                ST_Y(location) as latitude,
-                is_speci
-            FROM observations.metar
-            WHERE observation_time > NOW() - INTERVAL '%s hours'
-        """
-        params = [max_age_hours]
-        
-        # Add flight category filter
-        if flight_category and flight_category in ['VFR', 'MVFR', 'IFR', 'LIFR']:
-            query += " AND flight_category = %s"
-            params.append(flight_category)
-        
-        # Add spatial filter
-        if bounds:
-            # Bounding box filter
-            west, south, east, north = map(float, bounds.split(','))
-            
-            # Check for International Date Line crossing (west > east)
-            if west > east:
-                # Query spans the date line - split into two boxes
-                query += """
-                    AND (
-                        location && ST_MakeEnvelope(%s, %s, 180, %s, 4326)
-                        OR
-                        location && ST_MakeEnvelope(-180, %s, %s, %s, 4326)
-                    )
-                """
-                params.extend([west, south, north, south, east, north])
-            else:
-                # Normal bounding box (doesn't cross date line)
-                query += """
-                    AND location && ST_MakeEnvelope(%s, %s, %s, %s, 4326)
-                """
-                params.extend([west, south, east, north])
-        
-        elif center:
-            # Radius filter
-            lat, lon = map(float, center.split(','))
-            radius_meters = radius_nm * 1852  # Convert nm to meters
-            query += """
-                AND ST_DWithin(
-                    location::geography,
-                    ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geography,
-                    %s
-                )
-            """
-            params.extend([lon, lat, radius_meters])
-        
-        # Get most recent observation per station using DISTINCT ON
-        query = f"""
-            WITH filtered AS (
-                {query}
-            )
-            SELECT DISTINCT ON (station_id)
-                station_id, observation_time, raw_text, temp_c, dewpoint_c,
-                wind_dir, wind_speed_kts, wind_gust_kts, visibility_sm, altimeter_hg,
-                flight_category, sky_conditions, present_weather, longitude, latitude, is_speci
-            FROM filtered
-            ORDER BY station_id, observation_time DESC
-            LIMIT %s
-        """
-        params.append(limit)
-        
-        cur.execute(query, params)
-        
-        metars = []
-        for row in cur.fetchall():
-            metars.append({
-                'station_id': row[0],
-                'observation_time': row[1].isoformat() if row[1] else None,
-                'raw_text': row[2],
-                'temp_c': row[3],
-                'dewpoint_c': row[4],
-                'wind_dir': row[5],
-                'wind_speed_kts': row[6],
-                'wind_gust_kts': row[7],
-                'visibility_sm': row[8],
-                'altimeter_hg': row[9],
-                'flight_category': row[10],
-                'sky_conditions': row[11],
-                'present_weather': row[12],
-                'longitude': row[13],
-                'latitude': row[14],
-                'is_speci': row[15]
-            })
-        
-        cur.close()
-        conn.close()
-        
-        return jsonify({
-            'count': len(metars),
-            'metars': metars,
-            'timestamp': datetime.utcnow().isoformat()
-        })
-    
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
-@weather_api.route('/metar/station/<station_id>')
-def get_station_metar(station_id):
-    """
-    Get recent METARs for a specific station
-    
-    Query parameters:
-    - hours: Number of hours to look back (default: 24)
-    """
-    try:
-        hours = int(request.args.get('hours', 24))
-        station_id = station_id.upper()
-        
-        conn = get_connection()
-        cur = conn.cursor()
-        
-        cur.execute("""
-            SELECT 
-                station_id,
-                observation_time,
-                raw_text,
-                temp_c,
-                dewpoint_c,
-                wind_dir,
-                wind_speed_kts,
-                wind_gust_kts,
-                visibility_sm,
-                altimeter_hg,
-                flight_category,
-                sky_conditions,
-                present_weather,
-                ST_X(location) as longitude,
-                ST_Y(location) as latitude,
-                is_speci
-            FROM observations.metar
-            WHERE station_id = %s
-              AND observation_time > NOW() - INTERVAL '%s hours'
-            ORDER BY observation_time DESC
-        """, (station_id, hours))
-        
-        metars = []
-        for row in cur.fetchall():
-            metars.append({
-                'station_id': row[0],
-                'observation_time': row[1].isoformat() if row[1] else None,
-                'raw_text': row[2],
-                'temp_c': row[3],
-                'dewpoint_c': row[4],
-                'wind_dir': row[5],
-                'wind_speed_kts': row[6],
-                'wind_gust_kts': row[7],
-                'visibility_sm': row[8],
-                'altimeter_hg': row[9],
-                'flight_category': row[10],
-                'sky_conditions': row[11],
-                'present_weather': row[12],
-                'longitude': row[13],
-                'latitude': row[14],
-                'is_speci': row[15]
-            })
-        
-        cur.close()
-        conn.close()
-        
-        if not metars:
-            return jsonify({'error': 'Station not found or no recent data'}), 404
-        
-        # Add runway analysis for the most recent METAR
-        runway_analysis = None
-        runway_analysis_html = None
-        if metars:
-            latest = metars[0]
-            try:
-                analysis = analyze_runways_for_wind(
-                    station_id,
-                    latest['wind_dir'],
-                    latest['wind_speed_kts'],
-                    latest['wind_gust_kts']
-                )
-                runway_analysis = analysis
-                runway_analysis_html = format_runway_analysis_html(analysis)
-            except:
-                pass
-        
-        return jsonify({
-            'station_id': station_id,
-            'count': len(metars),
-            'metars': metars,
-            'runway_analysis': runway_analysis,
-            'runway_analysis_html': runway_analysis_html,
-            'timestamp': datetime.utcnow().isoformat()
-        })
-    
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
-@weather_api.route('/taf/station/<station_id>')
-def get_station_taf(station_id):
-    """
-    Get current TAF for a station with decoding
-    
-    Returns TAF with decoded weather information
-    """
-    try:
-        station_id = station_id.upper()
-        
-        conn = get_connection()
-        cur = conn.cursor()
-        
-        cur.execute("""
-            SELECT 
-                station_id,
-                issue_time,
-                valid_from,
-                valid_to,
-                raw_text,
-                ST_X(location) as longitude,
-                ST_Y(location) as latitude
-            FROM observations.taf
-            WHERE station_id = %s
-              AND valid_to > NOW()
-            ORDER BY issue_time DESC
-            LIMIT 1
-        """, (station_id,))
-        
-        row = cur.fetchone()
-        
-        cur.close()
-        conn.close()
-        
-        if not row:
-            return jsonify({'error': 'No TAF found for station'}), 404
-        
-        # Decode the TAF
         try:
-            decoded = decode_taf(row[4])
-            decoded_html = format_taf_for_display(decoded) if decoded else None
-        except:
-            decoded = None
-            decoded_html = None
+            bounds = list(map(float, bounds_param.split(',')))
+            if len(bounds) != 4:
+                raise ValueError()
+            west, south, east, north = bounds
+        except (ValueError, TypeError):
+            return jsonify({'error': 'Invalid bounds format. Expected: west,south,east,north'}), 400
         
-        taf = {
-            'station_id': row[0],
-            'issue_time': row[1].isoformat() if row[1] else None,
-            'valid_from': row[2].isoformat() if row[2] else None,
-            'valid_to': row[3].isoformat() if row[3] else None,
-            'raw_text': row[4],
-            'decoded': decoded,
-            'decoded_html': decoded_html,
-            'longitude': row[5],
-            'latitude': row[6]
-        }
-        
-        return jsonify(taf)
-    
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        # Validate bounds
+        if not (-180 <= west <= 180 and -180 <= east <= 180 and 
+                -90 <= south <= 90 and -90 <= north <= 90):
+            return jsonify({'error': 'Bounds out of valid range'}), 400
+            
+        if west >= east or south >= north:
+            return jsonify({'error': 'Invalid bounds: west >= east or south >= north'}), 400
 
-
-@weather_api.route('/stations/search')
-def search_stations():
-    """
-    Search for stations by identifier or name
-    
-    Query parameters:
-    - q: Search query (station ID or partial name)
-    - limit: Maximum results (default: 20)
-    """
-    try:
-        query = request.args.get('q', '').upper()
-        limit = min(int(request.args.get('limit', 20)), 100)
-        
-        if len(query) < 2:
-            return jsonify({'error': 'Query must be at least 2 characters'}), 400
-        
         conn = get_connection()
         cur = conn.cursor()
         
-        # Search in METAR stations (most recent observation)
-        cur.execute("""
-            WITH latest AS (
-                SELECT DISTINCT ON (station_id)
-                    station_id,
-                    observation_time,
-                    flight_category,
-                    ST_X(location) as longitude,
-                    ST_Y(location) as latitude
-                FROM observations.metar
-                WHERE station_id LIKE %s
-                  AND observation_time > NOW() - INTERVAL '6 hours'
-                ORDER BY station_id, observation_time DESC
+        # FINAL CORRECTED QUERY - Using PostGIS ST_Y/ST_X functions for lat/lon
+        query = """
+            WITH recent_observations AS (
+                SELECT DISTINCT ON (m.station_id)
+                    m.station_id,
+                    ST_Y(m.location) as latitude,
+                    ST_X(m.location) as longitude,
+                    m.observation_time,
+                    m.temp_c,
+                    m.dewpoint_c,
+                    m.wind_dir,
+                    m.wind_speed_kts,
+                    m.wind_gust_kts,
+                    m.altimeter_hg,
+                    m.visibility_sm,
+                    m.present_weather,
+                    m.sky_conditions,
+                    m.flight_category,
+                    m.raw_text,
+                    m.is_speci,
+                    a.name as airport_name,
+                    a.iso_region as municipality,
+                    a.is_military,
+                    CASE 
+                        WHEN a.is_major_hub THEN 'large_airport'
+                        WHEN a.longest_runway_ft >= 8000 THEN 'medium_airport'
+                        ELSE 'small_airport'
+                    END as airport_type
+                FROM observations.metar m
+                LEFT JOIN observations.airports a ON m.station_id = a.station_id
+                WHERE ST_Y(m.location) BETWEEN %s AND %s
+                  AND ST_X(m.location) BETWEEN %s AND %s
+                  AND m.observation_time >= NOW() - INTERVAL '2 hours'
+                ORDER BY m.station_id, m.observation_time DESC
             )
-            SELECT * FROM latest
-            ORDER BY station_id
+            SELECT 
+                station_id,
+                latitude,
+                longitude,
+                observation_time,
+                temp_c,
+                dewpoint_c,
+                wind_dir,
+                wind_speed_kts,
+                wind_gust_kts,
+                altimeter_hg,
+                visibility_sm,
+                present_weather,
+                sky_conditions,
+                flight_category,
+                raw_text,
+                is_speci,
+                airport_name,
+                municipality,
+                is_military,
+                airport_type
+            FROM recent_observations
+            ORDER BY observation_time DESC
             LIMIT %s
-        """, (f'{query}%', limit))
+        """
+        
+        cur.execute(query, (south, north, west, east, limit))
+        rows = cur.fetchall()
+        
+        metars = []
+        for row in rows:
+            # Parse present weather JSON if it exists
+            present_weather = []
+            if row[11]:  # present_weather column
+                try:
+                    present_weather = json.loads(row[11]) if isinstance(row[11], str) else row[11]
+                    if not isinstance(present_weather, list):
+                        present_weather = []
+                except (json.JSONDecodeError, TypeError):
+                    present_weather = []
+            
+            # Parse sky conditions JSON if it exists  
+            sky_conditions = []
+            if row[12]:  # sky_conditions column
+                try:
+                    sky_conditions = json.loads(row[12]) if isinstance(row[12], str) else row[12]
+                    if not isinstance(sky_conditions, list):
+                        sky_conditions = []
+                except (json.JSONDecodeError, TypeError):
+                    sky_conditions = []
+                    
+            # METAR data structure
+            metar_data = {
+                'station_id': row[0],
+                'latitude': float(row[1]) if row[1] is not None else None,
+                'longitude': float(row[2]) if row[2] is not None else None,
+                'observation_time': row[3].isoformat() if row[3] else None,
+                'temp_c': float(row[4]) if row[4] is not None else None,
+                'dewpoint_c': float(row[5]) if row[5] is not None else None,
+                'wind_dir': int(row[6]) if row[6] is not None else None,
+                'wind_speed_kts': int(row[7]) if row[7] is not None else None,
+                'wind_gust_kts': int(row[8]) if row[8] is not None else None,
+                'altimeter_hg': float(row[9]) if row[9] is not None else None,
+                'visibility_sm': float(row[10]) if row[10] is not None else None,
+                'present_weather': present_weather,
+                'sky_conditions': sky_conditions,
+                'flight_category': row[13],
+                'raw_text': row[14],
+                'is_speci': row[15] if row[15] is not None else False,
+                'airport_name': row[16],
+                'municipality': row[17],
+                'is_military': row[18] if row[18] is not None else False,
+                'airport_type': row[19]
+            }
+            
+            metars.append(metar_data)
+        
+        cur.close()
+        conn.close()
+        
+        # Get latest observation time for reference
+        latest_obs = None
+        if metars:
+            latest_obs = max(m['observation_time'] for m in metars if m['observation_time'])
+            if isinstance(latest_obs, str):
+                latest_obs = datetime.fromisoformat(latest_obs.replace('Z', '+00:00'))
+        
+        return jsonify({
+            'metars': metars,
+            'latest_observation': latest_obs.isoformat() if latest_obs else None,
+            'count': len(metars),
+            'bounds': {
+                'west': west,
+                'south': south, 
+                'east': east,
+                'north': north
+            },
+            'query_time': datetime.utcnow().isoformat()
+        })
+        
+    except Exception as e:
+        import traceback
+        error_details = {
+            'error': str(e),
+            'type': type(e).__name__,
+            'traceback': traceback.format_exc()
+        }
+        return jsonify(error_details), 500
+
+@weather_api.route('/stations', methods=['GET'])
+def get_stations():
+    """Get airport information"""
+    try:
+        bounds_param = request.args.get('bounds', '')
+        if not bounds_param:
+            return jsonify({'error': 'bounds parameter required'}), 400
+            
+        try:
+            bounds = list(map(float, bounds_param.split(',')))
+            if len(bounds) != 4:
+                raise ValueError()
+            west, south, east, north = bounds
+        except (ValueError, TypeError):
+            return jsonify({'error': 'Invalid bounds format. Expected: west,south,east,north'}), 400
+
+        conn = get_connection()
+        cur = conn.cursor()
+        
+        cur.execute("""
+            SELECT station_id, name, iso_region as municipality, 
+                   ST_Y(location) as latitude, ST_X(location) as longitude,
+                   elevation_ft, is_military, 
+                   CASE 
+                       WHEN is_major_hub THEN 'large_airport'
+                       WHEN longest_runway_ft >= 8000 THEN 'medium_airport'
+                       ELSE 'small_airport'
+                   END as airport_type,
+                   has_paved_runway, longest_runway_ft
+            FROM observations.airports
+            WHERE ST_Y(location) BETWEEN %s AND %s
+              AND ST_X(location) BETWEEN %s AND %s
+              AND has_paved_runway = true
+              AND longest_runway_ft >= 2500
+            ORDER BY is_military DESC, longest_runway_ft DESC, station_id
+        """, (south, north, west, east))
         
         stations = []
         for row in cur.fetchall():
             stations.append({
                 'station_id': row[0],
-                'last_observation': row[1].isoformat() if row[1] else None,
-                'flight_category': row[2],
-                'longitude': row[3],
-                'latitude': row[4]
+                'name': row[1],
+                'municipality': row[2], 
+                'latitude': float(row[3]) if row[3] else None,
+                'longitude': float(row[4]) if row[4] else None,
+                'elevation_ft': row[5],
+                'is_military': row[6] if row[6] is not None else False,
+                'airport_type': row[7],
+                'has_paved_runway': row[8] if row[8] is not None else False,
+                'longest_runway_ft': row[9]
             })
         
         cur.close()
         conn.close()
         
         return jsonify({
-            'query': query,
-            'count': len(stations),
-            'stations': stations
+            'stations': stations,
+            'count': len(stations)
         })
-    
+        
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-
-@weather_api.route('/stats')
-def get_stats():
-    """
-    Get database statistics
-    """
+@weather_api.route('/wind-constraints', methods=['GET'])
+def get_wind_constraints():
+    """Get wind constraint analysis for airports"""
     try:
+        bounds_param = request.args.get('bounds', '')
+        if not bounds_param:
+            return jsonify({'error': 'bounds parameter required'}), 400
+
+        try:
+            bounds = list(map(float, bounds_param.split(',')))
+            if len(bounds) != 4:
+                raise ValueError()
+            west, south, east, north = bounds
+        except (ValueError, TypeError):
+            return jsonify({'error': 'Invalid bounds format'}), 400
+
         conn = get_connection()
         cur = conn.cursor()
         
-        # METAR stats
+        # Check if wind_constraints table exists, if not return empty result
         cur.execute("""
-            SELECT 
-                COUNT(*) as total,
-                COUNT(DISTINCT station_id) as stations,
-                MAX(observation_time) as latest,
-                COUNT(CASE WHEN flight_category = 'VFR' THEN 1 END) as vfr,
-                COUNT(CASE WHEN flight_category = 'MVFR' THEN 1 END) as mvfr,
-                COUNT(CASE WHEN flight_category = 'IFR' THEN 1 END) as ifr,
-                COUNT(CASE WHEN flight_category = 'LIFR' THEN 1 END) as lifr
-            FROM observations.metar
-            WHERE observation_time > NOW() - INTERVAL '2 hours'
+            SELECT EXISTS (
+                SELECT 1 FROM information_schema.tables 
+                WHERE table_schema = 'observations' 
+                  AND table_name = 'wind_constraints'
+            )
         """)
         
-        metar_row = cur.fetchone()
+        if not cur.fetchone()[0]:
+            return jsonify({'wind_constraints': [], 'count': 0, 'note': 'Wind constraints table not available'})
         
-        # TAF stats
         cur.execute("""
-            SELECT 
-                COUNT(*) as total,
-                COUNT(DISTINCT station_id) as stations,
-                MAX(issue_time) as latest
-            FROM observations.taf
-            WHERE valid_to > NOW()
-        """)
+            SELECT w.station_id, w.constraint_level, w.wind_speed_kts, 
+                   w.wind_dir, w.valid_time,
+                   a.name, ST_Y(a.location) as lat, ST_X(a.location) as lon
+            FROM observations.wind_constraints w
+            LEFT JOIN observations.airports a ON w.station_id = a.station_id
+            WHERE w.valid_time >= NOW() - INTERVAL '3 hours'
+              AND ST_Y(a.location) BETWEEN %s AND %s
+              AND ST_X(a.location) BETWEEN %s AND %s
+            ORDER BY w.station_id, w.valid_time DESC
+        """, (south, north, west, east))
         
-        taf_row = cur.fetchone()
-        
-        cur.close()
-        conn.close()
-        
-        return jsonify({
-            'metar': {
-                'total_recent': metar_row[0],
-                'stations': metar_row[1],
-                'latest': metar_row[2].isoformat() if metar_row[2] else None,
-                'by_category': {
-                    'VFR': metar_row[3],
-                    'MVFR': metar_row[4],
-                    'IFR': metar_row[5],
-                    'LIFR': metar_row[6]
-                }
-            },
-            'taf': {
-                'total_active': taf_row[0],
-                'stations': taf_row[1],
-                'latest': taf_row[2].isoformat() if taf_row[2] else None
-            },
-            'timestamp': datetime.utcnow().isoformat()
-        })
-    
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
-@weather_api.route('/tfr/active')
-def get_active_tfrs():
-    """
-    Get all active TFRs
-
-    Query parameters:
-    - bounds: Bounding box "west,south,east,north" (optional)
-    """
-    try:
-        bounds = request.args.get('bounds')
-
-        conn = get_connection()
-        cur = conn.cursor()
-
-        query = """
-            SELECT
-                tfr_number,
-                notam_id,
-                effective_start,
-                effective_end,
-                facility,
-                city,
-                state,
-                type,
-                ST_AsGeoJSON(geometry) as geometry,
-                lower_altitude_ft,
-                upper_altitude_ft,
-                raw_data
-            FROM observations.tfr
-            WHERE active = TRUE
-              AND effective_end > NOW()
-        """
-
-        params = []
-
-        # Add spatial filter if bounds provided
-        if bounds:
-            west, south, east, north = map(float, bounds.split(','))
-            query += """
-                AND ST_Intersects(
-                    geometry,
-                    ST_MakeEnvelope(%s, %s, %s, %s, 4326)
-                )
-            """
-            params.extend([west, south, east, north])
-
-        query += " ORDER BY effective_start DESC"
-
-        cur.execute(query, params)
-
-        tfrs = []
+        constraints = []
         for row in cur.fetchall():
-            tfrs.append({
-                'tfr_number': row[0],
-                'notam_id': row[1],
-                'effective_start': row[2].isoformat() if row[2] else None,
-                'effective_end': row[3].isoformat() if row[3] else None,
-                'facility': row[4],
-                'city': row[5],
-                'state': row[6],
-                'type': row[7],
-                'geometry': json.loads(row[8]) if row[8] else None,
-                'lower_altitude_ft': row[9],
-                'upper_altitude_ft': row[10],
-                'raw_data': row[11]
+            constraints.append({
+                'station_id': row[0],
+                'constraint_level': row[1],
+                'wind_speed_kts': row[2],
+                'wind_dir': row[3],
+                'valid_time': row[4].isoformat() if row[4] else None,
+                'airport_name': row[5],
+                'latitude': float(row[6]) if row[6] else None,
+                'longitude': float(row[7]) if row[7] else None
             })
-
+        
         cur.close()
         conn.close()
-
-        return jsonify({
-            'count': len(tfrs),
-            'tfrs': tfrs,
-            'timestamp': datetime.utcnow().isoformat()
-        })
-
+        
+        return jsonify({'wind_constraints': constraints, 'count': len(constraints)})
+        
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@weather_api.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint for weather API"""
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        
+        # Test METAR table
+        cur.execute("SELECT COUNT(*) FROM observations.metar WHERE observation_time >= NOW() - INTERVAL '1 hour'")
+        recent_metars = cur.fetchone()[0]
+        
+        # Test airports table  
+        cur.execute("SELECT COUNT(*) FROM observations.airports")
+        total_airports = cur.fetchone()[0]
+        
+        cur.close()
+        conn.close()
+        
+        return jsonify({
+            'status': 'healthy',
+            'database': 'connected',
+            'recent_metars': recent_metars,
+            'total_airports': total_airports,
+            'timestamp': datetime.utcnow().isoformat()
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'unhealthy', 
+            'error': str(e),
+            'timestamp': datetime.utcnow().isoformat()
+        }), 500
+
+# Backwards compatibility routes
+@weather_api.route('/metar', methods=['GET'])
+def get_metar_compat():
+    """Compatibility route for /metar (redirects to /metar/recent)"""
+    return get_recent_metar()
 

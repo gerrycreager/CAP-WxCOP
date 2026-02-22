@@ -1,0 +1,87 @@
+#!/bin/bash
+set -euo pipefail
+
+ROOT="/var/www/cap_winds_app/model_data"
+
+# Log file
+LOG="${ROOT}/fetch_models.log"
+mkdir -p "$ROOT"
+
+echo "==== $(date -u) UTC: Fetch models ====" >> "$LOG"
+
+# ---------------------------
+# HRRR (surface, f00–f12)
+# ---------------------------
+
+# Use UTC now minus ~2 hours to target the latest likely-available cycle
+# HRRR is typically available 1–2 hours after cycle time.[web:54][web:57]
+now_utc=$(date -u +%s)
+cycle_time=$(( now_utc - 2*3600 ))
+CYCLE_DATE=$(date -u -d "@${cycle_time}" +%Y%m%d)
+CYCLE_HOUR=$(date -u -d "@${cycle_time}" +%H)
+
+HRRR_DIR="${ROOT}/hrrr.${CYCLE_DATE}/${CYCLE_HOUR}z"
+mkdir -p "$HRRR_DIR"
+
+BASE_HRRR_URL="https://noaa-hrrr-bdp-pds.s3.amazonaws.com/hrrr.${CYCLE_DATE}/conus"
+
+echo "HRRR target cycle: ${CYCLE_DATE} ${CYCLE_HOUR}Z" >> "$LOG"
+
+for FH in $(seq -w 00 12); do
+  FILE_REMOTE="hrrr.t${CYCLE_HOUR}z.wrfsfcf${FH}.grib2"
+  URL="${BASE_HRRR_URL}/${FILE_REMOTE}"
+  DEST="${HRRR_DIR}/${FILE_REMOTE}"
+
+  if [ -s "$DEST" ]; then
+    echo "HRRR: already have ${DEST}" >> "$LOG"
+    continue
+  fi
+
+  echo "HRRR: downloading ${URL}" >> "$LOG"
+  curl -sS --fail --retry 3 -o "$DEST.part" "$URL" || {
+    echo "HRRR: FAILED ${URL}" >> "$LOG"
+    rm -f "$DEST.part"
+    continue
+  }
+  mv "$DEST.part" "$DEST"
+done
+
+# ---------------------------
+# GFS (0.25 deg, f000–f012 as example)
+# ---------------------------
+
+# GFS main cycles 00/06/12/18Z; data typically available 4–5+ hours after init.[web:60][web:70]
+# Round to nearest 6‑hour cycle and then subtract 6h as a safety margin.
+gfs_now=$now_utc
+gfs_time=$(( gfs_now - 6*3600 ))
+GFS_CYCLE_DATE=$(date -u -d "@${gfs_time}" +%Y%m%d)
+GFS_CYCLE_HOUR=$(date -u -d "@${gfs_time}" +%H)
+
+GFS_DIR="${ROOT}/gfs.${GFS_CYCLE_DATE}/${GFS_CYCLE_HOUR}z"
+mkdir -p "$GFS_DIR"
+
+BASE_GFS_URL="https://nomads.ncep.noaa.gov/pub/data/nccf/com/gfs/prod/gfs.${GFS_CYCLE_DATE}/${GFS_CYCLE_HOUR}"
+
+echo "GFS target cycle: ${GFS_CYCLE_DATE} ${GFS_CYCLE_HOUR}Z" >> "$LOG"
+
+for FH in $(seq -w 000 012); do
+  FILE_REMOTE="gfs.t${GFS_CYCLE_HOUR}z.pgrb2.0p25.f${FH}"
+  URL="${BASE_GFS_URL}/${FILE_REMOTE}"
+  DEST="${GFS_DIR}/${FILE_REMOTE}"
+
+  if [ -s "$DEST" ]; then
+    echo "GFS: already have ${DEST}" >> "$LOG"
+    continue
+  fi
+
+  echo "GFS: downloading ${URL}" >> "$LOG"
+  curl -sS --fail --retry 3 -o "$DEST.part" "$URL" || {
+    echo "GFS: FAILED ${URL}" >> "$LOG"
+    rm -f "$DEST.part"
+    continue
+  }
+  mv "$DEST.part" "$DEST"
+done
+
+echo "==== done ====" >> "$LOG"
+

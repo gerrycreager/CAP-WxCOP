@@ -1,0 +1,197 @@
+CAP WINDS OCONUS MIGRATION - DEPLOYMENT CHECKLIST
+==================================================
+
+This checklist covers migrating from downloaded HRRR data to LDM-provided
+HRRR + GFS data with full OCONUS support.
+
+FILES TO DEPLOY:
+================
+☐ pqact_ngrid.conf → /home/ldm/etc/pqact_ngrid.conf
+☐ pqact_conduit.conf → /home/ldm/etc/pqact_conduit.conf (test backslash syntax first!)
+☐ gfs_manager.py → /var/www/cap_winds_app/gfs_manager.py
+☐ states_service_updated.py → /var/www/cap_winds_app/states_service.py
+☐ test_wind_data.py → /home/ldm/test_wind_data.py (optional testing tool)
+
+STEP 1: BACKUP CURRENT FILES
+=============================
+☐ cd /var/www/cap_winds_app
+☐ cp states_service.py states_service.py.backup
+☐ cd /home/ldm/etc
+☐ cp pqact_ngrid.conf pqact_ngrid.conf.backup
+☐ cp pqact_conduit.conf pqact_conduit.conf.backup
+
+STEP 2: UPDATE LDM CONFIGURATION
+=================================
+☐ Deploy pqact_ngrid.conf:
+    cp pqact_ngrid.conf /home/ldm/etc/pqact_ngrid.conf
+    
+☐ Test backslash syntax in pqact_conduit.conf:
+    # If your LDM needs backslashes before strftime parens, use as-is
+    # If not, remove the backslashes before testing
+    
+☐ Deploy pqact_conduit.conf:
+    cp pqact_conduit.conf /home/ldm/etc/pqact_conduit.conf
+    
+☐ Verify pqact syntax:
+    ldmadmin pqactcheck /home/ldm/etc/pqact_ngrid.conf
+    ldmadmin pqactcheck /home/ldm/etc/pqact_conduit.conf
+    
+☐ Reload pqact:
+    ldmadmin pqactHUP
+    
+☐ Verify feeds are running:
+    ldmadmin watch
+    # Should see NGRID and CONDUIT products flowing
+
+STEP 3: DEPLOY PYTHON CODE
+===========================
+☐ Copy new modules:
+    cp gfs_manager.py /var/www/cap_winds_app/gfs_manager.py
+    cp states_service_updated.py /var/www/cap_winds_app/states_service.py
+    
+☐ Set ownership:
+    chown www-data:www-data /var/www/cap_winds_app/gfs_manager.py
+    chown www-data:www-data /var/www/cap_winds_app/states_service.py
+    
+☐ Set permissions:
+    chmod 644 /var/www/cap_winds_app/gfs_manager.py
+    chmod 644 /var/www/cap_winds_app/states_service.py
+
+STEP 4: CONFIGURE APACHE
+=========================
+☐ Edit /etc/apache2/envvars:
+    sudo nano /etc/apache2/envvars
+    
+☐ Add this line at the end:
+    export MODEL_ROOT="/LDM/models/hrrr"
+    
+☐ Save and exit
+
+☐ Restart Apache:
+    sudo systemctl restart apache2
+    
+☐ Check Apache status:
+    sudo systemctl status apache2
+    # Should show "active (running)"
+
+STEP 5: WAIT FOR DATA
+======================
+☐ Wait for HRRR cycle (runs hourly):
+    # HRRR files will appear in /LDM/models/hrrr/hrrr.YYYYMMDD/HHz/
+    
+☐ Wait for GFS cycle (runs every 6 hours at 00z, 06z, 12z, 18z):
+    # GFS files will appear in /LDM/models/gfs/0p25/YYYY/MM/DD/
+    
+☐ Monitor LDM logs:
+    tail -f /home/ldm/logs/ldmd.log
+    
+☐ Check for HRRR files (wait ~1 hour after deployment):
+    ls -lh /LDM/models/hrrr/hrrr.*/
+    
+☐ Check for GFS files (wait up to 6 hours after deployment):
+    ls -lh /LDM/models/gfs/0p25/2026/01/01/
+
+STEP 6: TEST DATA AVAILABILITY (Optional)
+==========================================
+☐ Run test script:
+    cd /home/ldm
+    python3 test_wind_data.py
+    
+☐ Should show:
+    ✓ HRRR data is available and ready for CONUS wind analysis
+    ✓ GFS data is available and ready for OCONUS wind analysis
+    ✓ ALL DATA SOURCES READY
+
+STEP 7: TEST CAP WINDS APPLICATION
+===================================
+☐ Test CONUS state (should use HRRR):
+    - Navigate to CAP Winds web interface
+    - Generate map for Colorado (CO)
+    - Check Apache error log: tail -f /var/log/apache2/error.log
+    - Should see: "[CAP_WINDS] Using HRRR data for CO (CONUS coverage)"
+    
+☐ Test Alaska (should use GFS):
+    - Generate map for Alaska (AK)
+    - Should see: "[CAP_WINDS] Using GFS data for AK (OCONUS: no HRRR coverage)"
+    
+☐ Test Hawaii (should use GFS):
+    - Generate map for Hawaii (HI)
+    - Should see: "[CAP_WINDS] Using GFS data for HI (OCONUS: no HRRR coverage)"
+    
+☐ Test Puerto Rico (should use GFS):
+    - Generate map for Puerto Rico (PR)
+    - Should see: "[CAP_WINDS] Using GFS data for PR (OCONUS: no HRRR coverage)"
+    
+☐ Test Guam (should use GFS with new PCR-GUAM region):
+    - Generate map for Guam (GU)
+    - Should see: "[CAP_WINDS] Using GFS data for GU (OCONUS: no HRRR coverage)"
+
+STEP 8: CLEAN UP OLD DATA (After confirming everything works)
+==============================================================
+☐ Remove old HRRR download directory:
+    rm -rf /var/www/cap_winds_app/model_data/hrrr.*
+    
+☐ Remove old unorganized LDM HRRR files:
+    rm -rf /LDM/models/hrrr/all/
+    
+☐ Disable/remove any HRRR download cron jobs or scripts
+
+TROUBLESHOOTING
+===============
+If HRRR data not appearing:
+  - Check NGRID feed: ldmadmin watch | grep NGRID
+  - Verify pqact_ngrid.conf pattern matches product IDs
+  - Check directory permissions: ls -ld /LDM/models/hrrr
+
+If GFS data not appearing:
+  - Check CONDUIT feed: ldmadmin watch | grep CONDUIT
+  - Verify pqact_conduit.conf strftime syntax (backslashes may vary)
+  - Check directory permissions: ls -ld /LDM/models/gfs
+
+If CAP Winds shows errors:
+  - Check import errors: grep "ImportError" /var/log/apache2/error.log
+  - Verify gfs_manager.py exists and has correct permissions
+  - Verify MODEL_ROOT is set: grep MODEL_ROOT /etc/apache2/envvars
+  - Check Apache was restarted: systemctl status apache2
+
+If maps show wrong data:
+  - Check log messages to verify correct data source (HRRR vs GFS)
+  - Verify file timestamps match recent model runs
+  - Check file completeness: forecast hours 0-12 should exist
+
+ROLLBACK PROCEDURE (If needed)
+===============================
+If you need to rollback to the old system:
+
+☐ Restore backups:
+    cp /var/www/cap_winds_app/states_service.py.backup \
+       /var/www/cap_winds_app/states_service.py
+    cp /home/ldm/etc/pqact_ngrid.conf.backup \
+       /home/ldm/etc/pqact_ngrid.conf
+    cp /home/ldm/etc/pqact_conduit.conf.backup \
+       /home/ldm/etc/pqact_conduit.conf
+       
+☐ Remove new files:
+    rm /var/www/cap_winds_app/gfs_manager.py
+    
+☐ Remove MODEL_ROOT from /etc/apache2/envvars
+    
+☐ Reload LDM:
+    ldmadmin pqactHUP
+    
+☐ Restart Apache:
+    systemctl restart apache2
+
+COMPLETION
+==========
+☐ All files deployed
+☐ LDM configuration updated and verified
+☐ Apache configured and restarted
+☐ HRRR data flowing for CONUS
+☐ GFS data flowing for OCONUS
+☐ Application tested for both CONUS and OCONUS states
+☐ Old data cleaned up
+☐ Backups retained for rollback if needed
+
+Congratulations! Your CAP Winds app now has full CONUS and OCONUS coverage
+using locally-provided LDM data instead of downloading from AWS.

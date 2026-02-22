@@ -76,6 +76,8 @@ def sync_all_active_stations_to_airports(cur):
     except Exception as e:
         print(f"Warning: Failed to sync all stations: {e}")
 
+kq_admin = Blueprint('kq_admin', __name__, url_prefix='/admin/kq-stations')
+
 @kq_admin.route('/')
 def list_stations():
     """List all KQ stations"""
@@ -284,14 +286,14 @@ def delete_station(station_id):
         # Remove from airports table first (to avoid foreign key issues)
         sync_station_to_airports(cur, station_id, 'delete')
         
+        # Delete from custom_stations
+        cur.execute("""
         # Clean up related wind forecast data
         cur.execute("""
             DELETE FROM observations.model_wind_forecasts 
             WHERE station_id = %s
         """, (station_id,))
-        
-        # Delete from custom_stations
-        cur.execute("""
+
             DELETE FROM observations.custom_stations
             WHERE station_id = %s
         """, (station_id,))

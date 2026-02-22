@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manual TAF Entry - KQ Stations</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; background: #1a1a2e; color: #e0e0e0; min-height: 100vh; }
+        
+        .header {
+            background: linear-gradient(135deg, #16213e, #0f3460);
+            padding: 15px 25px;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+        }
+        .header a {
+            background: linear-gradient(135deg, #3498db, #2980b9);
+            color: white;
+            padding: 8px 18px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 14px;
+        }
+        .header h1 {
+            font-size: 20px;
+            color: #e0e0e0;
+        }
+        .header p {
+            font-size: 13px;
+            color: #aaa;
+            margin-top: 2px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 30px auto;
+            padding: 0 20px;
+        }
+
+        .form-section {
+            background: #16213e;
+            border: 1px solid #2a3a5e;
+            border-radius: 8px;
+            padding: 25px;
+            margin-bottom: 20px;
+        }
+
+        .section-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: #7ecfff;
+            margin-bottom: 15px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #2a3a5e;
+        }
+
+        label {
+            display: block;
+            font-weight: 600;
+            color: #ccc;
+            margin-bottom: 8px;
+            font-size: 13px;
+        }
+
+        textarea {
+            width: 100%;
+            min-height: 150px;
+            background: #0f3460;
+            border: 1px solid #2a3a5e;
+            border-radius: 6px;
+            padding: 12px;
+            color: #e0e0e0;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            resize: vertical;
+            line-height: 1.4;
+        }
+        textarea:focus { outline: none; border-color: #3498db; }
+        textarea::placeholder { color: #666; }
+
+        .hint {
+            font-size: 11px;
+            color: #888;
+            margin-top: 6px;
+            line-height: 1.4;
+        }
+
+        .stations-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 12px;
+            margin-top: 15px;
+        }
+
+        .station-item {
+            background: #0f3460;
+            border: 1px solid #2a3a5e;
+            border-radius: 5px;
+            padding: 10px;
+            font-size: 12px;
+        }
+        .station-id { 
+            font-weight: 700; 
+            color: #7ecfff; 
+            font-family: 'Courier New', monospace;
+        }
+        .station-name { 
+            color: #aaa; 
+            margin-top: 3px;
+        }
+        .station-coords {
+            color: #666;
+            font-size: 10px;
+            margin-top: 3px;
+        }
+
+        .btn-row {
+            display: flex;
+            gap: 12px;
+            margin-top: 20px;
+        }
+        
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #27ae60, #229954);
+            color: white;
+            flex: 1;
+        }
+        .btn-primary:hover { background: linear-gradient(135deg, #229954, #1e8449); }
+        .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+        
+        .btn-secondary {
+            background: #0f3460;
+            color: #7ecfff;
+            border: 1px solid #2a3a5e;
+        }
+        .btn-secondary:hover { background: #1a4a80; }
+
+        #status {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 6px;
+            font-size: 14px;
+            display: none;
+        }
+        #status.success { background: #1a3a2a; border: 1px solid #27ae60; color: #7ecfff; }
+        #status.error   { background: #3a1a1a; border: 1px solid #c0392b; color: #ff8a8a; }
+        #status.info    { background: #0f3460; border: 1px solid #2a3a5e; color: #7ecfff; }
+
+        .taf-details {
+            background: rgba(0,0,0,0.3);
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 10px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+        }
+
+        .nav-links {
+            margin-top: 20px;
+            text-align: center;
+        }
+        .nav-links a {
+            color: #3498db;
+            text-decoration: none;
+            margin: 0 15px;
+            font-size: 13px;
+        }
+        .nav-links a:hover { color: #7ecfff; }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <a href="/">&#127968; Home</a>
+    <a href="/CAP_WxCOP/admin/kq-stations">KQ Stations</a>
+    <div>
+        <h1>Manual TAF Entry</h1>
+        <p>Enter TAFs for KQ stations not available via LDM</p>
+    </div>
+</div>
+
+<div class="container">
+    
+    <!-- TAF Entry Form -->
+    <div class="form-section">
+        <div class="section-title">Enter TAF Text</div>
+        
+        <form id="tafForm">
+            <label for="tafText">TAF Raw Text:</label>
+            <textarea id="tafText" name="taf_text" placeholder="TAF KQXY 171200Z 171212/181212 12008KT 9999 FEW120 
+TEMPO 171214/171218 12015G25KT 
+FM171800 09012KT 9999 SCT080 
+TEMPO 172022/180200 4000 RA BKN020
+FM180200 27008KT 9999 FEW080
+RMK NXT FCST BY 172100Z="></textarea>
+            
+            <div class="hint">
+                <strong>Format:</strong> Paste the complete TAF text as received. System will automatically parse station ID, issue time, and validity periods.<br>
+                <strong>Supported:</strong> Standard TAF, TAF AMD (amended), TAF COR (corrected)<br>
+                <strong>Requirements:</strong> Station must exist in KQ Station database first
+            </div>
+            
+            <div class="btn-row">
+                <button type="submit" class="btn btn-primary" id="submitBtn">
+                    &#8593; Submit TAF
+                </button>
+                <button type="button" class="btn btn-secondary" onclick="clearForm()">
+                    Clear Form
+                </button>
+            </div>
+        </form>
+        
+        <div id="status"></div>
+    </div>
+
+    <!-- Available KQ Stations -->
+    <div class="form-section">
+        <div class="section-title">Available KQ Stations ({{ kq_stations|length }})</div>
+        
+        {% if kq_stations %}
+        <div class="stations-list">
+            {% for station in kq_stations %}
+            <div class="station-item">
+                <div class="station-id">{{ station[0] }}</div>
+                <div class="station-name">{{ station[1] or 'Unnamed' }}</div>
+                <div class="station-coords">{{ "%.4f, %.4f"|format(station[2], station[3]) }}</div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p style="color: #888; font-style: italic;">
+            No KQ stations found in database. 
+            <a href="/CAP_WxCOP/admin/kq-stations" style="color: #3498db;">Add KQ stations first</a>.
+        </p>
+        {% endif %}
+    </div>
+
+    <div class="nav-links">
+        <a href="/CAP_WxCOP/admin/kq-stations">Manage KQ Stations</a>
+        <a href="/CAP_WxCOP/admin/manual-taf/recent">Recent Manual TAFs</a>
+        <a href="/cap_winds_app/incident-archive">Incident Archive</a>
+    </div>
+
+</div>
+
+<script>
+    document.getElementById('tafForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        const statusEl = document.getElementById('status');
+        const submitBtn = document.getElementById('submitBtn');
+        const tafText = document.getElementById('tafText').value.trim();
+        
+        if (!tafText) {
+            showStatus('error', 'TAF text is required');
+            return;
+        }
+        
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Submitting...';
+        showStatus('info', 'Parsing and saving TAF...');
+        
+        try {
+            const response = await fetch('/CAP_WxCOP/admin/manual-taf/submit', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: new URLSearchParams({ taf_text: tafText })
+            });
+            
+            const result = await response.json();
+            
+            if (response.ok && result.success) {
+                showStatus('success', result.message);
+                
+                if (result.details) {
+                    const details = `
+                        <div class="taf-details">
+                            <strong>${result.details.station_id}</strong> - ${result.details.station_name}<br>
+                            Issue: ${result.details.issue_time}<br>
+                            Valid: ${result.details.valid_from} - ${result.details.valid_to}
+                        </div>
+                    `;
+                    statusEl.innerHTML += details;
+                }
+                
+                // Clear form after success
+                setTimeout(() => {
+                    clearForm();
+                    hideStatus();
+                }, 3000);
+                
+            } else {
+                showStatus('error', result.error || 'Unknown error occurred');
+                
+                if (result.redirect) {
+                    setTimeout(() => {
+                        window.location.href = result.redirect;
+                    }, 2000);
+                }
+            }
+            
+        } catch (error) {
+            showStatus('error', 'Network error: ' + error.message);
+        } finally {
+            submitBtn.disabled = false;
+            submitBtn.textContent = '↑ Submit TAF';
+        }
+    });
+    
+    function showStatus(type, message) {
+        const statusEl = document.getElementById('status');
+        statusEl.className = type;
+        statusEl.innerHTML = message;
+        statusEl.style.display = 'block';
+    }
+    
+    function hideStatus() {
+        document.getElementById('status').style.display = 'none';
+    }
+    
+    function clearForm() {
+        document.getElementById('tafText').value = '';
+        hideStatus();
+    }
+</script>
+
+</body>
+</html>
+

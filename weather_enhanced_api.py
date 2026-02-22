@@ -1,0 +1,381 @@
+"""
+Enhanced Weather API - New Separate File
+Creates /api/weather-enhanced endpoints with military prioritization
+Keeps original weather_api.py completely intact
+"""
+
+import sys
+import json
+sys.path.insert(0, '/var/www/cap_winds_app')
+from db_config import get_connection
+from datetime import datetime, timedelta
+from flask import Blueprint, jsonify, request
+
+# New blueprint with different name to avoid conflicts
+weather_enhanced_api = Blueprint('weather_enhanced_api', __name__, url_prefix='/api/weather-enhanced')
+
+def calculate_distance(lat1, lon1, lat2, lon2):
+    """Calculate distance in nautical miles using Haversine formula"""
+    from math import radians, cos, sin, asin, sqrt
+    
+    lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+    c = 2 * asin(sqrt(a))
+    r_nm = 3440.065  # Earth radius in nautical miles
+    return c * r_nm
+
+@weather_enhanced_api.route('/metar/recent', methods=['GET'])
+def get_recent_metar_enhanced():
+    """
+    Enhanced METAR endpoint with military prioritization and increased station limit
+    URL: /api/weather-enhanced/metar/recent
+    Prioritizes: Military -> Major -> Regional -> Small airports
+    Default limit increased to 2500 stations
+    """
+    try:
+        # Get bounding box parameters
+        bounds_param = request.args.get('bounds', '')
+        limit = int(request.args.get('limit', 2500))  # Increased from 500 to 2500
+        
+        if not bounds_param:
+            return jsonify({'error': 'bounds parameter required'}), 400
+            
+        try:
+            bounds = list(map(float, bounds_param.split(',')))
+            if len(bounds) != 4:
+                raise ValueError()
+            west, south, east, north = bounds
+        except (ValueError, TypeError):
+            return jsonify({'error': 'Invalid bounds format. Expected: west,south,east,north'}), 400
+        
+        # Validate bounds
+        if not (-180 <= west <= 180 and -180 <= east <= 180 and 
+                -90 <= south <= 90 and -90 <= north <= 90):
+            return jsonify({'error': 'Bounds out of valid range'}), 400
+            
+        if west >= east or south >= north:
+            return jsonify({'error': 'Invalid bounds: west >= east or south >= north'}), 400
+
+        conn = get_connection()
+        cur = conn.cursor()
+        
+        # Enhanced query with military prioritization
+        query = """
+            WITH prioritized_stations AS (
+                SELECT DISTINCT ON (m.station_id)
+                    m.station_id,
+                    m.latitude,
+                    m.longitude,
+                    m.observation_time,
+                    m.temp_c,
+                    m.dewpoint_c,
+                    m.wind_dir,
+                    m.wind_speed_kts,
+                    m.wind_gust_kts,
+                    m.altimeter_hg,
+                    m.visibility_sm,
+                    m.present_weather,
+                    m.sky_conditions,
+                    m.flight_category,
+                    m.raw_text,
+                    m.is_speci,
+                    -- Military prioritization logic
+                    CASE 
+                        WHEN a.is_military = true THEN 1
+                        WHEN a.airport_type = 'large_airport' THEN 2  
+                        WHEN a.airport_type = 'medium_airport' THEN 3
+                        WHEN a.airport_type = 'small_airport' THEN 4
+                        ELSE 5
+                    END as priority,
+                    a.name as airport_name,
+                    a.municipality,
+                    a.is_military,
+                    a.airport_type
+                FROM metar_observations m
+                LEFT JOIN airports a ON m.station_id = a.ident
+                WHERE m.latitude BETWEEN %s AND %s
+                  AND m.longitude BETWEEN %s AND %s
+                  AND m.observation_time >= NOW() - INTERVAL '2 hours'
+                ORDER BY m.station_id, m.observation_time DESC
+            )
+            SELECT 
+                station_id,
+                latitude,
+                longitude,
+                observation_time,
+                temp_c,
+                dewpoint_c,
+                wind_dir,
+                wind_speed_kts,
+                wind_gust_kts,
+                altimeter_hg,
+                visibility_sm,
+                present_weather,
+                sky_conditions,
+                flight_category,
+                raw_text,
+                is_speci,
+                airport_name,
+                municipality,
+                is_military,
+                airport_type,
+                priority
+            FROM prioritized_stations
+            ORDER BY 
+                priority ASC,                    -- Military first
+                is_military DESC NULLS LAST,     -- Military stations first
+                airport_type = 'large_airport' DESC,  -- Then large airports
+                airport_type = 'medium_airport' DESC, -- Then medium airports  
+                observation_time DESC           -- Most recent observations
+            LIMIT %s
+        """
+        
+        cur.execute(query, (south, north, west, east, limit))
+        rows = cur.fetchall()
+        
+        metars = []
+        for row in rows:
+            # Parse present weather JSON if it exists
+            present_weather = []
+            if row[11]:  # present_weather column
+                try:
+                    present_weather = json.loads(row[11]) if isinstance(row[11], str) else row[11]
+                    if not isinstance(present_weather, list):
+                        present_weather = []
+                except (json.JSONDecodeError, TypeError):
+                    present_weather = []
+            
+            # Parse sky conditions JSON if it exists  
+            sky_conditions = []
+            if row[12]:  # sky_conditions column
+                try:
+                    sky_conditions = json.loads(row[12]) if isinstance(row[12], str) else row[12]
+                    if not isinstance(sky_conditions, list):
+                        sky_conditions = []
+                except (json.JSONDecodeError, TypeError):
+                    sky_conditions = []
+                    
+            # Enhanced METAR data with labels and military status
+            metar_data = {
+                'station_id': row[0],
+                'latitude': float(row[1]) if row[1] is not None else None,
+                'longitude': float(row[2]) if row[2] is not None else None,
+                'observation_time': row[3].isoformat() if row[3] else None,
+                'temp_c': float(row[4]) if row[4] is not None else None,
+                'dewpoint_c': float(row[5]) if row[5] is not None else None,
+                'wind_dir': int(row[6]) if row[6] is not None else None,
+                'wind_speed_kts': int(row[7]) if row[7] is not None else None,
+                'wind_gust_kts': int(row[8]) if row[8] is not None else None,
+                'altimeter_hg': float(row[9]) if row[9] is not None else None,
+                'visibility_sm': float(row[10]) if row[10] is not None else None,
+                'present_weather': present_weather,
+                'sky_conditions': sky_conditions,
+                'flight_category': row[13],
+                'raw_text': row[14],
+                'is_speci': row[15] if row[15] is not None else False,
+                
+                # Enhanced labeling information
+                'airport_name': row[16],
+                'municipality': row[17],
+                'is_military': row[18] if row[18] is not None else False,
+                'airport_type': row[19],
+                'priority': row[20],
+                
+                # Display label for map
+                'display_label': row[0] + (' (MIL)' if row[18] else ''),
+                'label_priority': 'military' if row[18] else 'civilian'
+            }
+            
+            metars.append(metar_data)
+        
+        cur.close()
+        conn.close()
+        
+        # Get latest model run time for reference
+        latest_run = None
+        if metars:
+            latest_run = max(m['observation_time'] for m in metars if m['observation_time'])
+            if isinstance(latest_run, str):
+                latest_run = datetime.fromisoformat(latest_run.replace('Z', '+00:00'))
+        
+        return jsonify({
+            'metars': metars,
+            'model_run': latest_run.isoformat() if latest_run else None,
+            'count': len(metars),
+            'bounds': {
+                'west': west,
+                'south': south, 
+                'east': east,
+                'north': north
+            },
+            'limit_applied': limit,
+            'military_count': len([m for m in metars if m['is_military']]),
+            'station_types': {
+                'military': len([m for m in metars if m['is_military']]),
+                'large_airport': len([m for m in metars if m['airport_type'] == 'large_airport']),
+                'medium_airport': len([m for m in metars if m['airport_type'] == 'medium_airport']),
+                'small_airport': len([m for m in metars if m['airport_type'] == 'small_airport'])
+            }
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@weather_enhanced_api.route('/stations/priorities', methods=['GET'])
+def get_station_priorities():
+    """Get station priority information for enhanced map display"""
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        
+        # Get comprehensive station priority data
+        query = """
+            SELECT 
+                a.ident,
+                a.name,
+                a.municipality,
+                a.latitude_deg,
+                a.longitude_deg,
+                a.is_military,
+                a.airport_type,
+                CASE 
+                    WHEN a.is_military = true THEN 1
+                    WHEN a.airport_type = 'large_airport' THEN 2  
+                    WHEN a.airport_type = 'medium_airport' THEN 3
+                    WHEN a.airport_type = 'small_airport' THEN 4
+                    ELSE 5
+                END as priority
+            FROM airports a
+            WHERE a.ident IS NOT NULL
+              AND a.latitude_deg IS NOT NULL
+              AND a.longitude_deg IS NOT NULL
+              AND LENGTH(a.ident) BETWEEN 3 AND 6
+            ORDER BY priority ASC, a.is_military DESC NULLS LAST
+        """
+        
+        cur.execute(query)
+        rows = cur.fetchall()
+        
+        stations = []
+        for row in rows:
+            stations.append({
+                'station_id': row[0],
+                'name': row[1],
+                'municipality': row[2],
+                'latitude': float(row[3]) if row[3] is not None else None,
+                'longitude': float(row[4]) if row[4] is not None else None,
+                'is_military': row[5] if row[5] is not None else False,
+                'airport_type': row[6],
+                'priority': row[7],
+                'display_label': row[0] + (' (MIL)' if row[5] else ''),
+                'label_class': 'military' if row[5] else 'civilian'
+            })
+        
+        cur.close()
+        conn.close()
+        
+        return jsonify({
+            'stations': stations,
+            'count': len(stations),
+            'priority_counts': {
+                'military': len([s for s in stations if s['is_military']]),
+                'large_airport': len([s for s in stations if s['airport_type'] == 'large_airport']),
+                'medium_airport': len([s for s in stations if s['airport_type'] == 'medium_airport']),
+                'small_airport': len([s for s in stations if s['airport_type'] == 'small_airport'])
+            }
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# Reuse existing TFR/NDA endpoints from original weather_api if they exist
+# or create new enhanced versions here
+
+@weather_enhanced_api.route('/nda/active', methods=['GET'])
+def get_active_nda():
+    """Get active National Defense Airspace areas for enhanced map"""
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        
+        cur.execute("""
+            SELECT global_id, name, city, state, type_code, local_type,
+                   wkhr_code, wkhr_rmk, ST_AsGeoJSON(geometry) as geometry
+            FROM observations.national_defense_airspace 
+            WHERE active = TRUE 
+            ORDER BY state, name
+        """)
+        
+        nda_areas = []
+        for row in cur.fetchall():
+            nda_areas.append({
+                'id': row[0],
+                'name': row[1], 
+                'city': row[2],
+                'state': row[3],
+                'type_code': row[4],
+                'local_type': row[5],
+                'work_hours_code': row[6],
+                'work_hours_remark': row[7],
+                'geometry': json.loads(row[8]) if row[8] else None
+            })
+        
+        cur.close()
+        conn.close()
+        
+        return jsonify({
+            'nda_areas': nda_areas,
+            'count': len(nda_areas),
+            'generated_at': datetime.utcnow().isoformat() + 'Z',
+            'source': 'FAA/ESRI National Defense Airspace',
+            'note': 'For situational awareness only - not for official flight planning'
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@weather_enhanced_api.route('/stadium-tfrs', methods=['GET']) 
+def get_stadium_tfrs():
+    """Get Stadium TFR locations for enhanced mission planning"""
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        
+        cur.execute("""
+            SELECT global_id, name, city, state, status_code,
+                   latitude, longitude, ST_AsGeoJSON(geometry) as geometry,
+                   ST_AsGeoJSON(buffer_3nm) as buffer_3nm_geom
+            FROM observations.stadium_tfrs 
+            WHERE active = TRUE 
+            ORDER BY state, name
+        """)
+        
+        stadiums = []
+        for row in cur.fetchall():
+            stadiums.append({
+                'id': row[0],
+                'name': row[1], 
+                'city': row[2],
+                'state': row[3],
+                'status': row[4],
+                'latitude': float(row[5]) if row[5] else None,
+                'longitude': float(row[6]) if row[6] else None,
+                'geometry': json.loads(row[7]) if row[7] else None,
+                'tfr_area': json.loads(row[8]) if row[8] else None  # 3NM buffer for display
+            })
+        
+        cur.close()
+        conn.close()
+        
+        return jsonify({
+            'stadium_tfrs': stadiums,
+            'count': len(stadiums),
+            'generated_at': datetime.utcnow().isoformat() + 'Z',
+            'note': 'Stadium locations where TFRs may be activated during events - for situational awareness only'
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+

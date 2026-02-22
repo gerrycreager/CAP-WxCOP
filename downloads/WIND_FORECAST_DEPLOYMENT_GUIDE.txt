@@ -1,0 +1,411 @@
+WIND FORECAST SYSTEM - COMPLETE DEPLOYMENT GUIDE
+================================================
+
+This system provides 12-hour wind forecasts from TWO sources:
+1. HRRR/GFS model forecasts (numerical weather models)
+2. TAF forecasts (terminal aerodrome forecasts)
+
+You can generate forecast maps showing expected winds for the next 12 hours
+from either source, allowing comparison between model and TAF forecasts.
+
+
+OVERVIEW OF COMPONENTS
+======================
+
+Database:
+  - observations.model_wind_forecasts (HRRR/GFS forecasts by hour)
+  - observations.taf_wind_forecasts (TAF forecast periods)
+  - observations.wind_forecast_snapshots (pre-computed snapshots)
+
+Ingest Scripts:
+  - ingest_model_winds.py (extracts winds from GRIB files)
+  - populate_taf_winds.py (parses winds from TAFs)
+
+Visualization:
+  - Generate maps showing forecast winds (next step)
+  - Compare model vs TAF forecasts
+  - Show worst-case 12-hour max winds
+
+
+DEPLOYMENT STEPS
+================
+
+STEP 1: Create Database Schema
+-------------------------------
+cd /var/www/cap_winds_app
+
+# Run SQL to create tables
+sudo -u postgres psql -d avwx_data -f wind_forecast_schema.sql
+
+# Verify tables exist
+sudo -u postgres psql -d avwx_data -c "\dt observations.*wind*"
+
+Expected output:
+                       List of relations
+    Schema     |         Name              | Type  |  Owner
+  -------------+---------------------------+-------+----------
+   observations| model_wind_forecasts      | table | postgres
+   observations| taf_wind_forecasts        | table | postgres
+   observations| wind_forecast_snapshots   | table | postgres
+
+
+STEP 2: Deploy Ingest Scripts
+------------------------------
+# Copy scripts
+cp ingest_model_winds.py /var/www/cap_winds_app/scripts/
+cp populate_taf_winds.py /var/www/cap_winds_app/scripts/
+
+# Make executable
+chmod +x /var/www/cap_winds_app/scripts/ingest_model_winds.py
+chmod +x /var/www/cap_winds_app/scripts/populate_taf_winds.py
+chown www-data:www-data /var/www/cap_winds_app/scripts/*.py
+
+# Install dependencies
+pip install pygrib psycopg2-binary --break-system-packages
+
+
+STEP 3: Test Model Wind Ingest
+-------------------------------
+# Test HRRR ingest
+sudo -u www-data /var/www/cap_winds_app/scripts/ingest_model_winds.py --model HRRR --hours 12
+
+# Check results
+sudo -u postgres psql -d avwx_data -c "
+SELECT 
+    model_name, 
+    model_run, 
+    COUNT(*) as forecast_count,
+    COUNT(DISTINCT station_id) as airport_count,
+    MIN(valid_time) as first_fcst,
+    MAX(valid_time) as last_fcst
+FROM observations.model_wind_forecasts
+GROUP BY model_name, model_run
+ORDER BY model_run DESC
+LIMIT 5;
+"
+
+Expected: ~15,000-20,000 forecasts per model run (13 hours × ~1,500 airports)
+
+
+STEP 4: Test TAF Wind Parsing
+------------------------------
+# First make sure TAFs are in database
+sudo -u postgres psql -d avwx_data -c "SELECT COUNT(*) FROM observations.taf;"
+
+# Parse TAF winds
+sudo -u www-data /var/www/cap_winds_app/scripts/populate_taf_winds.py --recent 6
+
+# Check results
+sudo -u postgres psql -d avwx_data -c "
+SELECT 
+    COUNT(*) as total_periods,
+    COUNT(DISTINCT station_id) as airport_count,
+    MIN(valid_from) as earliest,
+    MAX(valid_to) as latest
+FROM observations.taf_wind_forecasts;
+"
+
+Expected: Varies widely, typically 1,000-3,000 forecast periods
+
+
+STEP 5: Set Up Cron Jobs
+-------------------------
+sudo crontab -u www-data -e
+
+Add these lines:
+
+# Model wind ingest - HRRR every hour, GFS every 6 hours
+15 * * * * /var/www/cap_winds_app/scripts/ingest_model_winds.py --model HRRR >> /var/log/model_winds.log 2>&1
+25 */6 * * * /var/www/cap_winds_app/scripts/ingest_model_winds.py --model GFS >> /var/log/model_winds.log 2>&1
+
+# TAF wind parsing - every hour after TAF ingest
+30 * * * * /var/www/cap_winds_app/scripts/populate_taf_winds.py --recent 2 >> /var/log/taf_winds.log 2>&1
+
+# METAR ingest (already configured)
+*/15 * * * * /var/www/cap_winds_app/scripts/ingest_metar.py --recent 20 >> /var/log/metar_ingest.log 2>&1
+
+# TAF ingest (already configured)
+5 * * * * /var/www/cap_winds_app/scripts/ingest_taf.py --recent 90 >> /var/log/taf_ingest.log 2>&1
+
+# Batch map generation - regions only, every hour
+5 * * * * /var/www/cap_winds_app/batch_generate_maps.py --regions-only >> /var/log/batch_maps.log 2>&1
+
+# Comprehensive batch - all maps, every 3 hours
+5 */3 * * * /var/www/cap_winds_app/batch_generate_all_maps.py --all >> /var/log/batch_maps_all.log 2>&1
+
+
+STEP 6: Create Log Files
+-------------------------
+sudo touch /var/log/model_winds.log
+sudo touch /var/log/taf_winds.log
+sudo chown www-data:www-data /var/log/model_winds.log
+sudo chown www-data:www-data /var/log/taf_winds.log
+
+
+STEP 7: Deploy New Flask App
+-----------------------------
+# Backup old app
+cp /var/www/cap_winds_app/app.py /var/www/cap_winds_app/app.py.old
+
+# Deploy new app with batch map checking
+cp app.py /var/www/cap_winds_app/app.py
+
+# Restart web server
+systemctl restart apache2
+
+
+STEP 8: Update HTML Dropdown (if needed)
+-----------------------------------------
+# Edit index.html to remove unsupported regions
+# See corrected_html_dropdown.html for exact replacement
+
+nano /var/www/cap_winds_app/templates/index.html
+
+# Replace lines 349-370 with corrected dropdown
+
+
+QUERYING THE DATA
+=================
+
+Get model forecast for specific airport:
+----------------------------------------
+sudo -u postgres psql -d avwx_data -c "
+SELECT * FROM get_current_model_winds('KDFW', 12);
+"
+
+Output shows hourly forecasts for next 12 hours
+
+
+Get TAF forecast for specific airport:
+---------------------------------------
+sudo -u postgres psql -d avwx_data -c "
+SELECT * FROM get_current_taf_winds('KDFW');
+"
+
+Output shows TAF forecast periods
+
+
+Get maximum winds in next 12 hours (model):
+--------------------------------------------
+sudo -u postgres psql -d avwx_data -c "
+SELECT * FROM get_max_forecast_winds('KDFW', 12, 'MODEL');
+"
+
+
+Get maximum winds in next 12 hours (TAF):
+------------------------------------------
+sudo -u postgres psql -d avwx_data -c "
+SELECT * FROM get_max_forecast_winds('KDFW', 12, 'TAF');
+"
+
+
+Find all airports with EXTREME winds forecast:
+-----------------------------------------------
+sudo -u postgres psql -d avwx_data -c "
+SELECT DISTINCT 
+    station_id, 
+    MAX(wind_speed_kts) as max_wind,
+    MAX(wind_gust_kts) as max_gust
+FROM observations.model_wind_forecasts
+WHERE wind_category = 'EXTREME'
+  AND valid_time BETWEEN NOW() AND NOW() + INTERVAL '12 hours'
+  AND model_run = (SELECT MAX(model_run) FROM observations.model_wind_forecasts)
+GROUP BY station_id
+ORDER BY max_wind DESC
+LIMIT 20;
+"
+
+
+Compare model vs TAF forecasts:
+--------------------------------
+sudo -u postgres psql -d avwx_data -c "
+SELECT 
+    m.station_id,
+    m.valid_time,
+    m.wind_speed_kts as model_wind,
+    t.wind_speed_kts as taf_wind,
+    ABS(m.wind_speed_kts - t.wind_speed_kts) as difference,
+    m.wind_category as model_category,
+    t.wind_category as taf_category
+FROM observations.model_wind_forecasts m
+JOIN observations.taf_wind_forecasts t 
+  ON m.station_id = t.station_id
+  AND m.valid_time BETWEEN t.valid_from AND t.valid_to
+WHERE m.valid_time > NOW()
+  AND m.model_run = (SELECT MAX(model_run) FROM observations.model_wind_forecasts)
+ORDER BY difference DESC
+LIMIT 20;
+"
+
+
+NEXT PHASE: FORECAST MAP GENERATION
+====================================
+
+Now that you have wind forecasts in PostGIS, you can:
+
+1. Generate forecast maps showing 12-hour maximum winds
+   - Model-based forecast map
+   - TAF-based forecast map
+   - Comparison/difference map
+
+2. Create time-series animations
+   - Show winds evolving over 12-hour period
+   - Identify trends (increasing/decreasing)
+
+3. Alert generation
+   - Airports forecast to exceed thresholds
+   - Email/SMS notifications
+   - Integration with CAP systems
+
+4. Web interface enhancements
+   - Display forecast alongside current conditions
+   - Show model vs TAF comparison
+   - Interactive timeline slider
+
+
+EXAMPLE: Generate Forecast Map
+-------------------------------
+You can now modify the batch generation script to create forecast maps:
+
+# Pseudo-code
+for each airport:
+    max_winds = get_max_forecast_winds(airport, 12, 'MODEL')
+    plot airport with color based on max_winds.wind_category
+    
+create_map(
+    title="12-Hour Maximum Wind Forecast (HRRR)",
+    data=airport_max_winds,
+    output="forecast_model_12hr.png"
+)
+
+
+MONITORING
+==========
+
+Check if ingest is working:
+----------------------------
+# Model winds
+tail -f /var/log/model_winds.log
+
+# TAF winds
+tail -f /var/log/taf_winds.log
+
+# Database record counts
+watch -n 60 'sudo -u postgres psql -d avwx_data -c "
+SELECT 
+    '\''model_winds'\'' as table, COUNT(*) 
+FROM observations.model_wind_forecasts
+WHERE model_run > NOW() - INTERVAL '\''6 hours'\''
+UNION ALL
+SELECT 
+    '\''taf_winds'\'', COUNT(*) 
+FROM observations.taf_wind_forecasts
+WHERE taf_issue_time > NOW() - INTERVAL '\''6 hours'\'';
+"'
+
+
+Data freshness check:
+---------------------
+sudo -u postgres psql -d avwx_data -c "
+SELECT 
+    'Latest model run' as metric,
+    MAX(model_run) as value
+FROM observations.model_wind_forecasts
+UNION ALL
+SELECT 
+    'Latest TAF parsed',
+    MAX(taf_issue_time)
+FROM observations.taf_wind_forecasts;
+"
+
+
+Storage usage:
+--------------
+sudo -u postgres psql -d avwx_data -c "
+SELECT 
+    schemaname,
+    tablename,
+    pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) AS size
+FROM pg_tables
+WHERE schemaname = 'observations'
+  AND tablename LIKE '%wind%'
+ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC;
+"
+
+
+TROUBLESHOOTING
+===============
+
+Issue: No model winds being ingested
+Solution:
+  - Check GRIB files exist: ls -lh /LDM/models/hrrr/hrrr.$(date -u +%Y%m%d)/*/
+  - Check pygrib installed: python3 -c "import pygrib; print('OK')"
+  - Run manually with verbose logging
+  - Check /var/log/model_winds.log for errors
+
+Issue: TAF parsing producing no results
+Solution:
+  - Check TAFs in database: SELECT COUNT(*) FROM observations.taf;
+  - Check raw TAF format: SELECT raw_text FROM observations.taf LIMIT 1;
+  - TAF parser is simplified - may need enhancement
+  - Check /var/log/taf_winds.log for errors
+
+Issue: Database getting too large
+Solution:
+  - Set up data retention (cleanup old forecasts)
+  - Keep model forecasts for 7 days
+  - Keep TAF forecasts for 7 days
+  - Add cleanup to cron
+
+
+DATA RETENTION
+==============
+
+Add to cleanup_old_data.sh:
+
+# Clean old model wind forecasts (keep 7 days)
+sudo -u postgres psql -d avwx_data -c "
+DELETE FROM observations.model_wind_forecasts
+WHERE model_run < NOW() - INTERVAL '7 days';
+"
+
+# Clean old TAF wind forecasts (keep 7 days)
+sudo -u postgres psql -d avwx_data -c "
+DELETE FROM observations.taf_wind_forecasts
+WHERE taf_issue_time < NOW() - INTERVAL '7 days';
+"
+
+# Vacuum
+sudo -u postgres psql -d avwx_data -c "VACUUM ANALYZE observations.model_wind_forecasts;"
+sudo -u postgres psql -d avwx_data -c "VACUUM ANALYZE observations.taf_wind_forecasts;"
+
+
+COMPLETE SYSTEM STATUS
+======================
+
+After full deployment, your system will have:
+
+Real-time observations:
+✓ METARs updating every 15 minutes
+✓ TAFs updating hourly
+✓ Current conditions in database
+
+Wind forecasts:
+✓ HRRR model forecasts (hourly updates, 0-12 hour forecasts)
+✓ GFS model forecasts (6-hourly updates, 0-12 hour forecasts)
+✓ TAF wind forecasts (hourly updates, parsed periods)
+✓ Maximum wind calculations for planning
+
+Map generation:
+✓ Current conditions maps (hourly, 13 regions)
+✓ Comprehensive maps (every 3 hours, 64 maps including states)
+✓ Forecast maps (ready to implement)
+
+Web interface:
+✓ Batch map serving (< 1 second for regions)
+✓ On-demand generation (1-3 min for states/radius)
+✓ API endpoints for status
+
+Total disk usage: ~1-2 GB for everything
+Total cron jobs: ~8 jobs
+System uptime: Fully automated, self-maintaining

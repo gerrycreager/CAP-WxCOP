@@ -1,0 +1,555 @@
+/**
+ * Enhanced Weather COP Map Styles
+ * File location: /var/www/cap_winds_app/static/css/enhanced_weather_map.css
+ * Features military prioritization, station labeling, and improved visual hierarchy
+ */
+
+/* ==== WEATHER MAP CONTROLS ==== */
+.weather-map-controls {
+    background: rgba(255, 255, 255, 0.95);
+    padding: 15px;
+    border-radius: 10px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+    max-width: 280px;
+    backdrop-filter: blur(5px);
+    border: 1px solid rgba(255,255,255,0.2);
+}
+
+.control-panel {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.control-panel h4 {
+    margin: 0 0 12px 0;
+    font-size: 16px;
+    font-weight: bold;
+    color: #1f2937;
+    border-bottom: 2px solid #3b82f6;
+    padding-bottom: 4px;
+}
+
+.control-panel label {
+    display: block;
+    margin: 10px 0;
+    font-size: 13px;
+    cursor: pointer;
+    color: #374151;
+    transition: color 0.2s;
+}
+
+.control-panel label:hover {
+    color: #1f2937;
+}
+
+.control-panel input[type="checkbox"] {
+    margin-right: 8px;
+    transform: scale(1.1);
+    accent-color: #3b82f6;
+}
+
+/* ==== STATION INFO PANEL ==== */
+.station-info {
+    margin: 15px 0;
+    padding: 10px;
+    background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+    border-radius: 6px;
+    font-size: 12px;
+    color: #475569;
+    border-left: 4px solid #3b82f6;
+}
+
+.station-info strong {
+    color: #1e293b;
+}
+
+/* ==== LEGEND STYLING ==== */
+.legend {
+    margin-top: 15px;
+    padding-top: 15px;
+    border-top: 1px solid #e5e7eb;
+}
+
+.legend h5 {
+    margin: 0 0 10px 0;
+    font-size: 13px;
+    font-weight: bold;
+    color: #374151;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    margin: 6px 0;
+    font-size: 12px;
+    color: #4b5563;
+    transition: all 0.2s;
+}
+
+.legend-item:hover {
+    color: #1f2937;
+    transform: translateX(2px);
+}
+
+.legend-color {
+    width: 16px;
+    height: 12px;
+    margin-right: 8px;
+    border-radius: 3px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    position: relative;
+    flex-shrink: 0;
+}
+
+.legend-color.military {
+    background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
+    border: 1px solid #7f1d1d;
+}
+
+.legend-color.military::after {
+    content: "★";
+    position: absolute;
+    color: white;
+    font-size: 8px;
+    left: 4px;
+    top: 1px;
+    text-shadow: 1px 1px 1px rgba(0,0,0,0.5);
+}
+
+.legend-color.major {
+    background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+    border: 1px solid #1e40af;
+}
+
+.legend-color.regional {
+    background: linear-gradient(135deg, #16a34a 0%, #15803d 100%);
+    border: 1px solid #166534;
+}
+
+.legend-color.small {
+    background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%);
+    border: 1px solid #374151;
+}
+
+/* ==== STATION MARKERS ==== */
+.weather-station-icon {
+    transition: all 0.3s ease;
+}
+
+.weather-station-icon:hover {
+    transform: scale(1.2);
+    z-index: 1000;
+}
+
+.military-station-marker {
+    width: 18px;
+    height: 18px;
+    border-radius: 4px;
+    background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
+    border: 2px solid #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    box-shadow: 0 2px 8px rgba(220, 38, 38, 0.4);
+    transition: all 0.3s ease;
+}
+
+.military-station-marker:hover {
+    transform: scale(1.15);
+    box-shadow: 0 4px 12px rgba(220, 38, 38, 0.6);
+}
+
+.military-star {
+    color: white;
+    font-size: 11px;
+    text-shadow: 1px 1px 2px rgba(0,0,0,0.7);
+    font-weight: bold;
+}
+
+.large-station-marker {
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    border: 2px solid #ffffff;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+    transition: all 0.3s ease;
+}
+
+.large-station-marker:hover {
+    transform: scale(1.1);
+    box-shadow: 0 4px 10px rgba(0,0,0,0.4);
+}
+
+.medium-station-marker {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 2px solid #ffffff;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.25);
+    transition: all 0.3s ease;
+}
+
+.medium-station-marker:hover {
+    transform: scale(1.1);
+    box-shadow: 0 3px 8px rgba(0,0,0,0.35);
+}
+
+.small-station-marker {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    border: 1px solid #ffffff;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+    transition: all 0.3s ease;
+}
+
+.small-station-marker:hover {
+    transform: scale(1.2);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+}
+
+/* ==== MILITARY HIGHLIGHTING ==== */
+.military-highlighted {
+    animation: military-pulse 2s infinite;
+    box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.7) !important;
+    z-index: 1000 !important;
+}
+
+@keyframes military-pulse {
+    0% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.7); }
+    70% { box-shadow: 0 0 0 8px rgba(220, 38, 38, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); }
+}
+
+/* ==== STATION LABELS ==== */
+.station-label {
+    background: rgba(255, 255, 255, 0.95);
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 4px;
+    padding: 3px 6px;
+    font-size: 10px;
+    font-weight: 600;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+    backdrop-filter: blur(3px);
+    white-space: nowrap;
+    transition: all 0.2s ease;
+    font-family: 'Courier New', monospace;
+}
+
+.station-label:hover {
+    transform: scale(1.05);
+    box-shadow: 0 3px 8px rgba(0,0,0,0.2);
+}
+
+.station-label.military {
+    background: linear-gradient(135deg, rgba(220, 38, 38, 0.95) 0%, rgba(153, 27, 27, 0.95) 100%);
+    color: white;
+    border-color: #7f1d1d;
+    text-shadow: 1px 1px 1px rgba(0,0,0,0.5);
+    font-weight: bold;
+}
+
+/* ==== POPUP STYLING ==== */
+.enhanced-weather-popup {
+    min-width: 320px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.station-header {
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid #e5e7eb;
+    position: relative;
+}
+
+.station-header.military {
+    border-bottom-color: #dc2626;
+}
+
+.station-header.military::after {
+    content: "MILITARY AIRFIELD";
+    position: absolute;
+    top: -4px;
+    right: 0;
+    background: #dc2626;
+    color: white;
+    font-size: 8px;
+    font-weight: bold;
+    padding: 2px 4px;
+    border-radius: 2px;
+    letter-spacing: 0.5px;
+}
+
+.station-header h3 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: bold;
+    color: #1f2937;
+}
+
+.airport-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: #4b5563;
+    margin-top: 2px;
+}
+
+.municipality {
+    font-size: 11px;
+    color: #6b7280;
+    margin-top: 1px;
+}
+
+/* ==== FLIGHT CATEGORIES ==== */
+.flight-category {
+    display: inline-block;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-weight: bold;
+    font-size: 12px;
+    margin-bottom: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.flight-category.vfr { 
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%); 
+    color: white; 
+    text-shadow: 1px 1px 1px rgba(0,0,0,0.3);
+}
+
+.flight-category.mvfr { 
+    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); 
+    color: white; 
+    text-shadow: 1px 1px 1px rgba(0,0,0,0.3);
+}
+
+.flight-category.ifr { 
+    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); 
+    color: white; 
+    text-shadow: 1px 1px 1px rgba(0,0,0,0.3);
+}
+
+.flight-category.lifr { 
+    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); 
+    color: white; 
+    text-shadow: 1px 1px 1px rgba(0,0,0,0.3);
+}
+
+.flight-category.unknown { 
+    background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%); 
+    color: white; 
+    text-shadow: 1px 1px 1px rgba(0,0,0,0.3);
+}
+
+/* ==== WEATHER DATA GRID ==== */
+.weather-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin: 12px 0;
+    padding: 12px;
+    background: #f8fafc;
+    border-radius: 6px;
+    border: 1px solid #e2e8f0;
+}
+
+.weather-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 0;
+}
+
+.weather-item .label {
+    font-weight: 600;
+    font-size: 11px;
+    color: #475569;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.weather-item .value {
+    font-size: 12px;
+    font-weight: bold;
+    color: #1e293b;
+    font-family: 'Courier New', monospace;
+}
+
+/* ==== OBSERVATION TIME ==== */
+.observation-time {
+    margin-top: 12px;
+    padding: 8px;
+    background: #f1f5f9;
+    border-radius: 4px;
+    font-size: 11px;
+    color: #64748b;
+    border-left: 3px solid #3b82f6;
+}
+
+.observation-time strong {
+    color: #334155;
+}
+
+/* ==== RAW METAR ==== */
+.raw-metar {
+    margin-top: 12px;
+}
+
+.raw-metar summary {
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    color: #475569;
+    padding: 6px;
+    background: #f1f5f9;
+    border-radius: 4px;
+    transition: background-color 0.2s;
+}
+
+.raw-metar summary:hover {
+    background: #e2e8f0;
+}
+
+.raw-metar code {
+    font-size: 10px;
+    background: #1e293b;
+    color: #e2e8f0;
+    padding: 8px;
+    border-radius: 4px;
+    display: block;
+    margin-top: 6px;
+    font-family: 'Courier New', monospace;
+    line-height: 1.4;
+    word-break: break-all;
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.1);
+}
+
+/* ==== TFR/NDA POPUPS ==== */
+.tfr-popup h4, .nda-popup h4 {
+    margin: 0 0 10px 0;
+    color: #dc2626;
+    font-size: 16px;
+    font-weight: bold;
+}
+
+.tfr-popup, .nda-popup {
+    font-size: 13px;
+    color: #374151;
+}
+
+.tfr-popup p, .nda-popup p {
+    margin: 6px 0;
+}
+
+.tfr-popup em, .nda-popup em {
+    color: #6b7280;
+    font-size: 11px;
+}
+
+/* ==== MILITARY POPUP ENHANCEMENT ==== */
+.military-popup .leaflet-popup-content-wrapper {
+    border: 3px solid #dc2626;
+    background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+}
+
+.military-popup .leaflet-popup-tip {
+    border-top-color: #dc2626;
+}
+
+/* ==== LEAFLET CONTROL CUSTOMIZATION ==== */
+.leaflet-control-layers {
+    box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(5px);
+}
+
+.leaflet-control-layers-expanded {
+    padding: 12px;
+}
+
+.leaflet-control-layers label {
+    font-size: 12px;
+    font-weight: 500;
+    color: #374151;
+}
+
+/* ==== RESPONSIVE DESIGN ==== */
+@media (max-width: 768px) {
+    .weather-map-controls {
+        max-width: 200px;
+        padding: 10px;
+    }
+    
+    .control-panel h4 {
+        font-size: 14px;
+    }
+    
+    .enhanced-weather-popup {
+        min-width: 280px;
+    }
+    
+    .weather-grid {
+        grid-template-columns: 1fr;
+        gap: 8px;
+    }
+    
+    .station-label {
+        font-size: 9px;
+        padding: 2px 4px;
+    }
+}
+
+/* ==== MAP LOADING INDICATOR ==== */
+.map-loading {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(255, 255, 255, 0.9);
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+    z-index: 1000;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.loading-spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid #e5e7eb;
+    border-top: 3px solid #3b82f6;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 10px;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* ==== PERFORMANCE OPTIMIZATIONS ==== */
+.leaflet-marker-icon,
+.leaflet-marker-shadow {
+    will-change: transform;
+}
+
+.weather-station-icon {
+    transform: translate3d(0, 0, 0);
+}
+
+/* ==== HIGH DPI SUPPORT ==== */
+@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+    .military-star {
+        font-size: 12px;
+    }
+    
+    .station-label {
+        font-size: 11px;
+    }
+}

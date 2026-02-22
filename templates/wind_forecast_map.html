@@ -171,6 +171,31 @@
             height: 15px;
             border: 1px solid #333;
         }
+
+.airport-label {
+    background: rgba(0, 0, 0, 0.7);
+    color: white;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 600;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    white-space: nowrap;
+    pointer-events: none;
+    text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.8);
+}
+.airport-label-military {
+    background: rgba(231, 76, 60, 0.85);
+    border-color: rgba(231, 76, 60, 1);
+}
+.airport-label-reporting {
+    background: rgba(39, 174, 96, 0.85);
+    border-color: rgba(39, 174, 96, 1);
+}
+.airport-label-basic {
+    background: rgba(52, 152, 219, 0.85);
+    border-color: rgba(52, 152, 219, 1);
+}
         
         .wind-marker {
             border-radius: 50%;
@@ -346,8 +371,9 @@
         
         <div class="label-toggle">
             <input type="checkbox" id="showHazards">
-            <label for="showHazards">☁️ Show AIRMETs/SIGMETs</label>
         </div>
+        
+        <div class="label-toggle">
         
         <div style="margin-left: auto; font-size: 0.85rem; color: #666;">
             <span id="airportCount">0 airports</span> | 
@@ -373,8 +399,50 @@
         let currentData = null;
         
         // Initialize map
+function toggleAirportLabels() {
+    labelsVisible = document.getElementById("showAirportIds").checked;
+    if (labelsVisible) {
+        updateAirportLabels();
+        map.addLayer(airportLabels);
+    } else {
+        map.removeLayer(airportLabels);
+    }
+}
+
+function updateAirportLabels() {
+    airportLabels.clearLayers();
+    if (!labelsVisible) return;
+    const zoom = map.getZoom();
+    const bounds = map.getBounds();
+    airports.forEach(airport => {
+        if (!bounds.contains([airport.lat, airport.lon])) return;
+        let show = false;
+        if (airport.type === "military") {
+            show = true;
+        } else if (airport.type === "reporting" && zoom >= 7) {
+            show = true;
+        } else if (airport.type === "basic" && zoom >= 9) {
+            show = true;
+        }
+        if (show) {
+            const labelClass = `airport-label airport-label-${airport.type}`;
+            const label = L.marker([airport.lat, airport.lon], {
+                icon: L.divIcon({
+                    className: labelClass,
+                    html: airport.icao || airport.station_id,
+                    iconSize: null,
+                    iconAnchor: [0, -10]
+                })
+            });
+            label.addTo(airportLabels);
+        }
+    });
+}
+
         function initMap() {
             map = L.map('map').setView([39.8, -98.6], 5);
+    map.on("zoomend", () => { if (labelsVisible) updateAirportLabels(); });
+    map.on("moveend", () => { if (labelsVisible) updateAirportLabels(); });
             
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 attribution: '© OpenStreetMap contributors',
@@ -589,7 +657,7 @@
 		const originalHTML = legend.innerHTML;
 		legend.innerHTML = '<div style="padding: 20px; text-align: center;"><div style="border: 3px solid #f3f3f3; border-top: 3px solid #667eea; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin: 0 auto;"></div><p style="margin-top: 10px; font-size: 0.9rem;">Loading hazards...</p></div>';
 
-                const response = await fetch('/cap_winds_app/api/hazards/weather-hazards');
+                const response = await fetch('/CAP_WxCOP/api/hazards/weather-hazards');
                 const geojson = await response.json();
 		// RESTORE original legend HTML
 		legend.innerHTML = originalHTML;
@@ -671,13 +739,13 @@
             let url;
             
             if (viewType === 'conus') {
-                url = '/cap_winds_app/api/wind-forecast/conus';
+                url = '/CAP_WxCOP/api/wind-forecast/conus';
             } else if (viewType === 'region') {
                 const region = document.getElementById('regionSelect').value;
-                url = `/cap_winds_app/api/wind-forecast/region/${region}`;
+                url = `/CAP_WxCOP/api/wind-forecast/region/${region}`;
             } else if (viewType === 'state') {
                 const state = document.getElementById('stateSelect').value;
-                url = `/cap_winds_app/api/wind-forecast/state/${state}`;
+                url = `/CAP_WxCOP/api/wind-forecast/state/${state}`;
             }
             
             document.getElementById('loading').style.display = 'block';

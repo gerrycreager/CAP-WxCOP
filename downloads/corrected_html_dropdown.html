@@ -1,0 +1,41 @@
+<!-- CORRECTED REGION DROPDOWN - Replace lines 349-370 in index.html -->
+<!-- This dropdown only includes the 13 regions that are actually implemented -->
+
+<div class="form-group hidden" id="region_group">
+    <label for="region_code">CAP Region</label>
+    <select id="region_code" name="region_code">
+        <optgroup label="Standard Regions">
+            <option value="NER">NER - Northeast</option>
+            <option value="GLR">GLR - Great Lakes</option>
+            <option value="NCR">NCR - North Central</option>
+            <option value="RMR">RMR - Rocky Mountain</option>
+            <option value="SWR">SWR - Southwest</option>
+        </optgroup>
+        <optgroup label="Southeast Region">
+            <option value="SER">SER - Southeast</option>
+            <option value="SER-CARIB">SER-CARIB - Southeast Caribbean</option>
+        </optgroup>
+        <optgroup label="Pacific Region">
+            <option value="PCR">PCR - Pacific</option>
+            <option value="PCR-WEST">PCR-WEST - Pacific West Coast</option>
+            <option value="PCR-HI">PCR-HI - Pacific Hawaii</option>
+            <option value="PCR-AK">PCR-AK - Pacific Alaska</option>
+            <option value="PCR-GUAM">PCR-GUAM - Pacific Guam</option>
+        </optgroup>
+    </select>
+</div>
+
+<!-- 
+REMOVED (Not implemented in states_service.py):
+- MAR - Mid-Atlantic
+- NCR-EAST, NCR-CENT, NCR-WEST (North Central sub-regions)
+- GLR-EAST, GLR-WEST (Great Lakes sub-regions)
+- SER-EAST, SER-WEST (Southeast sub-regions)
+- SER-CONUS (unclear if different from SER)
+
+WHAT'S INCLUDED (13 working regions):
+✓ NER, GLR, NCR, RMR, SWR (5 standard regions)
+✓ SER, SER-CARIB (2 Southeast regions)
+✓ PCR, PCR-WEST, PCR-HI, PCR-AK, PCR-GUAM (5 Pacific regions)
+✓ Plus CONUS (available via separate dropdown option)
+-->

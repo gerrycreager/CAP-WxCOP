@@ -1,0 +1,341 @@
+METAR/TAF INGEST AND MAINTENANCE SCRIPTS - DEPLOYMENT GUIDE
+===========================================================
+
+OVERVIEW
+========
+These scripts provide automated METAR/TAF data ingestion into PostGIS
+and system maintenance for the Aviation Weather System.
+
+SCRIPTS PROVIDED
+================
+1. ingest_metar.py    - Parse and ingest METAR/SPECI observations
+2. ingest_taf.py      - Parse and ingest TAF forecasts
+3. cleanup_old_data.sh - Remove old data (database, files, maps)
+4. system_status.sh   - Check system health and data status
+
+
+PREREQUISITES
+=============
+1. PostGIS database set up (run setup_postgis.sh first)
+2. Python dependencies installed:
+   pip install python-metar psycopg2-binary
+
+3. LDM feeds active:
+   - IDS|DDPLUS (METAR/TAF/SPECI)
+   - NGRID (HRRR)
+   - CONDUIT (GFS)
+
+
+DEPLOYMENT STEPS
+================
+
+Step 1: Install Scripts
+-----------------------
+# Create scripts directory
+mkdir -p /var/www/cap_winds_app/scripts
+
+# Copy all scripts
+cp ingest_metar.py /var/www/cap_winds_app/scripts/
+cp ingest_taf.py /var/www/cap_winds_app/scripts/
+cp cleanup_old_data.sh /var/www/cap_winds_app/scripts/
+cp system_status.sh /var/www/cap_winds_app/scripts/
+
+# Set permissions
+chmod +x /var/www/cap_winds_app/scripts/*.py
+chmod +x /var/www/cap_winds_app/scripts/*.sh
+chown -R www-data:www-data /var/www/cap_winds_app/scripts/
+
+
+Step 2: Install Python Dependencies
+------------------------------------
+cd /var/www/cap_winds_app
+source venv/bin/activate
+pip install python-metar psycopg2-binary
+pip freeze > requirements.txt
+
+
+Step 3: Test Scripts Manually
+------------------------------
+# Test METAR ingest (process today's data)
+sudo -u www-data /var/www/cap_winds_app/scripts/ingest_metar.py --today
+
+# Test TAF ingest (process today's data)
+sudo -u www-data /var/www/cap_winds_app/scripts/ingest_taf.py --today
+
+# Test cleanup (dry run - no changes)
+sudo /var/www/cap_winds_app/scripts/cleanup_old_data.sh --dry-run
+
+# Check system status
+sudo /var/www/cap_winds_app/scripts/system_status.sh
+
+
+Step 4: Set Up Cron Jobs
+-------------------------
+# Edit www-data crontab for ingest
+sudo crontab -u www-data -e
+
+Add these lines:
+
+# METAR/SPECI ingest - every 15 minutes
+*/15 * * * * /var/www/cap_winds_app/scripts/ingest_metar.py --recent 20 >> /var/log/metar_ingest.log 2>&1
+
+# TAF ingest - every hour
+0 * * * * /var/www/cap_winds_app/scripts/ingest_taf.py --recent 90 >> /var/log/taf_ingest.log 2>&1
+
+# Batch map generation - 5 minutes past each hour (already configured)
+5 * * * * /var/www/cap_winds_app/batch_generate_maps.py >> /var/log/batch_maps.log 2>&1
+
+
+# Edit root crontab for cleanup
+sudo crontab -e
+
+Add this line:
+
+# Daily cleanup at 3 AM
+0 3 * * * /var/www/cap_winds_app/scripts/cleanup_old_data.sh >> /var/log/cleanup.log 2>&1
+
+
+Step 5: Monitor Initial Runs
+-----------------------------
+# Watch METAR ingest (wait 15 minutes for first cron run)
+tail -f /var/log/metar_ingest.log
+
+# Watch TAF ingest (wait for top of hour)
+tail -f /var/log/taf_ingest.log
+
+# Check database has data
+sudo -u postgres psql -d avwx_data -c "SELECT COUNT(*) FROM observations.metar;"
+sudo -u postgres psql -d avwx_data -c "SELECT COUNT(*) FROM observations.taf;"
+
+
+SCRIPT USAGE DETAILS
+====================
+
+ingest_metar.py
+---------------
+Purpose: Parse METAR/SPECI text files and store in PostGIS
+
+Options:
+  --today              Process all METARs from today
+  --date YYYYMMDD      Process specific date
+  --recent N           Process files modified in last N minutes
+  --verbose, -v        Show detailed output
+
+Examples:
+  # Initial backfill - process today
+  ./ingest_metar.py --today
+  
+  # Process specific date
+  ./ingest_metar.py --date 20260103
+  
+  # Process last 20 minutes (for cron)
+  ./ingest_metar.py --recent 20
+
+What it does:
+  1. Scans /LDM/text/metar/ and /LDM/text/speci/
+  2. Parses METAR text using python-metar library
+  3. Extracts: temp, dewpoint, wind, visibility, altimeter, sky conditions
+  4. Calculates flight category (VFR/MVFR/IFR/LIFR)
+  5. Looks up airport coordinates from OurAirports
+  6. Stores in observations.metar table
+
+
+ingest_taf.py
+-------------
+Purpose: Parse TAF text files and store in PostGIS
+
+Options:
+  --today              Process all TAFs from today
+  --date YYYYMMDD      Process specific date
+  --recent N           Process files modified in last N minutes
+  --verbose, -v        Show detailed output
+
+Examples:
+  # Initial backfill
+  ./ingest_taf.py --today
+  
+  # Process last 90 minutes (for cron)
+  ./ingest_taf.py --recent 90
+
+What it does:
+  1. Scans /LDM/text/taf/
+  2. Parses TAF text (validity period, forecast groups)
+  3. Extracts issue time, valid from/to times
+  4. Stores forecast periods as JSONB
+  5. Stores in observations.taf table
+
+
+cleanup_old_data.sh
+-------------------
+Purpose: Remove old data to free disk space
+
+Options:
+  --dry-run            Show what would be deleted (no changes)
+
+Retention periods (configurable in script):
+  - METARs: 7 days
+  - TAFs: 7 days
+  - HRRR files: 3 days
+  - GFS files: 3 days
+  - Generated maps: 7 days
+  - Shapefiles: 7 days
+
+What it does:
+  1. Deletes old METARs/TAFs from PostgreSQL
+  2. Vacuums database to reclaim space
+  3. Deletes old HRRR GRIB files
+  4. Deletes old GFS GRIB files
+  5. Deletes old generated maps
+  6. Deletes old shapefiles
+  7. Shows disk usage summary
+
+Examples:
+  # Test what would be deleted
+  ./cleanup_old_data.sh --dry-run
+  
+  # Actually delete old data
+  ./cleanup_old_data.sh
+
+
+system_status.sh
+----------------
+Purpose: Check health of entire aviation weather system
+
+No options - just run it:
+  ./system_status.sh
+
+What it shows:
+  1. Service status (Apache, PostgreSQL, LDM)
+  2. LDM data feeds (recent products)
+  3. Model data availability (HRRR, GFS cycles)
+  4. Observation data (recent METAR/TAF counts)
+  5. Generated products (maps, shapefiles)
+  6. Disk usage
+  7. Recent errors
+  8. Scheduled cron jobs
+
+
+MONITORING AND TROUBLESHOOTING
+===============================
+
+Check if data is flowing:
+-------------------------
+# Check database
+sudo -u postgres psql -d avwx_data
+
+# List recent METARs
+SELECT station_id, observation_time, flight_category, raw_text 
+FROM observations.metar 
+ORDER BY observation_time DESC 
+LIMIT 10;
+
+# List recent TAFs
+SELECT station_id, issue_time, valid_from, valid_to 
+FROM observations.taf 
+ORDER BY issue_time DESC 
+LIMIT 10;
+
+# Count observations by hour
+SELECT DATE_TRUNC('hour', observation_time) as hour, COUNT(*) 
+FROM observations.metar 
+WHERE observation_time > NOW() - INTERVAL '24 hours'
+GROUP BY hour 
+ORDER BY hour DESC;
+
+
+Check logs:
+-----------
+# METAR ingest log
+tail -f /var/log/metar_ingest.log
+
+# TAF ingest log
+tail -f /var/log/taf_ingest.log
+
+# Cleanup log
+tail -f /var/log/cleanup.log
+
+# Batch maps log (already configured)
+tail -f /var/log/batch_maps.log
+
+
+Common Issues:
+--------------
+Problem: No METARs being ingested
+Solution:
+  1. Check LDM is receiving IDS|DDPLUS: ldmadmin watch | grep "IDS\|DDPLUS"
+  2. Check files exist: ls /LDM/text/metar/$(date -u +%Y/%m/%d)/
+  3. Test manually: ./ingest_metar.py --recent 60 --verbose
+
+Problem: Airport coordinates not found
+Solution:
+  1. Download airports.csv: 
+     curl -o /var/www/cap_winds_app/.cache/airports.csv \
+       https://davidmegginson.github.io/ourairports-data/airports.csv
+  2. Check permissions on .cache directory
+
+Problem: Database permission errors
+Solution:
+  1. Check user exists: sudo -u postgres psql -c "\du avwx_user"
+  2. Grant permissions: sudo /var/www/cap_winds_app/scripts/setup_postgis.sh
+
+Problem: Cleanup not running
+Solution:
+  1. Check root crontab: sudo crontab -l
+  2. Check cleanup log: tail /var/log/cleanup.log
+  3. Run manually: sudo ./cleanup_old_data.sh --dry-run
+
+
+EXPECTED RESULTS AFTER 24 HOURS
+================================
+
+Database:
+  - ~2,000-5,000 METAR observations (US airports report hourly)
+  - ~1,000-2,000 TAFs (major airports, 6-hour updates)
+  - Database size: ~50-100 MB
+
+Files:
+  - HRRR: Latest 3 days = ~6 GB
+  - GFS: Latest 3 days = ~15 GB
+  - Maps: Latest 7 days = ~300 MB
+  - Shapefiles: Latest 7 days = ~500 MB
+
+Generated products:
+  - 21 maps per hour × 24 hours = ~500 maps
+  - Corresponding shapefiles
+
+
+PERFORMANCE TUNING
+==================
+
+If ingest is slow:
+------------------
+1. Add database indexes (already done by setup_postgis.sh)
+2. Increase PostgreSQL shared_buffers:
+   sudo nano /etc/postgresql/16/main/postgresql.conf
+   # Set: shared_buffers = 256MB
+   sudo systemctl restart postgresql
+
+3. Process in batches:
+   # Instead of --today, use --recent with smaller windows
+   ./ingest_metar.py --recent 30
+
+If cleanup is slow:
+-------------------
+1. Run during off-hours (already scheduled for 3 AM)
+2. Increase retention if needed (edit cleanup script)
+3. Use find -delete instead of -exec rm
+
+
+NEXT STEPS
+==========
+
+Once data is flowing:
+1. Build web interface to display METAR/TAF (see AVIATION_WEATHER_SYSTEM_PLAN.txt Phase 2B)
+2. Add flight category colors to maps (Phase 2C)
+3. Add station plots (Phase 2C)
+4. Integrate SIGMET/AIRMET (Phase 3)
+
+Questions or issues?
+  - Check logs first
+  - Run system_status.sh
+  - Review AVIATION_WEATHER_SYSTEM_PLAN.txt for roadmap

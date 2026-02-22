@@ -1,0 +1,209 @@
+/**
+ * CAP Winds Radar Animation Styles
+ */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: #1a1a1a;
+    color: #fff;
+}
+
+#map {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 180px;
+}
+
+#controls {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 180px;
+    background: linear-gradient(to bottom, #2c3e50, #1a252f);
+    box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.5);
+    padding: 15px 20px;
+    overflow-y: auto;
+}
+
+.control-row {
+    display: flex;
+    align-items: center;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+}
+
+label {
+    font-weight: 600;
+    margin-right: 8px;
+    color: #ecf0f1;
+    font-size: 14px;
+    min-width: 80px;
+}
+
+input,
+select,
+button {
+    padding: 8px 12px;
+    margin: 4px;
+    font-size: 14px;
+    border: none;
+    border-radius: 6px;
+    transition: all 0.3s ease;
+}
+
+input,
+select {
+    background: #34495e;
+    color: #ecf0f1;
+    border: 2px solid transparent;
+}
+
+input:focus,
+select:focus {
+    outline: none;
+    border-color: #3498db;
+    background: #2c3e50;
+}
+
+input[type="text"] {
+    text-transform: uppercase;
+}
+
+button {
+    background: linear-gradient(135deg, #3498db, #2980b9);
+    color: white;
+    cursor: pointer;
+    font-weight: 600;
+    box-shadow: 0 2px 8px rgba(52, 152, 219, 0.3);
+}
+
+button:hover {
+    background: linear-gradient(135deg, #2980b9, #21618c);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(52, 152, 219, 0.5);
+}
+
+button:active {
+    transform: translateY(0);
+}
+
+button:disabled {
+    background: #7f8c8d;
+    cursor: not-allowed;
+    opacity: 0.6;
+    transform: none;
+}
+
+button.play-btn {
+    background: linear-gradient(135deg, #27ae60, #229954);
+    padding: 10px 20px;
+    font-size: 16px;
+}
+
+button.play-btn:hover {
+    background: linear-gradient(135deg, #229954, #1e8449);
+}
+
+button.play-btn.playing {
+    background: linear-gradient(135deg, #e74c3c, #c0392b);
+}
+
+#timeline {
+    width: 100%;
+    height: 8px;
+    -webkit-appearance: none;
+    background: #34495e;
+    border-radius: 4px;
+    outline: none;
+    margin: 10px 0;
+}
+
+#timeline::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 20px;
+    height: 20px;
+    background: #3498db;
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(52, 152, 219, 0.6);
+}
+
+#timeline::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+    background: #3498db;
+    border-radius: 50%;
+    cursor: pointer;
+    border: none;
+    box-shadow: 0 2px 8px rgba(52, 152, 219, 0.6);
+}
+
+#timeLabel {
+    font-size: 16px;
+    font-weight: 600;
+    color: #3498db;
+    margin-left: 15px;
+    display: inline-block;
+    min-width: 80px;
+}
+
+#status {
+    margin-top: 8px;
+    padding: 10px;
+    background: rgba(52, 73, 94, 0.8);
+    border-radius: 6px;
+    font-size: 13px;
+    border-left: 4px solid #3498db;
+}
+
+.status-loading {
+    border-left-color: #f39c12 !important;
+}
+
+.status-error {
+    border-left-color: #e74c3c !important;
+}
+
+.status-success {
+    border-left-color: #27ae60 !important;
+}
+
+select {
+    cursor: pointer;
+    min-width: 120px;
+}
+
+#airportInput {
+    width: 100px;
+}
+
+.divider {
+    margin: 0 15px;
+    color: #7f8c8d;
+}
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+    #controls {
+        height: 220px;
+    }
+    
+    .control-row {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    
+    label {
+        margin-bottom: 5px;
+    }
+}

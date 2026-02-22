@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Recent Manual TAFs - KQ Stations</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; background: #1a1a2e; color: #e0e0e0; min-height: 100vh; }
+        
+        .header {
+            background: linear-gradient(135deg, #16213e, #0f3460);
+            padding: 15px 25px;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+        }
+        .header a {
+            background: linear-gradient(135deg, #3498db, #2980b9);
+            color: white;
+            padding: 8px 18px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 14px;
+        }
+        .header h1 {
+            font-size: 20px;
+            color: #e0e0e0;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 30px auto;
+            padding: 0 20px;
+        }
+
+        .taf-table {
+            background: #16213e;
+            border: 1px solid #2a3a5e;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid #2a3a5e;
+        }
+
+        th {
+            background: #0f3460;
+            font-weight: 700;
+            color: #7ecfff;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        td {
+            font-size: 13px;
+        }
+
+        .station-id {
+            font-family: 'Courier New', monospace;
+            font-weight: 700;
+            color: #7ecfff;
+        }
+
+        .station-name {
+            color: #aaa;
+            font-size: 11px;
+        }
+
+        .time-col {
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+        }
+
+        .taf-preview {
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            color: #ccc;
+            max-width: 300px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .no-data {
+            text-align: center;
+            padding: 40px;
+            color: #888;
+            font-style: italic;
+        }
+
+        .nav-links {
+            margin-top: 20px;
+            text-align: center;
+        }
+        .nav-links a {
+            color: #3498db;
+            text-decoration: none;
+            margin: 0 15px;
+            font-size: 13px;
+        }
+        .nav-links a:hover { color: #7ecfff; }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <a href="/">&#127968; Home</a>
+    <a href="/admin/manual-taf">Add TAF</a>
+    <div>
+        <h1>Recent Manual TAFs</h1>
+    </div>
+</div>
+
+<div class="container">
+    
+    <div class="taf-table">
+        <table>
+            <thead>
+                <tr>
+                    <th>Station</th>
+                    <th>Issue Time</th>
+                    <th>Valid From</th>
+                    <th>Valid To</th>
+                    <th>TAF Preview</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% if recent_tafs %}
+                    {% for taf in recent_tafs %}
+                    <tr>
+                        <td>
+                            <div class="station-id">{{ taf[0] }}</div>
+                            <div class="station-name">{{ taf[1] or 'Unnamed' }}</div>
+                        </td>
+                        <td class="time-col">
+                            {{ taf[2].strftime('%m/%d %H:%MZ') if taf[2] else 'N/A' }}
+                        </td>
+                        <td class="time-col">
+                            {{ taf[3].strftime('%m/%d %H:%MZ') if taf[3] else 'N/A' }}
+                        </td>
+                        <td class="time-col">
+                            {{ taf[4].strftime('%m/%d %H:%MZ') if taf[4] else 'N/A' }}
+                        </td>
+                        <td>
+                            <div class="taf-preview" title="{{ taf[5] }}">{{ taf[5] or 'No preview' }}...</div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                {% else %}
+                    <tr>
+                        <td colspan="5" class="no-data">
+                            No manual TAFs found. 
+                            <a href="/admin/manual-taf" style="color: #3498db;">Add your first TAF</a>.
+                        </td>
+                    </tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="nav-links">
+        <a href="/admin/manual-taf">Add Manual TAF</a>
+        <a href="/admin/kq-stations">Manage KQ Stations</a>
+        <a href="/cap_winds_app/incident-archive">Incident Archive</a>
+    </div>
+
+</div>
+
+</body>
+</html>
+

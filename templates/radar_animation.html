@@ -59,6 +59,18 @@
         .airport-military { background-color: #e74c3c; }
         .airport-reporting { background-color: #27ae60; }
         .airport-basic { background-color: #3498db; }
+        .radar-label {
+            background: rgba(52, 152, 219, 0.9);
+            color: white;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 700;
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            white-space: nowrap;
+            pointer-events: none;
+            text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.9);
+        }
 
 	.home-btn {
             position: fixed;
@@ -144,6 +156,7 @@
             <button onclick="loadRadar()">📡 Load Radar</button>
             <button class="toggle-btn" id="airportToggle" onclick="toggleAirports()">✈️ Airports</button>
             <button class="toggle-btn" id="ringsToggle" onclick="toggleRings()">⭕ Rings</button>
+            <button class="toggle-btn" id="siteLabelsToggle" onclick="toggleSiteLabels()">🏷️ Site IDs</button>
         </div>
         <div class="control-row">
             <button id="playBtn" class="play-btn" onclick="togglePlay()" disabled>▶ Play</button>
@@ -186,14 +199,16 @@
         let airportsLoaded = false;
         let airportsVisible = false;
         let ringsVisible = false;
+let siteLabels = L.layerGroup();
+let siteLabelsVisible = false;
         
         // Initialize map
         map = L.map('map').setView([39.8, -98.6], 4);
         
         // Base layers
-        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
             attribution: 'Tiles © Esri',
-            maxZoom: 19
+            maxZoom: 16
         }).addTo(map);
         
         L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}', {
@@ -201,12 +216,13 @@
             opacity: 0.7
         }).addTo(map);
         
+        
         radarMarkers.addTo(map);
         airportMarkers.addTo(map);
         rangeRings.addTo(map);
         
         // Load radar sites
-        fetch('/cap_winds_app/radar/api/sites').then(r => r.json()).then(data => {
+        fetch('/CAP_WxCOP/radar/api/sites').then(r => r.json()).then(data => {
             const select = document.getElementById('siteSelect');
             const sites = Object.entries(data.sites).sort((a, b) => a[0].localeCompare(b[0]));
             
@@ -245,7 +261,7 @@
         function loadAirports() {
             const zoom = map.getZoom();
             
-            fetch(`/cap_winds_app/radar/api/airports?zoom=${zoom}`)
+            fetch(`/CAP_WxCOP/radar/api/airports?zoom=${zoom}`)
                 .then(r => r.json())
                 .then(data => {
                     airportMarkers.clearLayers();
@@ -298,6 +314,31 @@
             }
         }
         
+function toggleSiteLabels() {
+    siteLabelsVisible = document.getElementById("showSiteLabels").checked;
+    if (siteLabelsVisible) {
+        fetch("/CAP_WxCOP/radar/api/sites")
+            .then(r => r.json())
+            .then(data => {
+                siteLabels.clearLayers();
+                Object.entries(data.sites).forEach(([id, site]) => {
+                    const label = L.marker([site.lat, site.lon], {
+                        icon: L.divIcon({
+                            className: "radar-label",
+                            html: id,
+                            iconSize: null,
+                            iconAnchor: [0, -15]
+                        })
+                    });
+                    label.addTo(siteLabels);
+                });
+                siteLabels.addTo(map);
+            });
+    } else {
+        map.removeLayer(siteLabels);
+    }
+}
+
         function createRangeRings(lat, lon) {
             rangeRings.clearLayers();
             
@@ -330,7 +371,7 @@
                 btn.classList.add('active');
                 if (currentSite) {
                     const siteData = radarMarkers.getLayers()[0]._latlng; // Get from first marker as example
-                    fetch('/cap_winds_app/radar/api/sites')
+                    fetch('/CAP_WxCOP/radar/api/sites')
                         .then(r => r.json())
                         .then(data => {
                             const site = data.sites[currentSite];
@@ -359,7 +400,7 @@
             updateStatus('Finding nearest radar to ' + airport + '...', 'loading');
             
             try {
-                const response = await fetch(`/cap_winds_app/radar/api/nearest/${airport}`);
+                const response = await fetch(`/CAP_WxCOP/radar/api/nearest/${airport}`);
                 const data = await response.json();
                 
                 if (data.error) {
@@ -403,7 +444,7 @@
             
             try {
                 const hours = document.getElementById('hoursSelect').value;
-                const response = await fetch(`/cap_winds_app/radar/api/images/${currentSite}/${currentProduct}?hours=${hours}`);
+                const response = await fetch(`/CAP_WxCOP/radar/api/images/${currentSite}/${currentProduct}?hours=${hours}`);
                 const data = await response.json();
                 
                 if (data.error) {
@@ -430,7 +471,7 @@
                 
                 // Update range rings if visible
                 if (ringsVisible) {
-                    fetch('/cap_winds_app/radar/api/sites')
+                    fetch('/CAP_WxCOP/radar/api/sites')
                         .then(r => r.json())
                         .then(data => {
                             const site = data.sites[currentSite];
@@ -454,7 +495,7 @@
                 
                 try {
                     const hours = document.getElementById('hoursSelect').value;
-                    const response = await fetch(`/cap_winds_app/radar/api/images/${currentSite}/${currentProduct}?hours=${hours}`);
+                    const response = await fetch(`/CAP_WxCOP/radar/api/images/${currentSite}/${currentProduct}?hours=${hours}`);
                     const data = await response.json();
                     
                     if (data.error || data.images.length === 0) return;
@@ -495,6 +536,11 @@
                     opacity: 0.7,
                     zIndex: 1000
                 }).addTo(map);
+        
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}', {
+            maxZoom: 19,
+            opacity: 0.7
+        }).addTo(map);
             }
             
             document.getElementById('timeline').value = index;

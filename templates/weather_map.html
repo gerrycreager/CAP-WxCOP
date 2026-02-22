@@ -2,577 +2,491 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport"="width=device-width, initial-scale=1.0">
-    <title>Weather Map</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Weather Map - METWatch</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: 'Courier New', monospace;
-            background: #1a1a1a;
-            color: #e0e0e0;
-            margin: 0;
-            padding: 0;
-        }
-        #map {
-            width: 100vw;
-            height: calc(100vh - 48px);
-            margin-top: 48px;
-        }
-        .leaflet-popup-content {
-            font-family: 'Courier New', monospace;
-            min-width: 350px;
-            max-width: 500px;
-        }
-        .popup-header {
-            font-size: 18px;
-            font-weight: bold;
-            color: #2a5caa;
-            margin-bottom: 10px;
-            padding-bottom: 8px;
-            border-bottom: 2px solid #ccc;
-        }
-        .popup-section {
-            margin-bottom: 12px;
-        }
-        .popup-label {
-            font-size: 12px;
-            color: #555;
-            margin-bottom: 4px;
+        body { font-family: Arial, sans-serif; overflow: hidden; }
+        #map { height: 100vh; width: 100%; }
+
+        .home-btn {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            z-index: 1000;
+            background: linear-gradient(135deg, #3498db, #2980b9);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            text-decoration: none;
             font-weight: 600;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            transition: all 0.2s ease;
         }
-        .popup-text {
-            font-size: 12px;
-            line-height: 1.5;
-            color: #1a1a1a;
-            white-space: pre-wrap;
+        .home-btn:hover {
+            background: linear-gradient(135deg, #2980b9, #21618c);
+            transform: translateY(-2px);
         }
-        .popup-data {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 8px;
-            margin-top: 8px;
-        }
-        .popup-data-item {
-            font-size: 11px;
-        }
-        .popup-data-label {
-            color: #666;
-        }
-        .popup-data-value {
-            color: #1a1a1a;
-            font-weight: bold;
-        }
-        .flight-category {
-            display: inline-block;
-            padding: 2px 6px;
-            border-radius: 3px;
-            font-size: 11px;
-            font-weight: bold;
-        }
-        .cat-VFR { background: #00AA00; color: white; }
-        .cat-MVFR { background: #FFD700; color: black; }
-        .cat-IFR { background: #FF0000; color: white; }
-        .cat-LIFR { background: #FF00FF; color: white; }
-        .control-panel {
+
+        .controls {
             position: absolute;
             top: 10px;
             right: 10px;
-            background: #2a2a2a;
+            background: white;
             padding: 15px;
             border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
             z-index: 1000;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.5);
+            max-width: 265px;
         }
-        .control-title {
-            font-size: 14px;
-            color: #4a9eff;
-            margin-bottom: 10px;
-            font-weight: bold;
-        }
-        .filter-group {
-            margin-bottom: 10px;
-        }
-        .filter-label {
-            font-size: 11px;
-            color: #b0b0b0;
-            display: block;
-            margin-bottom: 5px;
-        }
-        .checkbox-group {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 5px;
-        }
+        .controls h3 { margin-bottom: 10px; font-size: 16px; color: #2c3e50; }
         .checkbox-label {
-            font-size: 11px;
             display: flex;
             align-items: center;
-            gap: 5px;
-        }
-        input[type="checkbox"] {
-            margin: 0;
-        }
-        button {
-            width: 100%;
-            padding: 8px;
-            background: #4a9eff;
-            color: white;
-            border: none;
-            border-radius: 4px;
+            font-size: 14px;
             cursor: pointer;
-            font-family: 'Courier New', monospace;
-            font-size: 12px;
-            margin-top: 10px;
+            margin: 5px 0;
         }
-        button:hover {
-            background: #3a8eef;
-        }
-        .legend {
-            position: absolute;
-            bottom: 30px;
-            right: 10px;
-            background: #2a2a2a;
-            padding: 15px;
-            border-radius: 8px;
-            z-index: 1000;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.5);
-        }
-        .legend-title {
-            font-size: 12px;
-            color: #4a9eff;
-            margin-bottom: 8px;
-            font-weight: bold;
-        }
-        .legend-item {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin-bottom: 5px;
-            font-size: 11px;
-        }
-        .legend-color {
-            width: 16px;
-            height: 16px;
+        input[type="checkbox"] { margin-right: 8px; cursor: pointer; }
+        .divider { margin: 10px 0; border-top: 1px solid #ddd; }
+        .legend-item { display: flex; align-items: center; margin: 4px 0; font-size: 12px; }
+        .legend-dot {
+            width: 14px; height: 14px;
             border-radius: 50%;
+            margin-right: 8px;
             border: 2px solid #000;
+            flex-shrink: 0;
         }
-        .loading-overlay {
+        .legend-tag {
+            min-width: 36px; height: 15px;
+            border-radius: 3px;
+            margin-right: 8px;
+            font-size: 9px; font-weight: 700;
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0;
+        }
+
+        #loading {
             position: absolute;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            background: #2a2a2a;
+            background: white;
             padding: 20px 40px;
             border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
             z-index: 2000;
-            color: #4a9eff;
-            font-size: 16px;
+            font-size: 18px;
         }
+
+        /* -------------------------------------------------------
+           Airport label tiers.
+           transform: translateX(-50%) centers the label horizontally
+           over its anchor point regardless of text width.
+           iconAnchor [0, 22] places the bottom of the label 22px
+           above the dot's center, horizontally centered.
+           pointer-events: none so labels don't block dot clicks.
+        ------------------------------------------------------- */
+
+        /* Tier 1 - Military: red, bold, always on top */
+        .apt-t1 {
+            font-size: 11px;
+            font-weight: 700;
+            color: white;
+            background: rgba(200, 30, 30, 0.93);
+            padding: 2px 5px;
+            border-radius: 3px;
+            border: 1px solid #800;
+            white-space: nowrap;
+            pointer-events: none;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+            transform: translateX(-50%);
+        }
+
+        /* Tier 2 - Major hub: blue */
+        .apt-t2 {
+            font-size: 11px;
+            font-weight: 700;
+            color: white;
+            background: rgba(25, 80, 200, 0.93);
+            padding: 2px 5px;
+            border-radius: 3px;
+            border: 1px solid #003a99;
+            white-space: nowrap;
+            pointer-events: none;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+            transform: translateX(-50%);
+        }
+
+        /* Tier 3 - Regional: light gray */
+        .apt-t3 {
+            font-size: 10px;
+            font-weight: 600;
+            color: #111;
+            background: rgba(220, 220, 220, 0.93);
+            padding: 1px 4px;
+            border-radius: 3px;
+            border: 1px solid #888;
+            white-space: nowrap;
+            pointer-events: none;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+            transform: translateX(-50%);
+        }
+
+        /* Tier 4 - GA: no label rendered, tooltip only */
     </style>
 </head>
 <body>
-    <!-- Navigation Header -->
-    <div style="
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 12px 20px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        z-index: 10000;
-    ">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-            <a href="/" style="color: white; text-decoration: none; font-size: 18px; font-weight: bold; display: flex; align-items: center; gap: 8px;">
-                <span style="font-size: 22px;">🛩️</span>
-                <span>CAP Weather Hub</span>
-            </a>
-            <nav style="display: flex; gap: 12px;">
-                <a href="/" style="color: white; text-decoration: none; padding: 8px 16px; border-radius: 6px; font-size: 14px; background: rgba(255,255,255,0.2); font-weight: 500;" onmouseover="this.style.background='rgba(255,255,255,0.3)'" onmouseout="this.style.background='rgba(255,255,255,0.2)'">🏠 Home</a>
-            </nav>
-        </div>
-    </div>
-    
+    <a href="/" class="home-btn">&#127968; Home</a>
     <div id="map"></div>
-    
-    <div class="control-panel">
-        <div class="control-title">Map Controls</div>
-        <div class="filter-group">
-            <span class="filter-label">Flight Categories:</span>
-            <div class="checkbox-group">
-                <label class="checkbox-label">
-                    <input type="checkbox" id="showVFR" checked> VFR
-                </label>
-                <label class="checkbox-label">
-                    <input type="checkbox" id="showMVFR" checked> MVFR
-                </label>
-                <label class="checkbox-label">
-                    <input type="checkbox" id="showIFR" checked> IFR
-                </label>
-                <label class="checkbox-label">
-                    <input type="checkbox" id="showLIFR" checked> LIFR
-                </label>
-            </div>
-        </div>
-        <div class="filter-group" style="border-top: 1px solid #444; padding-top: 10px; margin-top: 10px;">
-            <span class="filter-label">Overlays:</span>
-            <label class="checkbox-label" style="display: block; margin-top: 5px;">
-                <input type="checkbox" id="showTFRs"> Show TFRs
-            </label>
-        </div>
-        <button onclick="updateMap()">Refresh Data</button>
-    </div>
-    
-    <div class="legend">
-        <div class="legend-title">Flight Categories</div>
+
+    <div class="controls">
+        <h3>Flight Categories</h3>
+        <label class="checkbox-label"><input type="checkbox" id="showVFR"  checked> VFR</label>
+        <label class="checkbox-label"><input type="checkbox" id="showMVFR" checked> MVFR</label>
+        <label class="checkbox-label"><input type="checkbox" id="showIFR"  checked> IFR</label>
+        <label class="checkbox-label"><input type="checkbox" id="showLIFR" checked> LIFR</label>
+
+        <div class="divider"></div>
+        <label class="checkbox-label"><input type="checkbox" id="showTFRs"> Show TFRs</label>
+        <label class="checkbox-label"><input type="checkbox" id="showAirportIds" checked> Show Airport IDs</label>
+
+        <div class="divider"></div>
+        <div class="legend-item"><div class="legend-dot" style="background:#00FF00;"></div>VFR (&ge;3000' &amp; &ge;5sm)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#0000FF;"></div>MVFR (1000-3000')</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#FF0000;"></div>IFR (500-1000')</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#FF00FF;"></div>LIFR (&lt;500')</div>
+
+        <div class="divider"></div>
+        <div style="font-size:11px;color:#555;margin-bottom:5px;">Airport ID Labels:</div>
         <div class="legend-item">
-            <div class="legend-color" style="background: #00AA00;"></div>
-            <span>VFR - Visual</span>
+            <div class="legend-tag" style="background:rgba(200,30,30,0.93);color:white;border:1px solid #800;">MIL</div>
+            Military (always)
         </div>
         <div class="legend-item">
-            <div class="legend-color" style="background: #FFD700;"></div>
-            <span>MVFR - Marginal</span>
+            <div class="legend-tag" style="background:rgba(25,80,200,0.93);color:white;border:1px solid #003a99;">HUB</div>
+            Major hub (zoom 3+)
         </div>
         <div class="legend-item">
-            <div class="legend-color" style="background: #FF0000;"></div>
-            <span>IFR - Instrument</span>
+            <div class="legend-tag" style="background:rgba(220,220,220,0.93);color:#111;border:1px solid #888;">RGN</div>
+            Regional &ge;5000ft (zoom 7+)
         </div>
         <div class="legend-item">
-            <div class="legend-color" style="background: #FF00FF;"></div>
-            <span>LIFR - Low IFR</span>
+            <div class="legend-tag" style="background:#eee;color:#777;border:1px solid #bbb;">&#8212;</div>
+            GA &ge;2500ft (hover only)
         </div>
     </div>
-    
-    <div id="loading" class="loading-overlay" style="display: none;">Loading weather data...</div>
+
+    <div id="loading">Loading weather data...</div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-        let map;
-        let markers = [];
-        let tfrLayer = L.layerGroup();  // Layer for TFRs
-        
-        // Initialize map centered on CONUS
+        var map;
+        var metatMarkers  = [];
+        var labelsLayer;
+        var tfrLayer;
+        var currentMetars = [];
+        var airportTiers  = {};   // station_id -> tier (1-4)
+        var labelsVisible = true;
+
+        // Minimum zoom to show each tier label
+        var TIER_MIN_ZOOM = { 1: 0, 2: 3, 3: 7, 4: 99 };
+
         function initMap() {
             try {
-                // Check if Leaflet is loaded
-                if (typeof L === 'undefined') {
-                    console.error('Leaflet library not loaded!');
-                    document.getElementById('loading').innerHTML = 'Error: Map library failed to load';
-                    return;
-                }
-                
                 map = L.map('map').setView([39.8, -98.6], 5);
-                
-                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                    attribution: '© OpenStreetMap contributors',
-                    maxZoom: 18
-                }).addTo(map);
-                
-                // Load initial data
-                updateMap();
-                
-                // Refresh on map move
+
+                L.tileLayer(
+                    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+                    { attribution: 'Tiles &copy; Esri', maxZoom: 18 }
+                ).addTo(map);
+
+                labelsLayer = L.layerGroup().addTo(map);
+                tfrLayer    = L.layerGroup();
+
                 map.on('moveend', updateMap);
-                
-                // Auto-refresh every 5 minutes
+                map.on('zoomend', function() { fetchAndUpdateLabels(); });
+
+                document.getElementById('showAirportIds').addEventListener('change', function() {
+                    labelsVisible = this.checked;
+                    if (labelsVisible) {
+                        fetchAndUpdateLabels();
+                    } else {
+                        labelsLayer.clearLayers();
+                    }
+                });
+
+                ['showVFR','showMVFR','showIFR','showLIFR'].forEach(function(id) {
+                    document.getElementById(id).addEventListener('change', updateMap);
+                });
+                document.getElementById('showTFRs').addEventListener('change', loadTFRs);
+
+                updateMap();
                 setInterval(updateMap, 5 * 60 * 1000);
-                
-            } catch (error) {
-                console.error('Map initialization error:', error);
-                document.getElementById('loading').innerHTML = 'Error initializing map: ' + error.message;
+
+            } catch(e) {
+                console.error('Map init error:', e);
             }
         }
-        
+
+        function getBoundsParam() {
+            var b = map.getBounds();
+            return b.getWest() + ',' + b.getSouth() + ',' + b.getEast() + ',' + b.getNorth();
+        }
+
+        function getMaxTierForZoom(zoom) {
+            if (zoom >= 7) return 3;
+            if (zoom >= 3) return 2;
+            return 1;
+        }
+
         function updateMap() {
-            // Safety check
-            if (!map) {
-                console.error('Map not initialized');
-                return;
-            }
-            
-            document.getElementById('loading').style.display = 'block';
-            
-            // Get current map bounds
-            const bounds = map.getBounds();
-            const boundsStr = `${bounds.getWest()},${bounds.getSouth()},${bounds.getEast()},${bounds.getNorth()}`;
-            
-            // Clear existing markers
-            markers.forEach(marker => map.removeLayer(marker));
-            markers = [];
-            
-            // Fetch data within bounds
-            fetch(`/cap_winds_app/api/weather/metar/recent?bounds=${boundsStr}&limit=5000`)
-                .then(response => response.json())
-                .then(data => {
-                    document.getElementById('loading').style.display = 'none';
-                    
-                    // Get filter settings
-                    const showVFR = document.getElementById('showVFR').checked;
-                    const showMVFR = document.getElementById('showMVFR').checked;
-                    const showIFR = document.getElementById('showIFR').checked;
-                    const showLIFR = document.getElementById('showLIFR').checked;
-                    
-                    // Add markers
-                    data.metars.forEach(metar => {
-                        // Filter by flight category
-                        if (metar.flight_category === 'VFR' && !showVFR) return;
+            var showVFR  = document.getElementById('showVFR').checked;
+            var showMVFR = document.getElementById('showMVFR').checked;
+            var showIFR  = document.getElementById('showIFR').checked;
+            var showLIFR = document.getElementById('showLIFR').checked;
+
+            fetch('/CAP_WxCOP/api/weather/metar/recent?bounds=' + getBoundsParam())
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    metatMarkers.forEach(function(m) { map.removeLayer(m); });
+                    metatMarkers  = [];
+                    currentMetars = [];
+
+                    data.metars.forEach(function(metar) {
+                        if (metar.flight_category === 'VFR'  && !showVFR)  return;
                         if (metar.flight_category === 'MVFR' && !showMVFR) return;
-                        if (metar.flight_category === 'IFR' && !showIFR) return;
+                        if (metar.flight_category === 'IFR'  && !showIFR)  return;
                         if (metar.flight_category === 'LIFR' && !showLIFR) return;
-                        
                         addMarker(metar);
+                        currentMetars.push(metar);
                     });
-                    
-                    // Load TFRs if enabled
+
+                    fetchAndUpdateLabels();
                     loadTFRs();
-                })
-                .catch(error => {
                     document.getElementById('loading').style.display = 'none';
-                    alert('Error loading weather data: ' + error);
+                })
+                .catch(function(err) {
+                    document.getElementById('loading').style.display = 'none';
+                    console.error('METAR load error:', err);
                 });
         }
-        
+
+        function fetchAndUpdateLabels() {
+            if (!labelsVisible) {
+                labelsLayer.clearLayers();
+                return;
+            }
+
+            var zoom    = map.getZoom();
+            var maxTier = getMaxTierForZoom(zoom);
+
+            fetch('/CAP_WxCOP/api/weather/airport-tiers?bounds=' + getBoundsParam() + '&tier=' + maxTier)
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    airportTiers = {};
+                    data.airports.forEach(function(apt) {
+                        airportTiers[apt.station_id] = apt.tier;
+                    });
+                    updateLabels();
+                })
+                .catch(function(err) {
+                    console.error('Airport tiers error:', err);
+                    updateLabels();
+                });
+        }
+
+        function updateLabels() {
+            labelsLayer.clearLayers();
+            if (!labelsVisible) return;
+
+            var zoom   = map.getZoom();
+            var bounds = map.getBounds();
+
+            currentMetars.forEach(function(metar) {
+                if (!bounds.contains([metar.latitude, metar.longitude])) return;
+
+                var sid  = metar.station_id;
+                var tier = airportTiers[sid];
+
+                // Tier 4 and unknown: no label, tooltip only
+                if (!tier || tier > 3) return;
+
+                // Enforce minimum zoom per tier
+                if (zoom < TIER_MIN_ZOOM[tier]) return;
+
+                var label = L.marker([metar.latitude, metar.longitude], {
+                    icon: L.divIcon({
+                        className: 'apt-t' + tier,
+                        html: sid,
+                        iconSize: null,
+                        // iconAnchor [0, 22]: the anchor point is horizontally
+                        // centered (CSS handles this via translateX(-50%)) and
+                        // 22px below the top of the label, placing the label
+                        // above the dot.
+                        iconAnchor: [0, 22]
+                    }),
+                    interactive: false,
+                    // Military always rendered on top
+                    zIndexOffset: tier === 1 ? 1000 : (3 - tier) * 100
+                });
+                label.addTo(labelsLayer);
+            });
+        }
+
         function addMarker(metar) {
-            const color = getCategoryColor(metar.flight_category);
-            
-            // Create custom icon
-            const icon = L.divIcon({
-                className: 'custom-marker',
-                html: `<div style="
-                    width: 12px;
-                    height: 12px;
-                    background: ${color};
-                    border: 2px solid #000;
-                    border-radius: 50%;
-                    box-shadow: 0 0 4px rgba(0,0,0,0.5);
-                "></div>`,
+            var color = getCategoryColor(metar.flight_category);
+            var icon  = L.divIcon({
+                className: '',
+                html: '<div style="width:12px;height:12px;background:' + color +
+                      ';border:2px solid #000;border-radius:50%;' +
+                      'box-shadow:0 0 4px rgba(0,0,0,0.5);"></div>',
                 iconSize: [12, 12],
                 iconAnchor: [6, 6]
             });
-            
-            const marker = L.marker([metar.latitude, metar.longitude], { icon: icon });
-            
-            // Tooltip on hover
-            marker.bindTooltip(`${metar.station_id} - ${metar.flight_category}`, {
+
+            var marker = L.marker([metar.latitude, metar.longitude], { icon: icon });
+
+            // Tooltip always visible on hover - all tiers including GA
+            marker.bindTooltip(metar.station_id + ' \u2014 ' + metar.flight_category, {
                 permanent: false,
                 direction: 'top',
-                offset: [0, -10]
+                offset: [0, -8]
             });
-            
-            // Popup on click
-            marker.on('click', () => {
-                showStationPopup(metar);
-            });
-            
+
+            marker.on('click', function() { showStationPopup(metar); });
             marker.addTo(map);
-            markers.push(marker);
+            metatMarkers.push(marker);
         }
-        
+
+        function getCategoryColor(cat) {
+            if (cat === 'VFR')  return '#00FF00';
+            if (cat === 'MVFR') return '#0000FF';
+            if (cat === 'IFR')  return '#FF0000';
+            if (cat === 'LIFR') return '#FF00FF';
+            return '#808080';
+        }
+
         function showStationPopup(metar) {
-            // Fetch detailed data including TAF
             Promise.all([
-                fetch(`/cap_winds_app/api/weather/metar/station/${metar.station_id}?hours=3`).then(r => r.json()),
-                fetch(`/cap_winds_app/api/weather/taf/station/${metar.station_id}`).then(r => r.json()).catch(() => null)
-            ]).then(([metarData, tafData]) => {
-                const latestMetar = metarData.metars[0];
-                const obsType = latestMetar.is_speci ? 'SPECI' : 'METAR';
-                
-                let popupHtml = `
-                    <div class="popup-header">${metar.station_id}</div>
-                    
-                    <div class="popup-section">
-                        <div class="popup-label">${obsType} @ ${formatTime(latestMetar.observation_time)}</div>
-                        <div class="popup-text">${latestMetar.raw_text}</div>
-                        
-                        <div class="popup-data">
-                            <div class="popup-data-item">
-                                <span class="popup-data-label">Category:</span><br>
-                                <span class="flight-category cat-${latestMetar.flight_category}">${latestMetar.flight_category}</span>
-                            </div>
-                            ${latestMetar.temp_c !== null ? `
-                            <div class="popup-data-item">
-                                <span class="popup-data-label">Temp/Dewpoint:</span><br>
-                                <span class="popup-data-value">${Math.round(latestMetar.temp_c)}°C / ${latestMetar.dewpoint_c !== null ? Math.round(latestMetar.dewpoint_c) + '°C' : 'N/A'}</span>
-                            </div>
-                            ` : ''}
-                            ${latestMetar.wind_speed_kts !== null ? `
-                            <div class="popup-data-item">
-                                <span class="popup-data-label">Wind:</span><br>
-                                <span class="popup-data-value">${formatWind(latestMetar)}</span>
-                            </div>
-                            ` : ''}
-                            <div class="popup-data-item">
-                                <span class="popup-data-label">Ceiling:</span><br>
-                                <span class="popup-data-value">${formatCeiling(getCeiling(latestMetar))}</span>
-                            </div>
-                            ${latestMetar.visibility_sm !== null ? `
-                            <div class="popup-data-item">
-                                <span class="popup-data-label">Visibility:</span><br>
-                                <span class="popup-data-value">${latestMetar.visibility_sm} SM</span>
-                            </div>
-                            ` : ''}
-                        </div>
-                    </div>
-                `;
-                
-                if (tafData && !tafData.error) {
-                    popupHtml += `
-                        <div class="popup-section" style="border-top: 1px solid #ccc; padding-top: 10px;">
-                            <div class="popup-label">TAF FORECAST</div>
-                            <div class="popup-text">${tafData.raw_text}</div>
-                            <div class="popup-label" style="margin-top: 5px; font-size: 10px;">
-                                Valid: ${formatTime(tafData.valid_from)} to ${formatTime(tafData.valid_to)}
-                            </div>
-                        </div>
-                    `;
+                fetch('/CAP_WxCOP/api/weather/metar/station/' + metar.station_id + '?hours=3')
+                    .then(function(r) { return r.json(); }),
+                fetch('/CAP_WxCOP/api/weather/taf/station/' + metar.station_id)
+                    .then(function(r) { return r.json(); })
+                    .catch(function() { return null; })
+            ]).then(function(results) {
+                var md  = results[0];
+                var taf = results[1];
+                var obs = (md.metars && md.metars[0]) ? md.metars[0] : metar;
+
+                var wind = (obs.wind_dir || '---') + '&deg; @ ' +
+                           (obs.wind_speed_kts || 0) + 'kt';
+                if (obs.wind_gust_kts) wind += ' G' + obs.wind_gust_kts + 'kt';
+
+                // Tier badge
+                var tier = airportTiers[metar.station_id];
+                var badge = '';
+                if (tier === 1) {
+                    badge = ' <span style="background:rgba(200,30,30,0.9);color:white;' +
+                            'padding:1px 5px;border-radius:2px;font-size:10px;font-weight:700;">MIL</span>';
+                } else if (tier === 2) {
+                    badge = ' <span style="background:rgba(25,80,200,0.9);color:white;' +
+                            'padding:1px 5px;border-radius:2px;font-size:10px;font-weight:700;">HUB</span>';
+                } else if (tier === 3) {
+                    badge = ' <span style="background:rgba(180,180,180,0.9);color:#111;' +
+                            'padding:1px 5px;border-radius:2px;font-size:10px;font-weight:600;">RGNL</span>';
                 }
-                
-                L.popup()
+
+                var catColor = getCategoryColor(obs.flight_category);
+
+                var c = '<div style="font-family:monospace;min-width:300px;">';
+                c += '<div style="font-weight:bold;font-size:15px;color:#2c3e50;margin-bottom:7px;">';
+                c += metar.station_id + badge + '</div>';
+                c += '<table style="font-size:12px;border-collapse:collapse;width:100%;">';
+                c += '<tr><td style="color:#666;padding:2px 8px 2px 0;white-space:nowrap;">Category</td>';
+                c += '<td style="font-weight:bold;color:' + catColor + ';text-shadow:0 0 3px #333;">' +
+                     (obs.flight_category || 'N/A') + '</td></tr>';
+                c += '<tr><td style="color:#666;padding:2px 8px 2px 0;">Temp / Dew</td>';
+                c += '<td>' + (obs.temp_c !== null ? obs.temp_c : '--') + '&deg;C / ' +
+                     (obs.dewpoint_c !== null ? obs.dewpoint_c : '--') + '&deg;C</td></tr>';
+                c += '<tr><td style="color:#666;padding:2px 8px 2px 0;">Visibility</td>';
+                c += '<td>' + (obs.visibility_sm || 'N/A') + ' sm</td></tr>';
+                c += '<tr><td style="color:#666;padding:2px 8px 2px 0;">Wind</td>';
+                c += '<tr><td style="color:#666;padding:2px 8px 2px 0;">Ceiling</td></td>';
+                c += '<td>' + formatCeiling(obs.sky_conditions) + '</td></tr>';
+
+                function formatCeiling(skyConditions) {
+                    if (!skyConditions || skyConditions.length === 0) return 'Unlimited';
+                    var lowest = null;
+                    for (var i = 0; i < skyConditions.length; i++) {
+                        var layer = skyConditions[i];
+                        if (layer.cover === 'BKN' || layer.cover === 'OVC') {
+                            if (!lowest || layer.height_ft < lowest) {
+                                lowest = layer.height_ft;
+                            }
+                        }
+                    }
+                    return lowest ? (lowest + ' ft' + (lowest < 1000 ? ' AGL' : '')) : 'Unlimited';
+                }
+                c += '<td>' + wind + '</td></tr>';
+                c += '</table>';
+
+                if (obs.raw_text) {
+                    c += '<div style="margin-top:8px;font-size:10px;background:#f5f5f5;' +
+                         'padding:5px;border-radius:3px;word-break:break-all;">' +
+                         obs.raw_text + '</div>';
+                }
+                if (taf && taf.decoded_html) {
+                    c += '<div style="margin-top:6px;font-size:11px;font-weight:bold;">TAF:</div>';
+                    c += '<div style="font-size:10px;background:#eef;padding:5px;' +
+                         'border-radius:3px;word-break:break-all;">' +
+                         taf.decoded_html + '</div>';
+                }
+                c += '</div>';
+
+                L.popup({ maxWidth: 400 })
                     .setLatLng([metar.latitude, metar.longitude])
-                    .setContent(popupHtml)
+                    .setContent(c)
                     .openOn(map);
             });
         }
-        
-        function getCategoryColor(category) {
-            const colors = {
-                'VFR': '#00AA00',
-                'MVFR': '#FFD700',
-                'IFR': '#FF0000',
-                'LIFR': '#FF00FF'
-            };
-            return colors[category] || '#888888';
-        }
-        
-        function formatTime(isoString) {
-            if (!isoString) return 'N/A';
-            const date = new Date(isoString);
-            const day = date.getUTCDate().toString().padStart(2, '0');
-            const hours = date.getUTCHours().toString().padStart(2, '0');
-            const minutes = date.getUTCMinutes().toString().padStart(2, '0');
-            return `${day}${hours}${minutes}Z`;
-        }
-        
-        function formatWind(metar) {
-            const dir = metar.wind_dir !== null ? metar.wind_dir.toString().padStart(3, '0') : 'VRB';
-            const spd = metar.wind_speed_kts;
-            const gust = metar.wind_gust_kts !== null ? `G${metar.wind_gust_kts}` : '';
-            return `${dir}/${spd}${gust} KT`;
-        }
-        
+
         function loadTFRs() {
-            const showTFRs = document.getElementById('showTFRs').checked;
-            
-            // Clear existing TFRs
-            tfrLayer.clearLayers();
-            
-            if (!showTFRs) {
+            if (!document.getElementById('showTFRs').checked) {
+                map.removeLayer(tfrLayer);
                 return;
             }
-            
-            // Get map bounds
-            const bounds = map.getBounds();
-            const boundsStr = `${bounds.getWest()},${bounds.getSouth()},${bounds.getEast()},${bounds.getNorth()}`;
-            
-            // Fetch TFRs
-            fetch(`/cap_winds_app/api/weather/tfr/active?bounds=${boundsStr}`)
-                .then(response => response.json())
-                .then(data => {
+            tfrLayer.clearLayers();
+            fetch('/CAP_WxCOP/api/weather/tfr/active?bounds=' + getBoundsParam())
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
                     if (data.tfrs) {
-                        data.tfrs.forEach(tfr => {
+                        data.tfrs.forEach(function(tfr) {
                             if (tfr.geometry) {
-                                // Parse GeoJSON geometry
-                                const geoJson = L.geoJSON(tfr.geometry, {
+                                var g = L.geoJSON(tfr.geometry, {
                                     style: {
                                         color: '#FF0000',
                                         fillColor: '#FF0000',
                                         fillOpacity: 0.15,
                                         weight: 2,
-                                        dashArray: '5, 5'
+                                        dashArray: '5,5'
                                     }
                                 });
-                                
-                                // Add popup
-                                const popupContent = `
-                                    <div style="font-family: 'Courier New', monospace; min-width: 250px;">
-                                        <div style="font-weight: bold; font-size: 14px; color: #FF0000; margin-bottom: 8px;">
-                                            🚫 TFR ${tfr.tfr_number}
-                                        </div>
-                                        <div style="font-size: 12px; line-height: 1.5;">
-                                            <strong>Type:</strong> ${tfr.type}<br>
-                                            ${tfr.city ? `<strong>Location:</strong> ${tfr.city}, ${tfr.state}<br>` : ''}
-                                            ${tfr.facility ? `<strong>Facility:</strong> ${tfr.facility}<br>` : ''}
-                                            <strong>Effective:</strong><br>
-                                            &nbsp;&nbsp;${formatTFRTime(tfr.effective_start)} to<br>
-                                            &nbsp;&nbsp;${formatTFRTime(tfr.effective_end)}<br>
-                                            ${tfr.lower_altitude_ft !== null ? `<strong>Altitude:</strong> ${tfr.lower_altitude_ft}' - ${tfr.upper_altitude_ft}' MSL<br>` : ''}
-                                        </div>
-                                    </div>
-                                `;
-                                
-                                geoJson.bindPopup(popupContent);
-                                geoJson.addTo(tfrLayer);
+                                g.bindPopup(
+                                    '<b style="color:red;">&#x1F6AB; TFR ' + tfr.tfr_number + '</b>' +
+                                    '<br>Type: ' + tfr.type
+                                );
+                                g.addTo(tfrLayer);
                             }
                         });
-                        
-                        // Add TFR layer to map
                         tfrLayer.addTo(map);
                     }
                 })
-                .catch(error => {
-                    console.error('Error loading TFRs:', error);
-                });
+                .catch(function(err) { console.error('TFR load error:', err); });
         }
-        
-        function formatTFRTime(isoString) {
-            if (!isoString) return 'N/A';
-            const date = new Date(isoString);
-            return date.toLocaleString('en-US', { 
-                month: 'short', 
-                day: 'numeric', 
-                hour: '2-digit', 
-                minute: '2-digit',
-                timeZone: 'UTC',
-                timeZoneName: 'short'
-            });
-        }
-        
-        // TFR checkbox change handler
-        document.getElementById('showTFRs').addEventListener('change', loadTFRs);
-        
-        function getCeiling(metar) {
-            // Calculate ceiling from sky conditions
-            if (!metar.sky_conditions || metar.sky_conditions.length === 0) {
-                return null;
-            }
-            
-            let ceiling = null;
-            for (const layer of metar.sky_conditions) {
-                if (layer.cover === 'BKN' || layer.cover === 'OVC') {
-                    if (layer.height_ft) {
-                        if (ceiling === null || layer.height_ft < ceiling) {
-                            ceiling = layer.height_ft;
-                        }
-                    }
-                }
-            }
-            return ceiling;
-        }
-        
-        function formatCeiling(ceiling) {
-            if (ceiling === null) return 'None';
-            if (ceiling >= 1000) {
-                return `${(ceiling / 100).toFixed(0)}00 ft`;
-            }
-            return `${ceiling} ft`;
-        }
-        
-        // Wait for DOM and Leaflet to be ready
-        window.addEventListener('load', function() {
-            initMap();
-        });
+
+        window.addEventListener('load', function() { initMap(); });
     </script>
 </body>
 </html>
-

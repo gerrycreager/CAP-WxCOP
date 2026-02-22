@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Incident Data Archive - METWatch</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; background: #1a1a2e; color: #e0e0e0; min-height: 100vh; }
+
+        .header {
+            background: linear-gradient(135deg, #16213e, #0f3460);
+            padding: 15px 25px;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+        }
+        .header a {
+            background: linear-gradient(135deg, #3498db, #2980b9);
+            color: white;
+            padding: 8px 18px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 14px;
+        }
+        .header h1 {
+            font-size: 20px;
+            color: #e0e0e0;
+        }
+        .header p {
+            font-size: 13px;
+            color: #aaa;
+            margin-top: 2px;
+        }
+
+        .main {
+            display: grid;
+            grid-template-columns: 380px 1fr;
+            gap: 0;
+            height: calc(100vh - 65px);
+        }
+
+        /* ---- LEFT PANEL ---- */
+        .panel {
+            background: #16213e;
+            border-right: 1px solid #2a3a5e;
+            overflow-y: auto;
+            padding: 20px;
+        }
+
+        .section-title {
+            font-size: 13px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #7ecfff;
+            margin: 18px 0 8px 0;
+            padding-bottom: 4px;
+            border-bottom: 1px solid #2a3a5e;
+        }
+        .section-title:first-child { margin-top: 0; }
+
+        /* Location tabs */
+        .loc-tabs {
+            display: flex;
+            gap: 6px;
+            margin-bottom: 10px;
+        }
+        .loc-tab {
+            flex: 1;
+            padding: 7px 4px;
+            text-align: center;
+            font-size: 12px;
+            font-weight: 600;
+            border: 1px solid #2a3a5e;
+            border-radius: 5px;
+            cursor: pointer;
+            background: #0f3460;
+            color: #aaa;
+            transition: all 0.15s;
+        }
+        .loc-tab.active {
+            background: #2980b9;
+            color: white;
+            border-color: #2980b9;
+        }
+        .loc-tab:hover:not(.active) { border-color: #3498db; color: #e0e0e0; }
+
+        .loc-input { display: none; }
+        .loc-input.visible { display: block; }
+
+        /* Form elements */
+        label {
+            display: block;
+            font-size: 12px;
+            color: #aaa;
+            margin-bottom: 4px;
+            margin-top: 10px;
+        }
+        label:first-child { margin-top: 0; }
+
+        input[type="text"],
+        input[type="number"],
+        input[type="datetime-local"] {
+            width: 100%;
+            padding: 8px 10px;
+            background: #0f3460;
+            border: 1px solid #2a3a5e;
+            border-radius: 5px;
+            color: #e0e0e0;
+            font-size: 13px;
+            transition: border-color 0.15s;
+        }
+        input:focus { outline: none; border-color: #3498db; }
+        input::placeholder { color: #555; }
+
+        .input-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+        .hint {
+            font-size: 11px;
+            color: #666;
+            margin-top: 3px;
+        }
+
+        /* Radius row */
+        .radius-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+        /* Preview / Generate buttons */
+        .btn-row { display: flex; gap: 8px; margin-top: 18px; }
+        .btn {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .btn-preview {
+            background: #0f3460;
+            color: #7ecfff;
+            border: 1px solid #2a3a5e;
+        }
+        .btn-preview:hover { background: #1a4a80; }
+        .btn-generate {
+            background: linear-gradient(135deg, #27ae60, #229954);
+            color: white;
+        }
+        .btn-generate:hover { background: linear-gradient(135deg, #229954, #1e8449); }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        /* Status / preview box */
+        #status {
+            margin-top: 14px;
+            padding: 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            display: none;
+        }
+        #status.info    { background: #0f3460; border: 1px solid #2a3a5e; color: #7ecfff; }
+        #status.success { background: #1a3a2a; border: 1px solid #27ae60; color: #7ecfff; }
+        #status.error   { background: #3a1a1a; border: 1px solid #c0392b; color: #ff8a8a; }
+
+        .preview-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-top: 8px;
+        }
+        .preview-card {
+            background: rgba(0,0,0,0.3);
+            border-radius: 5px;
+            padding: 8px 10px;
+            text-align: center;
+        }
+        .preview-card .num { font-size: 22px; font-weight: 700; color: #7ecfff; }
+        .preview-card .lbl { font-size: 11px; color: #888; margin-top: 2px; }
+
+        .radar-site-list {
+            margin-top: 8px;
+            font-size: 11px;
+            color: #aaa;
+            max-height: 120px;
+            overflow-y: auto;
+        }
+        .radar-site-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 2px 0;
+            border-bottom: 1px solid #1a2a3a;
+        }
+
+        /* ---- RIGHT PANEL - MAP ---- */
+        .map-panel { position: relative; }
+        #map { width: 100%; height: 100%; }
+
+        .map-legend {
+            position: absolute;
+            bottom: 20px;
+            right: 10px;
+            background: rgba(22, 33, 62, 0.92);
+            border: 1px solid #2a3a5e;
+            border-radius: 6px;
+            padding: 10px 14px;
+            font-size: 12px;
+            z-index: 1000;
+            pointer-events: none;
+        }
+        .map-legend .leg-item { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
+        .leg-circle {
+            width: 14px; height: 14px;
+            border-radius: 50%;
+            border: 2px solid rgba(255,255,255,0.5);
+            flex-shrink: 0;
+        }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <a href="/">&#127968; Home</a>
+    <div>
+        <h1>Aircraft Incident Data Archive</h1>
+        <p>Collect weather data for aviation incident investigation</p>
+    </div>
+</div>
+
+<div class="main">
+    <!-- LEFT PANEL -->
+    <div class="panel">
+
+        <div class="section-title">Location</div>
+        <div class="loc-tabs">
+            <div class="loc-tab active" id="tab-airport" onclick="setLocType('airport')">Airport ID</div>
+            <div class="loc-tab"        id="tab-latlon"  onclick="setLocType('latlon')">Lat / Lon</div>
+            <div class="loc-tab"        id="tab-mgrs"    onclick="setLocType('mgrs')">MGRS</div>
+        </div>
+
+        <div class="loc-input visible" id="input-airport">
+            <label>ICAO Identifier</label>
+            <input type="text" id="airportId" placeholder="KCOS" maxlength="4"
+                   oninput="this.value=this.value.toUpperCase()">
+        </div>
+
+        <div class="loc-input" id="input-latlon">
+            <div class="input-row">
+                <div>
+                    <label>Latitude</label>
+                    <input type="text" id="lat" placeholder="38.8058">
+                    <div class="hint">Decimal or 38 48.348N</div>
+                </div>
+                <div>
+                    <label>Longitude</label>
+                    <input type="text" id="lon" placeholder="-104.7008">
+                    <div class="hint">Decimal or 104 42.048W</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="loc-input" id="input-mgrs">
+            <label>MGRS Coordinate</label>
+            <input type="text" id="mgrs" placeholder="13TDE1234567890"
+                   oninput="this.value=this.value.toUpperCase()">
+            <div class="hint">10-digit precision</div>
+        </div>
+
+        <div class="section-title">Incident Time (UTC)</div>
+        <input type="datetime-local" id="incidentTime">
+        <div class="hint">All times are UTC. Local time will be converted automatically.</div>
+
+        <div class="section-title">Collection Radii</div>
+        <div class="radius-row">
+            <div>
+                <label>METAR / TAF (nm)</label>
+                <input type="number" id="radius" value="100" min="10" max="300">
+            </div>
+            <div>
+                <label>Radar (nm)</label>
+                <input type="number" id="radarRadius" value="140" min="10" max="300">
+            </div>
+        </div>
+
+        <div class="btn-row">
+            <button class="btn btn-preview"  id="btnPreview"  onclick="previewArchive()">Preview</button>
+            <button class="btn btn-generate" id="btnGenerate" onclick="generateArchive()" disabled>
+                &#8595; Generate ZIP
+            </button>
+        </div>
+
+        <div id="status"></div>
+
+    </div>
+
+    <!-- RIGHT PANEL - MAP -->
+    <div class="map-panel">
+        <div id="map"></div>
+        <div class="map-legend">
+            <div class="leg-item">
+                <div class="leg-circle" style="background:rgba(231,76,60,0.7);border-color:#c0392b;"></div>
+                Incident location
+            </div>
+            <div class="leg-item">
+                <div class="leg-circle" style="background:rgba(52,152,219,0.4);border-color:#2980b9;"></div>
+                METAR / TAF radius
+            </div>
+            <div class="leg-item">
+                <div class="leg-circle" style="background:rgba(241,196,15,0.3);border-color:#f39c12;"></div>
+                Radar radius
+            </div>
+            <div class="leg-item">
+                <div class="leg-circle" style="background:rgba(39,174,96,0.7);border-color:#27ae60;"></div>
+                Radar site
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    // -----------------------------------------------------------------------
+    // MAP SETUP
+    // -----------------------------------------------------------------------
+    var map = L.map('map').setView([39.8, -98.6], 4);
+
+    L.tileLayer(
+        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+        { attribution: 'Tiles &copy; Esri', maxZoom: 18 }
+    ).addTo(map);
+
+    var incidentMarker = null;
+    var metarCircle    = null;
+    var radarCircle    = null;
+    var radarSiteLayers = [];
+
+    // -----------------------------------------------------------------------
+    // LOCATION TYPE SWITCHING
+    // -----------------------------------------------------------------------
+    var currentLocType = 'airport';
+
+    function setLocType(type) {
+        currentLocType = type;
+        ['airport', 'latlon', 'mgrs'].forEach(function(t) {
+            document.getElementById('tab-' + t).classList.toggle('active', t === type);
+            document.getElementById('input-' + t).classList.toggle('visible', t === type);
+        });
+    }
+
+    // -----------------------------------------------------------------------
+    // BUILD REQUEST BODY
+    // -----------------------------------------------------------------------
+    function buildRequestData() {
+        var incidentTime = document.getElementById('incidentTime').value;
+        if (!incidentTime) throw new Error('Incident time is required');
+
+        var isoTime = incidentTime + ':00Z';
+
+        var location;
+        if (currentLocType === 'airport') {
+            var sid = document.getElementById('airportId').value.trim().toUpperCase();
+            if (!sid) throw new Error('Airport identifier is required');
+            location = { type: 'airport', value: sid };
+
+        } else if (currentLocType === 'latlon') {
+            var lat = document.getElementById('lat').value.trim();
+            var lon = document.getElementById('lon').value.trim();
+            if (!lat || !lon) throw new Error('Latitude and longitude are required');
+            location = { type: 'latlon', value: { lat: lat, lon: lon } };
+
+        } else {
+            var mgrs = document.getElementById('mgrs').value.trim();
+            if (!mgrs) throw new Error('MGRS coordinate is required');
+            location = { type: 'mgrs', value: mgrs };
+        }
+
+        return {
+            location:        location,
+            incident_time:   isoTime,
+            radius_nm:       parseInt(document.getElementById('radius').value),
+            radar_radius_nm: parseInt(document.getElementById('radarRadius').value)
+        };
+    }
+
+    // -----------------------------------------------------------------------
+    // PREVIEW
+    // -----------------------------------------------------------------------
+    function previewArchive() {
+        var statusEl = document.getElementById('status');
+        statusEl.className = 'info';
+        statusEl.style.display = 'block';
+        statusEl.innerHTML = 'Querying database&hellip;';
+
+        document.getElementById('btnPreview').disabled  = true;
+        document.getElementById('btnGenerate').disabled = true;
+
+        var data;
+        try {
+            data = buildRequestData();
+        } catch(e) {
+            showError(e.message);
+            return;
+        }
+
+        fetch('/CAP_WxCOP/incident-archive/preview', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            if (d.error) { showError(d.error); return; }
+
+            // Update map
+            updateMap(d.lat, d.lon,
+                      data.radius_nm,
+                      data.radar_radius_nm,
+                      d.radar.sites);
+
+            // Show preview cards
+            var radarSiteList = d.radar.sites.map(function(s) {
+                return '<div class="radar-site-item">' +
+                       '<span>' + s.site + '</span>' +
+                       '<span>' + s.distance_nm + ' nm</span>' +
+                       '</div>';
+            }).join('');
+
+            statusEl.className = 'success';
+            statusEl.innerHTML =
+                '<strong>Preview: data available at incident time</strong>' +
+                '<div class="preview-grid">' +
+                  '<div class="preview-card"><div class="num">' + d.metars.stations + '</div><div class="lbl">METAR stations</div></div>' +
+                  '<div class="preview-card"><div class="num">' + d.metars.reports  + '</div><div class="lbl">METAR reports</div></div>' +
+                  '<div class="preview-card"><div class="num">' + d.tafs.stations   + '</div><div class="lbl">TAF stations</div></div>' +
+                  '<div class="preview-card"><div class="num">' + d.radar.sites.length + '</div><div class="lbl">Radar sites</div></div>' +
+                '</div>' +
+                (d.radar.sites.length > 0 ?
+                  '<div class="radar-site-list">' + radarSiteList + '</div>' : '') +
+                '<div style="margin-top:8px;font-size:11px;color:#888;">' +
+                  'Location: ' + d.lat.toFixed(4) + ', ' + d.lon.toFixed(4) +
+                '</div>';
+
+            document.getElementById('btnGenerate').disabled = false;
+            document.getElementById('btnPreview').disabled  = false;
+        })
+        .catch(function(err) {
+            showError('Network error: ' + err.message);
+        });
+    }
+
+    // -----------------------------------------------------------------------
+    // GENERATE
+    // -----------------------------------------------------------------------
+    function generateArchive() {
+        var statusEl = document.getElementById('status');
+        statusEl.className = 'info';
+        statusEl.style.display = 'block';
+        statusEl.innerHTML = 'Collecting data and building ZIP&hellip; This may take 15-30 seconds for large radar archives.';
+
+        document.getElementById('btnGenerate').disabled = true;
+        document.getElementById('btnPreview').disabled  = true;
+
+        var data;
+        try {
+            data = buildRequestData();
+        } catch(e) {
+            showError(e.message);
+            return;
+        }
+
+        fetch('/CAP_WxCOP/incident-archive/create', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        })
+        .then(function(r) {
+            if (!r.ok) {
+                return r.json().then(function(d) { throw new Error(d.error || 'Server error'); });
+            }
+            // Extract filename from Content-Disposition
+            var cd = r.headers.get('Content-Disposition') || '';
+            var fnMatch = cd.match(/filename="?([^";\n]+)"?/);
+            var filename = fnMatch ? fnMatch[1] : 'incident_archive.zip';
+            return r.blob().then(function(blob) { return { blob: blob, filename: filename }; });
+        })
+        .then(function(result) {
+            var url = window.URL.createObjectURL(result.blob);
+            var a   = document.createElement('a');
+            a.href     = url;
+            a.download = result.filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+
+            statusEl.className = 'success';
+            statusEl.innerHTML = '&#10003; Archive downloaded: <strong>' + result.filename + '</strong>';
+            document.getElementById('btnGenerate').disabled = false;
+            document.getElementById('btnPreview').disabled  = false;
+        })
+        .catch(function(err) {
+            showError(err.message);
+        });
+    }
+
+    // -----------------------------------------------------------------------
+    // MAP UPDATE
+    // -----------------------------------------------------------------------
+    function updateMap(lat, lon, metarRadius, radarRadius, radarSites) {
+        // Clear previous layers
+        if (incidentMarker) map.removeLayer(incidentMarker);
+        if (metarCircle)    map.removeLayer(metarCircle);
+        if (radarCircle)    map.removeLayer(radarCircle);
+        radarSiteLayers.forEach(function(l) { map.removeLayer(l); });
+        radarSiteLayers = [];
+
+        var nmToM = 1852;
+
+        // Radar radius (outer)
+        radarCircle = L.circle([lat, lon], {
+            radius:      radarRadius * nmToM,
+            color:       '#f39c12',
+            weight:      1.5,
+            fillColor:   '#f39c12',
+            fillOpacity: 0.06,
+            dashArray:   '6,4'
+        }).addTo(map);
+
+        // METAR radius (inner)
+        metarCircle = L.circle([lat, lon], {
+            radius:      metarRadius * nmToM,
+            color:       '#2980b9',
+            weight:      1.5,
+            fillColor:   '#2980b9',
+            fillOpacity: 0.08
+        }).addTo(map);
+
+        // Incident marker
+        incidentMarker = L.circleMarker([lat, lon], {
+            radius:      8,
+            color:       '#c0392b',
+            weight:      2,
+            fillColor:   '#e74c3c',
+            fillOpacity: 0.9
+        }).bindTooltip('Incident location', { permanent: false, direction: 'top' })
+          .addTo(map);
+
+        // Radar site markers
+        radarSites.forEach(function(s) {
+            var siteInfo = null;
+            // Site coords from preview response don't include lat/lon,
+            // so we place markers only if we can look them up.
+            // The backend includes them when it can. For now show a
+            // label near incident with offset — best effort.
+            var marker = L.circleMarker([lat, lon], {
+                // placeholder - real coords need to come from preview endpoint
+                radius: 5, color: '#27ae60', fillColor: '#27ae60', fillOpacity: 0.7
+            });
+            // We don't have site lat/lon in the current preview response.
+            // This will be improved in Phase 2 when preview returns site coords.
+        });
+
+        map.fitBounds(radarCircle.getBounds(), { padding: [20, 20] });
+    }
+
+    // -----------------------------------------------------------------------
+    // HELPERS
+    // -----------------------------------------------------------------------
+    function showError(msg) {
+        var statusEl = document.getElementById('status');
+        statusEl.className = 'error';
+        statusEl.style.display = 'block';
+        statusEl.innerHTML = '&#9888; ' + msg;
+        document.getElementById('btnPreview').disabled  = false;
+        document.getElementById('btnGenerate').disabled = false;
+    }
+
+    // Set default incident time to 1 hour ago (UTC)
+    (function() {
+        var now = new Date();
+        now.setHours(now.getHours() - 1);
+        now.setSeconds(0);
+        now.setMilliseconds(0);
+        var pad = function(n) { return String(n).padStart(2, '0'); };
+        document.getElementById('incidentTime').value =
+            now.getUTCFullYear() + '-' +
+            pad(now.getUTCMonth() + 1) + '-' +
+            pad(now.getUTCDate()) + 'T' +
+            pad(now.getUTCHours()) + ':' +
+            pad(now.getUTCMinutes());
+    })();
+</script>
+</body>
+</html>
+
