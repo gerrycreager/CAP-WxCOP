@@ -455,8 +455,11 @@
                 }
                 var tafRawText = (md.taf && md.taf.raw_text) ? md.taf.raw_text : null;
 
-                var wind = (obs.wind_dir || '---') + '° @ ' + (obs.wind_speed_kts || 0) + ' kt';
-                if (obs.wind_gust_kts) wind += ' gusting ' + obs.wind_gust_kts + ' kt';
+                var windDir = obs.wind_dir != null
+                    ? String(obs.wind_dir).padStart(3, '0')
+                    : '---';
+                var wind = windDir + '° @ ' + (obs.wind_speed_kts || 0) + ' kts';
+                if (obs.wind_gust_kts) wind += ' gusts ' + obs.wind_gust_kts + ' kts';
 
                 var tier = airportTiers[metar.station_id] || (metar.is_military === true ? 1 : null);
                 var badge = '';
@@ -508,7 +511,7 @@
                              ';font-weight:bold;">' + obs.flight_category + '</span></p>' +
                              '<p><strong>Wind:</strong> ' + wind + '</p>' +
                              '<p><strong>Visibility:</strong> ' + (obs.visibility_sm || '---') + ' SM</p>' +
-                             '<p><strong>Sky:</strong> ' + skyText + '</p>' +
+                             '<p><strong>Sky Cond:</strong> ' + skyText + '</p>' +
                              '<p><strong>Temperature:</strong> ' + tempText + '</p>' +
                              '<p><strong>Dewpoint:</strong> ' + dewpointText + '</p>' +
                              '<p><strong>Altimeter:</strong> ' + (obs.altimeter_hg || '---') + ' inHg</p>' +
