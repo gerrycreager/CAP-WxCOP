@@ -29,7 +29,7 @@ REGION_BOUNDS = {
     'PCR':       {'west': -125, 'south': 32,  'east': -114, 'north': 49},
     'AK':        {'west': -180, 'south': 51,  'east': -130, 'north': 72},
     'HI':        {'west': -161, 'south': 18,  'east': -154, 'north': 23},
-    'CARIBBEAN': {'west': -68,  'south': 17,  'east': -64,  'north': 19},
+    'CARIBBEAN': {'west': -80,  'south': 17,  'east': -64,  'north': 27},
 }
 
 
@@ -257,7 +257,7 @@ def get_state_forecasts(state_code):
     # State bounding boxes (simplified - you may want more precise bounds)
     state_bounds = {
             'AL': {'west': -88.5, 'south': 30.1, 'east': -84.8, 'north': 35.1},
-        'AK': {'west': 172, 'south': 51, 'east': -129, 'north': 72},
+        'AK': {'west': -180, 'south': 51, 'east': -129, 'north': 72},
         'AZ': {'west': -114.8, 'south': 31.3, 'east': -109.0, 'north': 37.1},
         'AR': {'west': -94.6, 'south': 33.0, 'east': -89.6, 'north': 36.5},
         'CA': {'west': -124.5, 'south': 32.5, 'east': -114.1, 'north': 42.1},

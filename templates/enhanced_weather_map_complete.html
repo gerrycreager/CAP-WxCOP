@@ -160,7 +160,7 @@
             <option value="conus">CONUS</option>
             <option value="ak">Alaska</option>
             <option value="hi">Hawaii</option>
-            <option value="carib">Caribbean</option>
+            <option value="carib">Caribbean / Bahamas</option>
         </select>
 
         <div class="divider"></div>
@@ -589,10 +589,11 @@
         }
 
         var COVERAGE_BOUNDS = {
-            'conus': { west: -125, south: 24,  east: -66,  north: 50,  center: [39.0, -98.0], zoom: 5 },
+            'conus': { west: -125, south: 24,  east: -66,  north: 50,  center: [39.0, -98.0],  zoom: 5 },
             'ak':    { west: -180, south: 51,  east: -130, north: 72,  center: [64.0, -153.0], zoom: 5 },
             'hi':    { west: -161, south: 18,  east: -154, north: 23,  center: [20.5, -157.0], zoom: 7 },
-            'carib': { west: -68,  south: 17,  east: -64,  north: 19,  center: [18.2, -66.0],  zoom: 8 }
+            // Caribbean: PR/USVI + Bahamas (to ~77W, 27N) + Turks & Caicos (~72W, 22N)
+            'carib': { west: -80,  south: 17,  east: -64,  north: 27,  center: [22.5, -72.0],  zoom: 6 }
         };
 
         function loadWeatherData() {
