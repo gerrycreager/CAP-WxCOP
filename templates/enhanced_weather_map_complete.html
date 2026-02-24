@@ -161,6 +161,15 @@
             <option value="ak">Alaska</option>
             <option value="hi">Hawaii</option>
             <option value="carib">Caribbean / Bahamas</option>
+            <option disabled>──────────────</option>
+            <option value="ncr">North Central Region</option>
+            <option value="glr">Great Lakes Region</option>
+            <option value="mar">Mid-Atlantic Region</option>
+            <option value="ner">Northeast Region</option>
+            <option value="ser">Southeast Region</option>
+            <option value="swr">Southwest Region</option>
+            <option value="rmr">Rocky Mountain Region</option>
+            <option value="pcr">Pacific Region (Western US)</option>
         </select>
 
         <div class="divider"></div>
@@ -592,11 +601,20 @@
         }
 
         var COVERAGE_BOUNDS = {
-            'conus': { west: -125, south: 24,  east: -66,  north: 50,  center: [39.0, -98.0],  zoom: 5 },
-            'ak':    { west: -180, south: 51,  east: -130, north: 72,  center: [64.0, -153.0], zoom: 5 },
-            'hi':    { west: -161, south: 18,  east: -154, north: 23,  center: [20.5, -157.0], zoom: 7 },
+            'conus': { west: -125, south: 24,  east: -66,  north: 50,  center: [39.0,  -98.0],  zoom: 5 },
+            'ak':    { west: -180, south: 51,  east: -130, north: 72,  center: [64.0, -153.0],  zoom: 5 },
+            'hi':    { west: -161, south: 18,  east: -154, north: 23,  center: [20.5, -157.0],  zoom: 7 },
             // Caribbean: PR/USVI + Bahamas (to ~77W, 27N) + Turks & Caicos (~72W, 22N)
-            'carib': { west: -80,  south: 17,  east: -64,  north: 27,  center: [22.5, -72.0],  zoom: 6 }
+            'carib': { west: -80,  south: 17,  east: -64,  north: 27,  center: [22.5,  -72.0],  zoom: 6 },
+            // CAP Regions
+            'ncr':   { west: -104, south: 37,  east: -89,  north: 49,  center: [43.5,  -96.5],  zoom: 6 },
+            'glr':   { west: -93,  south: 37,  east: -80,  north: 49,  center: [43.5,  -86.5],  zoom: 6 },
+            'mar':   { west: -84,  south: 32,  east: -75,  north: 40,  center: [36.0,  -79.5],  zoom: 6 },
+            'ner':   { west: -80,  south: 39,  east: -66,  north: 48,  center: [43.5,  -73.0],  zoom: 6 },
+            'ser':   { west: -92,  south: 24,  east: -79,  north: 37,  center: [30.5,  -85.5],  zoom: 6 },
+            'swr':   { west: -115, south: 25,  east: -89,  north: 37,  center: [31.5, -102.0],  zoom: 6 },
+            'rmr':   { west: -117, south: 37,  east: -102, north: 49,  center: [43.0, -109.5],  zoom: 6 },
+            'pcr':   { west: -125, south: 32,  east: -114, north: 49,  center: [40.5, -119.5],  zoom: 6 }
         };
 
         function loadWeatherData() {
