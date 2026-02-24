@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CAP Wind Constraints Forecast</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; overflow: hidden; }
+        #map { height: 100vh; width: 100%; }
+
+        .home-btn {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            z-index: 1000;
+            background: linear-gradient(135deg, #2c5f41, #4a7c59);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 600;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            transition: all 0.2s ease;
+        }
+        .home-btn:hover {
+            background: linear-gradient(135deg, #4a7c59, #2c5f41);
+            transform: translateY(-2px);
+            color: white;
+            text-decoration: none;
+        }
+
+        .controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+            z-index: 1000;
+            max-width: 285px;
+        }
+        .controls h3 { margin-bottom: 10px; font-size: 16px; color: #2c3e50; }
+        
+        .layer-selector {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background: white;
+            font-size: 14px;
+        }
+        
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            font-size: 14px;
+            cursor: pointer;
+            margin: 5px 0;
+        }
+        input[type="checkbox"] { margin-right: 8px; cursor: pointer; }
+        .divider { margin: 10px 0; border-top: 1px solid #ddd; }
+        .legend-item { display: flex; align-items: center; margin: 4px 0; font-size: 12px; }
+        .legend-dot {
+            width: 14px; height: 14px;
+            border-radius: 50%;
+            margin-right: 8px;
+            border: 2px solid #000;
+            flex-shrink: 0;
+        }
+        .legend-tag {
+            min-width: 36px; height: 15px;
+            border-radius: 3px;
+            margin-right: 8px;
+            font-size: 9px; font-weight: 700;
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0;
+        }
+
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            padding: 20px 40px;
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            z-index: 2000;
+            font-size: 18px;
+        }
+
+        /* Military labels - always visible */
+        .apt-t1 {
+            font-size: 11px;
+            font-weight: 700;
+            color: white;
+            background: rgba(200, 30, 30, 0.93);
+            padding: 2px 5px;
+            border-radius: 3px;
+            border: 1px solid #800;
+            white-space: nowrap;
+            pointer-events: none;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+            transform: translateX(-50%);
+        }
+
+        /* Regular airport labels */
+        .apt-t2 {
+            font-size: 10px;
+            font-weight: 600;
+            color: #333;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 1px 4px;
+            border-radius: 3px;
+            border: 1px solid #888;
+            white-space: nowrap;
+            pointer-events: none;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+            transform: translateX(-50%);
+        }
+
+        .runway-info {
+            font-family: 'Courier New', monospace;
+            font-size: 0.8rem;
+            margin: 0.5rem 0;
+            padding: 0.5rem;
+            background: #f8f9fa;
+            border-radius: 4px;
+        }
+        
+        .crosswind-high { color: #dc3545; font-weight: bold; }
+        .crosswind-med { color: #ffc107; font-weight: bold; }
+        .crosswind-low { color: #28a745; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <a href="/" class="home-btn">🏠 Home</a>
+    <div id="map"></div>
+    <div id="loading">Loading wind constraint forecast data...</div>
+
+    <div class="controls">
+        <h3>Map Layer</h3>
+        <select id="layerSelector" class="layer-selector">
+            <option value="street">Street Map</option>
+            <option value="sectional">VFR Sectional (zoom >5 mi)</option>
+            <option value="satellite">Satellite</option>
+            <option value="dark">Dark Mode</option>
+            <option value="topo">Topographic</option>
+        </select>
+
+        <div class="divider"></div>
+        <h3>Coverage Area</h3>
+        <select id="regionSelector" class="layer-selector">
+            <option value="conus">CONUS</option>
+            <option value="region/AK">Alaska</option>
+            <option value="region/HI">Hawaii</option>
+            <option value="region/CARIBBEAN">Caribbean</option>
+            <option value="region/NCR">NCR</option>
+            <option value="region/GLR">Great Lakes</option>
+            <option value="region/MAR">Mid-Atlantic</option>
+            <option value="region/NER">Northeast</option>
+            <option value="region/SER">Southeast</option>
+            <option value="region/SWR">Southwest</option>
+            <option value="region/RMR">Rocky Mountain</option>
+            <option value="region/PCR">Pacific</option>
+        </select>
+        <label class="checkbox-label"><input type="checkbox" id="airmetToggle"> AIRMET</label>
+        <label class="checkbox-label"><input type="checkbox" id="sigmetToggle"> SIGMET</label>
+
+        <div class="divider"></div>
+        <h3>CAPR 70-1 Wind Constraints</h3>
+        <div class="legend-item"><div class="legend-dot" style="background:#28a745;"></div>< 20 kt, X-wind < 10 kt</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#ffc107;"></div>20-29 kt or X-wind 10-14 kt</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#dc3545;"></div>≥ 30 kt or X-wind ≥ 15 kt</div>
+
+        <div class="divider"></div>
+        <div class="legend-item"><div class="legend-tag" style="background:rgba(200,30,30,0.9);color:white;">MIL</div>Military</div>
+        
+        <div class="divider"></div>
+        <div style="font-size: 11px; color: #666;">
+            Coverage: CONUS (HRRR Model)
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        var map, labelsLayer, baseLayers = {};
+        var airmetLayer, sigmetLayer;
+        var currentAirports = [];
+        var windMarkers = [];
+        var currentLayerName = 'street';
+
+        function initMap() {
+            map = L.map('map', {
+                center: [39.0, -98.0],
+                zoom: 5,
+                zoomControl: true
+            });
+
+            // Define base layers
+            baseLayers = {
+                'street': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '&copy; OpenStreetMap contributors',
+                    maxZoom: 18
+                }),
+                'sectional': L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Specialty/World_Navigation_Charts/MapServer/tile/{z}/{y}/{x}', {
+                    attribution: 'VFR Sectional Charts &copy; FAA, Esri',
+                    maxZoom: 12,
+                    minZoom: 5
+                }),
+                'satellite': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                    attribution: 'Tiles &copy; Esri',
+                    maxZoom: 18
+                }),
+                'dark': L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                    attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+                    subdomains: 'abcd',
+                    maxZoom: 18
+                }),
+                'topo': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', {
+                    attribution: 'Tiles &copy; Esri',
+                    maxZoom: 18
+                })
+            };
+
+            // Start with street map
+            baseLayers[currentLayerName].addTo(map);
+
+            // Add scale control
+            L.control.scale({
+                position: 'bottomleft',
+                imperial: true,
+                metric: false,
+                maxWidth: 150
+            }).addTo(map);
+
+            labelsLayer = L.layerGroup().addTo(map);
+
+            setupControls();
+            loadWindForecastData();
+
+            map.on('zoomend moveend', updateLabels);
+        }
+
+        function setupControls() {
+            // Layer selector
+            document.getElementById('layerSelector').addEventListener('change', function(e) {
+                const newLayer = e.target.value;
+                try {
+                    Object.values(baseLayers).forEach(layer => {
+                        if (map.hasLayer(layer)) {
+                            map.removeLayer(layer);
+                        }
+                    });
+                    
+                    if (newLayer === 'sectional' && map.getZoom() < 5) {
+                        alert('VFR Sectional charts are only available at zoom levels showing areas less than 5 miles across.');
+                        baseLayers['street'].addTo(map);
+                        this.value = 'street';
+                        currentLayerName = 'street';
+                    } else if (baseLayers[newLayer]) {
+                        baseLayers[newLayer].addTo(map);
+                        currentLayerName = newLayer;
+                    } else {
+                        baseLayers['street'].addTo(map);
+                        this.value = 'street';
+                        currentLayerName = 'street';
+                    }
+                } catch (error) {
+                    console.error('Layer switch error:', error);
+                    baseLayers['street'].addTo(map);
+                    this.value = 'street';
+                    currentLayerName = 'street';
+                }
+            });
+
+            // Region selector
+            document.getElementById('regionSelector').addEventListener('change', function() {
+                loadWindForecastData();
+            });
+
+            // AIRMET/SIGMET toggles
+            document.getElementById('airmetToggle').addEventListener('change', function(e) {
+                if (e.target.checked) {
+                    loadAirmets();
+                } else {
+                    if (airmetLayer) {
+                        map.removeLayer(airmetLayer);
+                    }
+                }
+            });
+            
+            document.getElementById('sigmetToggle').addEventListener('change', function(e) {
+                if (e.target.checked) {
+                    loadSigmets();
+                } else {
+                    if (sigmetLayer) {
+                        map.removeLayer(sigmetLayer);
+                    }
+                }
+            });
+        }
+
+        function updateLabels() {
+            labelsLayer.clearLayers();
+            var zoom = map.getZoom();
+            var bounds = map.getBounds();
+
+            // Zoom thresholds: priority 1 (MIL) always, P2 at zoom>=5, P3 at zoom>=8
+            // P1 must show at CONUS zoom (~4-5) and even zoomed out further
+            currentAirports.forEach(function(airport) {
+                if (!bounds.contains([airport.lat, airport.lon])) return;
+
+                var sid = airport.station_id;
+                // Use label_priority from API; fall back to is_military flag
+                var priority = airport.label_priority ||
+                               (airport.is_military === true ? 1 : 3);
+
+                // Priority 1 (military): always visible at every zoom level
+                if (priority === 1) {
+                    var label = L.marker([airport.lat, airport.lon], {
+                        icon: L.divIcon({
+                            className: 'apt-t1',
+                            html: sid,
+                            iconSize: null,
+                            iconAnchor: [0, 22]
+                        }),
+                        interactive: false,
+                        zIndexOffset: 1000
+                    });
+                    label.addTo(labelsLayer);
+                    return;
+                }
+
+                // Priority 2 (major hub / large runway): zoom >= 5
+                if (priority === 2 && zoom >= 5) {
+                    var label = L.marker([airport.lat, airport.lon], {
+                        icon: L.divIcon({
+                            className: 'apt-t2',
+                            html: sid,
+                            iconSize: null,
+                            iconAnchor: [0, 22]
+                        }),
+                        interactive: false,
+                        zIndexOffset: 500
+                    });
+                    label.addTo(labelsLayer);
+                    return;
+                }
+
+                // Priority 3 (regional / medium): zoom >= 8
+                if (priority === 3 && zoom >= 8) {
+                    var label = L.marker([airport.lat, airport.lon], {
+                        icon: L.divIcon({
+                            className: 'apt-t2',
+                            html: sid,
+                            iconSize: null,
+                            iconAnchor: [0, 22]
+                        }),
+                        interactive: false,
+                        zIndexOffset: 100
+                    });
+                    label.addTo(labelsLayer);
+                }
+            });
+        }
+
+        async function loadAirmets() {
+            try {
+                const response = await fetch('/CAP_WxCOP/api/airmet-sigmet/airmets');
+                console.log('AIRMET response status:', response.status);
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log('AIRMET data:', data);
+                    displayAirmets(data.airmets || data);
+                } else {
+                    console.log('AIRMET data not available, status:', response.status);
+                }
+            } catch (error) {
+                console.log('Error loading AIRMETs:', error);
+            }
+        }
+
+        async function loadSigmets() {
+            try {
+                const response = await fetch('/CAP_WxCOP/api/airmet-sigmet/sigmets');
+                console.log('SIGMET response status:', response.status);
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log('SIGMET data:', data);
+                    displaySigmets(data.sigmets || data);
+                } else {
+                    console.log('SIGMET data not available, status:', response.status);
+                }
+            } catch (error) {
+                console.log('Error loading SIGMETs:', error);
+            }
+        }
+
+        function displayAirmets(airmets) {
+            if (airmetLayer) map.removeLayer(airmetLayer);
+            airmetLayer = L.layerGroup();
+            
+            if (airmets && airmets.length > 0) {
+                airmets.forEach(airmet => {
+                    if (airmet.geometry || airmet.geojson) {
+                        const geometry = airmet.geometry || airmet.geojson;
+                        const airmetArea = L.geoJSON(geometry, {
+                            style: { color: '#ff6b35', weight: 2, opacity: 0.8, fillOpacity: 0.2 }
+                        }).bindPopup(`
+                            <div style="font-family: monospace;">
+                                <h3>AIRMET</h3>
+                                <p><strong>Type:</strong> ${airmet.hazard || airmet.type || 'Weather Hazard'}</p>
+                                <p><strong>Valid:</strong> ${airmet.valid_from || airmet.start_time} - ${airmet.valid_to || airmet.end_time}</p>
+                                ${airmet.text || airmet.raw_text ? `<p><strong>Text:</strong> ${airmet.text || airmet.raw_text}</p>` : ''}
+                            </div>
+                        `);
+                        airmetLayer.addLayer(airmetArea);
+                    }
+                });
+                console.log(`Added ${airmets.length} AIRMET areas`);
+                airmetLayer.addTo(map);
+            } else {
+                console.log('No AIRMET areas to display');
+            }
+        }
+
+        function displaySigmets(sigmets) {
+            if (sigmetLayer) map.removeLayer(sigmetLayer);
+            sigmetLayer = L.layerGroup();
+            
+            if (sigmets && sigmets.length > 0) {
+                sigmets.forEach(sigmet => {
+                    if (sigmet.geometry || sigmet.geojson) {
+                        const geometry = sigmet.geometry || sigmet.geojson;
+                        const sigmetArea = L.geoJSON(geometry, {
+                            style: { color: '#d63384', weight: 3, opacity: 0.9, fillOpacity: 0.3 }
+                        }).bindPopup(`
+                            <div style="font-family: monospace;">
+                                <h3>SIGMET</h3>
+                                <p><strong>Type:</strong> ${sigmet.hazard || sigmet.type || 'Severe Weather'}</p>
+                                <p><strong>Valid:</strong> ${sigmet.valid_from || sigmet.start_time} - ${sigmet.valid_to || sigmet.end_time}</p>
+                                ${sigmet.text || sigmet.raw_text ? `<p><strong>Text:</strong> ${sigmet.text || sigmet.raw_text}</p>` : ''}
+                            </div>
+                        `);
+                        sigmetLayer.addLayer(sigmetArea);
+                    }
+                });
+                console.log(`Added ${sigmets.length} SIGMET areas`);
+                sigmetLayer.addTo(map);
+            } else {
+                console.log('No SIGMET areas to display');
+            }
+        }
+
+        function addWindMarker(airport) {
+            var lat = airport.lat;
+            var lon = airport.lon;
+            var windSpeed = airport.max_wind_kts || 0;
+            var windGust = airport.max_gust_kts || null;
+            var windDir = airport.wind_direction || 270;
+            var maxWind = Math.max(windSpeed, windGust || 0);
+            var model = airport.model || 'HRRR';
+
+            if (maxWind === 0) return;
+
+            var stationId = airport.station_id;
+            var airportName = airport.name || 'Unknown Airport';
+            var isMilitary = airport.is_military === true || airport.military === true;
+            var longestRunway = airport.longest_runway_ft || 3000;
+            var runwayHeading = airport.runway_heading || 270;
+
+            var bestRunwayHeading = findBestRunway(windDir, [runwayHeading, (runwayHeading + 180) % 360]);
+            var crosswindComponent = calculateCrosswind(windDir, maxWind, bestRunwayHeading);
+
+            // CAPR 70-1 constraint determination
+            var color = '#28a745'; // Green
+            var category = 'No Restrictions';
+            var reason = '';
+
+            if (crosswindComponent >= 15) {
+                color = '#dc3545'; // Red
+                category = 'Restricted Operations';
+                reason = `Crosswind ${Math.round(crosswindComponent)} kt`;
+            } else if (crosswindComponent >= 10) {
+                color = '#ffc107'; // Yellow
+                category = 'Limited Operations';
+                reason = `Crosswind ${Math.round(crosswindComponent)} kt`;
+            } else if (maxWind >= 30) {
+                color = '#dc3545'; // Red
+                category = 'Restricted Operations';
+                reason = `Wind ${Math.round(maxWind)} kt`;
+            } else if (maxWind >= 20) {
+                color = '#ffc107'; // Yellow
+                category = 'Limited Operations';
+                reason = `Wind ${Math.round(maxWind)} kt`;
+            }
+
+            var icon = L.divIcon({
+                className: '',
+                html: '<div style="width:12px;height:12px;background:' + color +
+                      ';border:2px solid #000;border-radius:50%;' +
+                      'box-shadow:0 0 4px rgba(0,0,0,0.5);"></div>',
+                iconSize: [12, 12],
+                iconAnchor: [6, 6]
+            });
+
+            var marker = L.marker([lat, lon], { icon: icon });
+
+            // Calculate runway designator
+            var runwayDesignator = Math.round(bestRunwayHeading / 10) || Math.round(runwayHeading / 10);
+            var runwayId = runwayDesignator === 0 ? "36" : String(runwayDesignator).padStart(2, '0');
+
+            var windText = windGust ? 
+                `${windDir}° at ${Math.round(windSpeed)} kt gusting ${Math.round(windGust)} kt` :
+                `${windDir}° at ${Math.round(windSpeed)} kt`;
+
+            var crosswindClass = crosswindComponent >= 15 ? 'crosswind-high' : 
+                               crosswindComponent >= 10 ? 'crosswind-med' : 'crosswind-low';
+
+            var popupContent = `
+                <div style="font-family: 'Courier New', monospace; min-width: 280px;">
+                    <h3 style="margin: 0 0 0.5rem 0;">
+                        ${stationId} ${isMilitary ? '(MIL)' : ''}
+                    </h3>
+                    <p style="margin: 0 0 0.5rem 0; font-weight: bold; font-size: 0.9rem;">${airportName}</p>
+                    <hr style="margin: 0.5rem 0; border: none; border-top: 1px solid #ddd;">
+                    
+                    <p style="margin: 0.25rem 0;"><strong>${model} Forecast:</strong> ${windText}</p>
+                    <p style="margin: 0.25rem 0;"><strong>CAPR 70-1:</strong> 
+                       <span style="color: ${color === '#dc3545' ? '#dc3545' : color === '#ffc107' ? '#856404' : '#28a745'}; font-weight: bold;">${category}</span>
+                       ${reason ? ` (${reason})` : ''}
+                    </p>
+                    
+                    <div class="runway-info">
+                        <div style="font-weight: bold; margin-bottom: 0.25rem;">Runway Analysis:</div>
+                        <div>Longest: ${Math.round(longestRunway/100)*100}' (Rwy ${runwayId})</div>
+                        <div>Best aligned: Rwy ${Math.round(bestRunwayHeading / 10) || 36}</div>
+                        <div>Crosswind: <span class="${crosswindClass}">${Math.round(crosswindComponent)} kt</span></div>
+                        <div>Headwind: ${Math.round(Math.abs(Math.cos((windDir - bestRunwayHeading) * Math.PI / 180) * maxWind))} kt</div>
+                    </div>
+                </div>
+            `;
+
+            marker.bindPopup(popupContent);
+            marker.addTo(map);
+            windMarkers.push(marker);
+        }
+
+        function calculateCrosswind(windDirection, windSpeed, runwayHeading) {
+            const windAngle = windDirection * Math.PI / 180;
+            const runwayAngle = runwayHeading * Math.PI / 180;
+            const angleDiff = windAngle - runwayAngle;
+            return Math.abs(windSpeed * Math.sin(angleDiff));
+        }
+
+        function findBestRunway(windDirection, runwayHeadings) {
+            let bestRunway = runwayHeadings[0];
+            let minCrosswind = 999;
+            
+            runwayHeadings.forEach(heading => {
+                const crosswind = Math.abs(Math.sin((windDirection - heading) * Math.PI / 180));
+                if (crosswind < minCrosswind) {
+                    minCrosswind = crosswind;
+                    bestRunway = heading;
+                }
+            });
+            
+            return bestRunway;
+        }
+
+        function loadWindForecastData() {
+            var region = document.getElementById('regionSelector').value;
+            var url = '/CAP_WxCOP/api/wind-forecast/' + region;
+
+            // Clear existing markers
+            windMarkers.forEach(function(m) { map.removeLayer(m); });
+            windMarkers = [];
+            currentAirports = [];
+            labelsLayer.clearLayers();
+
+            document.getElementById('loading').style.display = 'block';
+
+            fetch(url)
+                .then(function(response) {
+                    console.log('Wind forecast response status:', response.status);
+                    return response.json();
+                })
+                .then(function(data) {
+                    document.getElementById('loading').style.display = 'none';
+
+                    if (data.airports && data.airports.length > 0) {
+                        currentAirports = data.airports;
+                        data.airports.forEach(addWindMarker);
+                        updateLabels();
+
+                        // Fit map to region bounds if provided
+                        if (data.bounds) {
+                            var b = data.bounds;
+                            map.fitBounds([[b.south, b.west], [b.north, b.east]]);
+                        }
+
+                        var milCount = data.airports.filter(function(a) {
+                            return a.is_military === true || a.label_priority === 1;
+                        }).length;
+                        console.log('Loaded ' + data.airports.length + ' airports (' + milCount + ' military)');
+                    } else {
+                        console.log('No wind data returned for region: ' + region);
+                    }
+                })
+                .catch(function(error) {
+                    console.error('Error loading wind forecast data:', error);
+                    document.getElementById('loading').style.display = 'none';
+                });
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', initMap);
+
+        // Suppress browser extension errors
+        window.addEventListener('error', function(e) {
+            if (e.message && e.message.includes('message channel closed')) {
+                return true;
+            }
+        });
+    </script>
+</body>
+</html>
+

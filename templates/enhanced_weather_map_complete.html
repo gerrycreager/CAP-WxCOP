@@ -3,752 +3,639 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Enhanced Weather Map - Military Priority</title>
+    <title>Weather COP</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: 'Courier New', monospace;
-            background: #1a1a1a;
-            color: #e0e0e0;
-            margin: 0;
-            padding: 0;
+        body { font-family: Arial, sans-serif; overflow: hidden; }
+        #map { height: 100vh; width: 100%; }
+
+        .home-btn {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            z-index: 1000;
+            background: linear-gradient(135deg, #2c5f41, #4a7c59);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 600;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            transition: all 0.2s ease;
         }
-        #map {
-            width: 100vw;
-            height: calc(100vh - 48px);
-            margin-top: 48px;
+        .home-btn:hover {
+            background: linear-gradient(135deg, #4a7c59, #2c5f41);
+            transform: translateY(-2px);
+            color: white;
+            text-decoration: none;
         }
-        
-        /* Enhanced Control Panel */
-        .control-panel {
+
+        .controls {
             position: absolute;
             top: 10px;
-            left: 10px;
-            background: rgba(42, 42, 42, 0.95);
+            right: 10px;
+            background: white;
             padding: 15px;
             border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
             z-index: 1000;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.6);
-            backdrop-filter: blur(5px);
-            min-width: 280px;
+            max-width: 285px;
         }
-        .control-title {
-            font-size: 16px;
-            color: #ff6b47;
-            margin-bottom: 12px;
-            font-weight: bold;
-            text-align: center;
-            border-bottom: 2px solid #ff6b47;
-            padding-bottom: 6px;
-        }
-        .control-title::before {
-            content: "⭐ ";
-            color: #ffd700;
-        }
+        .controls h3 { margin-bottom: 10px; font-size: 16px; color: #2c3e50; }
         
-        /* Station Counter */
-        .station-counter {
-            background: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%);
-            color: white;
-            padding: 8px 12px;
-            border-radius: 6px;
-            margin-bottom: 12px;
-            text-align: center;
-            font-size: 12px;
-            font-weight: bold;
-        }
-        
-        /* Control Groups */
-        .control-group {
-            margin-bottom: 15px;
-            padding: 10px;
-            background: rgba(255,255,255,0.05);
-            border-radius: 6px;
-        }
-        .control-group-title {
-            font-size: 12px;
-            color: #4a9eff;
-            margin-bottom: 8px;
-            font-weight: bold;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-        .control-item {
-            margin: 6px 0;
-        }
-        .control-item label {
-            font-size: 11px;
-            color: #b0b0b0;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        .control-item input[type="checkbox"] {
-            transform: scale(1.2);
-            accent-color: #ff6b47;
-        }
-        
-        /* Priority Legend */
-        .priority-legend {
-            display: grid;
-            gap: 6px;
-        }
-        .legend-item {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 10px;
-        }
-        .legend-marker {
-            width: 16px;
-            height: 16px;
-            border-radius: 2px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-            font-size: 10px;
-            border: 1px solid #fff;
-        }
-        .legend-mil { background: #dc2626; color: white; }
-        .legend-mil::before { content: "★"; }
-        .legend-major { background: #2563eb; color: white; }
-        .legend-regional { background: #16a34a; color: white; }
-        .legend-small { background: #6b7280; color: white; }
-        
-        /* Station Labels */
-        .station-label {
-            background: rgba(0,0,0,0.8);
-            color: white;
-            padding: 2px 6px;
-            border-radius: 3px;
-            font-size: 10px;
-            font-weight: bold;
-            border: 1px solid rgba(255,255,255,0.3);
-            text-shadow: 1px 1px 1px rgba(0,0,0,0.8);
-            white-space: nowrap;
-        }
-        .station-label.military {
-            background: rgba(220, 38, 38, 0.9);
-            border-color: #dc2626;
-        }
-        .station-label.major {
-            background: rgba(37, 99, 235, 0.9);
-            border-color: #2563eb;
-        }
-        
-        /* Enhanced Popup */
-        .leaflet-popup-content {
-            font-family: 'Courier New', monospace;
-            min-width: 380px;
-            max-width: 500px;
-        }
-        .popup-header {
-            font-size: 18px;
-            font-weight: bold;
+        .layer-selector {
+            width: 100%;
+            padding: 8px;
             margin-bottom: 10px;
-            padding: 8px;
+            border: 1px solid #ddd;
             border-radius: 4px;
-            text-align: center;
-        }
-        .popup-header.military {
-            background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
-            color: white;
-        }
-        .popup-header.military::before {
-            content: "⭐ MILITARY AIRFIELD ⭐";
-            display: block;
-            font-size: 10px;
-            margin-bottom: 4px;
-        }
-        .popup-header.civilian {
-            background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
-            color: white;
+            background: white;
+            font-size: 14px;
         }
         
-        .popup-data {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 12px;
-            margin: 12px 0;
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            font-size: 14px;
+            cursor: pointer;
+            margin: 5px 0;
         }
-        .popup-data-item {
+        input[type="checkbox"] { margin-right: 8px; cursor: pointer; }
+        .divider { margin: 10px 0; border-top: 1px solid #ddd; }
+        .legend-item { display: flex; align-items: center; margin: 4px 0; font-size: 12px; }
+        .legend-dot {
+            width: 14px; height: 14px;
+            border-radius: 50%;
+            margin-right: 8px;
+            border: 2px solid #000;
+            flex-shrink: 0;
+        }
+        .legend-tag {
+            min-width: 36px; height: 15px;
+            border-radius: 3px;
+            margin-right: 8px;
+            font-size: 9px; font-weight: 700;
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0;
+        }
+
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            padding: 20px 40px;
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            z-index: 2000;
+            font-size: 18px;
+        }
+
+        /* Military labels - always visible */
+        .apt-t1 {
             font-size: 11px;
-            padding: 6px;
-            background: #f8fafc;
-            border-radius: 4px;
+            font-weight: 700;
+            color: white;
+            background: rgba(200, 30, 30, 0.93);
+            padding: 2px 5px;
+            border-radius: 3px;
+            border: 1px solid #800;
+            white-space: nowrap;
+            pointer-events: none;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+            transform: translateX(-50%);
         }
-        .popup-data-label {
-            color: #64748b;
-            font-weight: 600;
-            text-transform: uppercase;
-            font-size: 9px;
-            letter-spacing: 0.5px;
+
+        /* Major hub: blue */
+        .apt-t2 {
+            font-size: 11px;
+            font-weight: 700;
+            color: white;
+            background: rgba(25, 80, 200, 0.93);
+            padding: 2px 5px;
+            border-radius: 3px;
+            border: 1px solid #003a99;
+            white-space: nowrap;
+            pointer-events: none;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+            transform: translateX(-50%);
         }
-        .popup-data-value {
-            color: #1e293b;
-            font-weight: bold;
-            font-size: 12px;
-            margin-top: 2px;
-        }
-        
-        /* Flight Categories */
-        .flight-category {
-            display: inline-block;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 12px;
-            font-weight: bold;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin: 8px 0;
-        }
-        .cat-VFR { background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; }
-        .cat-MVFR { background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: white; }
-        .cat-IFR { background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: white; }
-        .cat-LIFR { background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); color: white; }
-        
-        /* Raw METAR */
-        .raw-metar {
-            margin-top: 10px;
-            padding: 8px;
-            background: #1e293b;
-            color: #e2e8f0;
-            border-radius: 4px;
+
+        /* Regional: light gray */
+        .apt-t3 {
             font-size: 10px;
-            line-height: 1.4;
-            max-height: 100px;
-            overflow-y: auto;
-        }
-        
-        /* Responsive */
-        @media (max-width: 768px) {
-            .control-panel {
-                min-width: 220px;
-            }
-            .leaflet-popup-content {
-                min-width: 300px;
-            }
-            .popup-data {
-                grid-template-columns: 1fr;
-                gap: 8px;
-            }
+            font-weight: 600;
+            color: #111;
+            background: rgba(220, 220, 220, 0.93);
+            padding: 1px 4px;
+            border-radius: 3px;
+            border: 1px solid #888;
+            white-space: nowrap;
+            pointer-events: none;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+            transform: translateX(-50%);
         }
     </style>
 </head>
 <body>
+    <a href="/" class="home-btn">🏠 Home</a>
     <div id="map"></div>
-    
-    <div class="control-panel">
-        <div class="control-title">Enhanced Weather COP</div>
-        
-        <div class="station-counter" id="stationCounter">
-            Loading stations...
-        </div>
-        
-        <div class="control-group">
-            <div class="control-group-title">Display Options</div>
-            <div class="control-item">
-                <label>
-                    <input type="checkbox" id="showLabels" checked> 
-                    Show Station Labels
-                </label>
-            </div>
-            <div class="control-item">
-                <label>
-                    <input type="checkbox" id="militaryPriority" checked> 
-                    Military Priority Display
-                </label>
-            </div>
-            <div class="control-item">
-                <label>
-                    <input type="checkbox" id="showMilitary" checked> 
-                    Military Stations
-                </label>
-            </div>
-            <div class="control-item">
-                <label>
-                    <input type="checkbox" id="showMajor" checked> 
-                    Major Airports
-                </label>
-            </div>
-            <div class="control-item">
-                <label>
-                    <input type="checkbox" id="showRegional" checked> 
-                    Regional Airports
-                </label>
-            </div>
-        </div>
-        
-        <div class="control-group">
-            <div class="control-group-title">Station Priority</div>
-            <div class="priority-legend">
-                <div class="legend-item">
-                    <div class="legend-marker legend-mil"></div>
-                    <span>Military Airfields</span>
-                </div>
-                <div class="legend-item">
-                    <div class="legend-marker legend-major"></div>
-                    <span>Major Airports</span>
-                </div>
-                <div class="legend-item">
-                    <div class="legend-marker legend-regional"></div>
-                    <span>Regional Airports</span>
-                </div>
-                <div class="legend-item">
-                    <div class="legend-marker legend-small"></div>
-                    <span>Small Airports</span>
-                </div>
-            </div>
-        </div>
+    <div id="loading">Loading weather data...</div>
+
+    <div class="controls">
+        <h3>Map Layer</h3>
+        <select id="layerSelector" class="layer-selector">
+            <option value="street">Street Map</option>
+            <option value="sectional">VFR Sectional (zoom >5 mi)</option>
+            <option value="satellite">Satellite</option>
+            <option value="dark">Dark Mode</option>
+            <option value="topo">Topographic</option>
+        </select>
+
+        <div class="divider"></div>
+        <h3>Coverage Area</h3>
+        <select id="coverageSelector" class="layer-selector">
+            <option value="conus">CONUS</option>
+            <option value="ak">Alaska</option>
+            <option value="hi">Hawaii</option>
+            <option value="carib">Caribbean</option>
+        </select>
+
+        <div class="divider"></div>
+        <h3>Display Options</h3>
+        <label class="checkbox-label"><input type="checkbox" id="showMilitary" checked> Military Airfields</label>
+        <label class="checkbox-label"><input type="checkbox" id="showHubs" checked> Major Hubs</label>
+        <label class="checkbox-label"><input type="checkbox" id="showRegional" checked> Regional Airfields</label>
+
+        <div class="divider"></div>
+        <h3>Weather Hazards</h3>
+        <label class="checkbox-label"><input type="checkbox" id="tfrToggle"> TFRs</label>
+
+        <div class="divider"></div>
+        <h3>Flight Categories</h3>
+        <div class="legend-item"><div class="legend-dot" style="background:#00FF00;"></div>VFR</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#0000FF;"></div>MVFR</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#FF0000;"></div>IFR</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#FF00FF;"></div>LIFR</div>
+
+        <div class="divider"></div>
+        <div class="legend-item"><div class="legend-tag" style="background:rgba(200,30,30,0.9);color:white;">MIL</div>Military</div>
+        <div class="legend-item"><div class="legend-tag" style="background:rgba(25,80,200,0.9);color:white;">HUB</div>Major Hub</div>
+        <div class="legend-item"><div class="legend-tag" style="background:rgba(180,180,180,0.9);color:#111;">RGNL</div>Regional</div>
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-        class EnhancedWeatherMap {
-            constructor() {
-                // ### STATION LIMIT CONFIGURATION ###
-                // Change this value to adjust the maximum number of stations displayed
-                this.maxStations = 2500;  // Increased from default 500 to 2500
-                // ### END STATION LIMIT CONFIGURATION ###
-                
-                this.map = null;
-                this.stations = new Map();
-                this.layerGroups = {
-                    military: L.layerGroup(),
-                    major: L.layerGroup(), 
-                    regional: L.layerGroup(),
-                    small: L.layerGroup()
-                };
-                this.labelsVisible = true;
-                this.militaryPriority = true;
-                this.visibleLayers = {
-                    military: true,
-                    major: true,
-                    regional: true,
-                    small: true
-                };
-                
-                this.initMap();
-                this.setupControls();
-                this.loadWeatherData();
-            }
-            
-            initMap() {
-                // Initialize map centered on CONUS
-                this.map = L.map('map', {
-                    center: [39.0, -98.0],
-                    zoom: 5,
-                    zoomControl: true,
-                    preferCanvas: true // Better performance for many markers
-                });
-                
-                // Base layers
-                const baseLayers = {
-                    "Street Map": L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                        attribution: '© OpenStreetMap contributors',
-                        maxZoom: 18
-                    }),
-                    "Satellite": L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-                        attribution: 'Esri, DigitalGlobe, GeoEye, Earthstar Geographics',
-                        maxZoom: 18
-                    }),
-                    "Dark Mode": L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-                        attribution: '© CartoDB, © OpenStreetMap contributors',
-                        maxZoom: 18
-                    })
-                };
-                
-                // Default to dark mode
-                baseLayers["Dark Mode"].addTo(this.map);
-                
-                // Add layer groups
-                Object.values(this.layerGroups).forEach(group => {
-                    group.addTo(this.map);
-                });
-                
-                // Layer control
-                const overlayLayers = {
-                    "Military Stations": this.layerGroups.military,
-                    "Major Airports": this.layerGroups.major,
-                    "Regional Airports": this.layerGroups.regional,
-                    "Small Airports": this.layerGroups.small
-                };
-                
-                L.control.layers(baseLayers, overlayLayers, {
-                    position: 'topright',
-                    collapsed: true
-                }).addTo(this.map);
-                
-                // Map event listeners
-                this.map.on('moveend zoomend', () => {
-                    this.loadWeatherData();
-                });
-                
-                this.map.on('zoomend', () => {
-                    this.updateLabelsVisibility();
-                });
-            }
-            
-            setupControls() {
-                // Control event listeners
-                document.getElementById('showLabels').addEventListener('change', (e) => {
-                    this.labelsVisible = e.target.checked;
-                    this.updateLabelsVisibility();
-                });
-                
-                document.getElementById('militaryPriority').addEventListener('change', (e) => {
-                    this.militaryPriority = e.target.checked;
-                    this.loadWeatherData();
-                });
-                
-                ['showMilitary', 'showMajor', 'showRegional'].forEach(id => {
-                    document.getElementById(id).addEventListener('change', (e) => {
-                        const layer = id.replace('show', '').toLowerCase();
-                        this.visibleLayers[layer] = e.target.checked;
-                        this.toggleLayerVisibility(layer, e.target.checked);
-                    });
-                });
-            }
-            
-            async loadWeatherData() {
+        var map, labelsLayer, baseLayers = {}, tfrLayer;
+        var currentMetars = [];
+        var metatMarkers = [];
+        var labelsVisible = true;
+        var currentLayerName = 'street';
+
+        var TIER_MIN_ZOOM = { 1: 0, 2: 6, 3: 8 }; // Military always visible
+
+        var airportTiers = {
+            'KATL': 2, 'KORD': 2, 'KLAX': 2, 'KDFW': 2, 'KDEN': 2, 'KJFK': 2,
+            'KSFO': 2, 'KLAS': 2, 'KPHX': 2, 'KIAH': 2, 'KCLT': 2, 'KMIA': 2,
+            'KSEA': 2, 'KEWR': 2, 'KMSP': 2, 'KDET': 2, 'KBOS': 2, 'KPHL': 2,
+            'KLGA': 2, 'KDCA': 2, 'KMDW': 2, 'KBWI': 2, 'KSLC': 2, 'KSAN': 2,
+            'KTPA': 2, 'KPDX': 2, 'KHON': 2
+        };
+
+        function initMap() {
+            map = L.map('map', {
+                center: [39.0, -98.0],
+                zoom: 5,
+                zoomControl: true
+            });
+
+            // Define base layers - start with street map
+            baseLayers = {
+                'street': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '&copy; OpenStreetMap contributors',
+                    maxZoom: 18
+                }),
+                'sectional': L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Specialty/World_Navigation_Charts/MapServer/tile/{z}/{y}/{x}', {
+                    attribution: 'VFR Sectional Charts &copy; FAA, Esri',
+                    maxZoom: 12,
+                    minZoom: 7
+                }),
+                'satellite': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                    attribution: 'Tiles &copy; Esri',
+                    maxZoom: 18
+                }),
+                'dark': L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                    attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+                    subdomains: 'abcd',
+                    maxZoom: 18
+                }),
+                'topo': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', {
+                    attribution: 'Tiles &copy; Esri',
+                    maxZoom: 18
+                })
+            };
+
+            // Start with street map
+            baseLayers[currentLayerName].addTo(map);
+
+            // Add scale control
+            L.control.scale({
+                position: 'bottomleft',
+                imperial: true,
+                metric: false,
+                maxWidth: 150
+            }).addTo(map);
+
+            labelsLayer = L.layerGroup().addTo(map);
+
+            setupControls();
+            loadWeatherData();
+
+            map.on('zoomend moveend', updateLabels);
+        }
+
+        function setupControls() {
+            // Layer selector
+            document.getElementById('layerSelector').addEventListener('change', function(e) {
+                const newLayer = e.target.value;
                 try {
-                    const bounds = this.map.getBounds();
-                    const boundsParam = `${bounds.getWest()},${bounds.getSouth()},${bounds.getEast()},${bounds.getNorth()}`;
+                    Object.values(baseLayers).forEach(layer => {
+                        if (map.hasLayer(layer)) {
+                            map.removeLayer(layer);
+                        }
+                    });
                     
-                    const url = `/CAP_WxCOP/api/weather/metar/recent?bounds=${boundsParam}&limit=${this.maxStations}`;
-                    const response = await fetch(url);
-                    
-                    if (!response.ok) {
-                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    if (newLayer === 'sectional' && map.getZoom() < 7) {
+                        alert('VFR Sectional charts are only available at zoom levels showing areas less than 10 miles across.');
+                        baseLayers['street'].addTo(map);
+                        this.value = 'street';
+                    } else if (baseLayers[newLayer]) {
+                        baseLayers[newLayer].addTo(map);
+                        currentLayerName = newLayer;
+                    } else {
+                        baseLayers['street'].addTo(map);
+                        this.value = 'street';
                     }
-                    
-                    const data = await response.json();
-                    this.displayStations(data);
-                    this.updateStationCounter(data);
-                    
                 } catch (error) {
-                    console.error('Weather data load error:', error);
-                    document.getElementById('stationCounter').textContent = `Error loading data: ${error.message}`;
-                    document.getElementById('stationCounter').style.background = 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)';
+                    baseLayers['street'].addTo(map);
+                    this.value = 'street';
                 }
-            }
-            
-            displayStations(data) {
-                // Clear existing stations
-                Object.values(this.layerGroups).forEach(group => group.clearLayers());
-                this.stations.clear();
+            });
+
+            // Coverage selector
+            document.getElementById('coverageSelector').addEventListener('change', function() {
+                var coverage = this.value;
+                var cb = COVERAGE_BOUNDS[coverage];
+                map.setView(cb.center, cb.zoom);
+                loadWeatherData();
+            });
+
+            // Display options
+            ['Military', 'Hubs', 'Regional'].forEach(function(type) {
+                document.getElementById('show' + type).addEventListener('change', filterMarkers);
+            });
+
+            // TFR toggle
+            document.getElementById('tfrToggle').addEventListener('change', function(e) {
+                if (e.target.checked) {
+                    loadTFRs();
+                } else {
+                    if (tfrLayer) {
+                        map.removeLayer(tfrLayer);
+                    }
+                }
+            });
+        }
+
+        function filterMarkers() {
+            var showMilitary = document.getElementById('showMilitary').checked;
+            var showHubs = document.getElementById('showHubs').checked;
+            var showRegional = document.getElementById('showRegional').checked;
+
+            metatMarkers.forEach(function(marker) {
+                var tier = marker.options.airportTier;
                 
-                if (!data.metars || !Array.isArray(data.metars)) {
-                    console.error('Invalid data format:', data);
+                var tierShow = (tier === 1 && showMilitary) ||
+                              (tier === 2 && showHubs) ||
+                              (tier === 3 && showRegional) ||
+                              (!tier && showRegional);
+
+                if (tierShow) {
+                    marker.addTo(map);
+                } else {
+                    map.removeLayer(marker);
+                }
+            });
+            updateLabels();
+        }
+
+        function updateLabels() {
+            labelsLayer.clearLayers();
+            if (!labelsVisible) return;
+
+            var zoom = map.getZoom();
+            var bounds = map.getBounds();
+
+            currentMetars.forEach(function(metar) {
+                if (!bounds.contains([metar.latitude, metar.longitude])) return;
+
+                var sid = metar.station_id;
+                // Use hard-coded tier table first; then fall back to is_military DB flag
+                var tier = airportTiers[sid] || (metar.is_military === true ? 1 : null);
+
+                // Tier 1 (Military): always visible at every zoom level
+                if (tier === 1) {
+                    var label = L.marker([metar.latitude, metar.longitude], {
+                        icon: L.divIcon({
+                            className: 'apt-t1',
+                            html: sid,
+                            iconSize: null,
+                            iconAnchor: [0, 22]
+                        }),
+                        interactive: false,
+                        zIndexOffset: 1000
+                    });
+                    label.addTo(labelsLayer);
                     return;
                 }
-                
-                // Sort stations by priority (military first, then by type)
-                const sortedStations = this.prioritizeStations(data.metars);
-                
-                // Add stations to appropriate layers
-                sortedStations.forEach(station => {
-                    const marker = this.createStationMarker(station);
-                    const layer = this.getStationLayer(station);
-                    
-                    if (layer && this.visibleLayers[this.getLayerName(layer)]) {
-                        marker.addTo(layer);
-                        this.stations.set(station.station_id, station);
-                    }
-                });
-                
-                this.updateLabelsVisibility();
-            }
+
+                // Tier 2 (Major hub): visible at zoom >= 5
+                if (tier === 2 && zoom >= 5) {
+                    var label = L.marker([metar.latitude, metar.longitude], {
+                        icon: L.divIcon({
+                            className: 'apt-t2',
+                            html: sid,
+                            iconSize: null,
+                            iconAnchor: [0, 22]
+                        }),
+                        interactive: false,
+                        zIndexOffset: 500
+                    });
+                    label.addTo(labelsLayer);
+                    return;
+                }
+
+                // Tier 3 (Regional): visible at zoom >= 8
+                if (tier === 3 && zoom >= 8) {
+                    var label = L.marker([metar.latitude, metar.longitude], {
+                        icon: L.divIcon({
+                            className: 'apt-t3',
+                            html: sid,
+                            iconSize: null,
+                            iconAnchor: [0, 22]
+                        }),
+                        interactive: false,
+                        zIndexOffset: 100
+                    });
+                    label.addTo(labelsLayer);
+                }
+            });
+        }
+
+        function addMarker(metar) {
+            var color = getCategoryColor(metar.flight_category);
+            var icon = L.divIcon({
+                className: '',
+                html: '<div style="width:12px;height:12px;background:' + color +
+                      ';border:2px solid #000;border-radius:50%;' +
+                      'box-shadow:0 0 4px rgba(0,0,0,0.5);"></div>',
+                iconSize: [12, 12],
+                iconAnchor: [6, 6]
+            });
+
+            var tier = airportTiers[metar.station_id] || (metar.is_military === true ? 1 : null);
+            var marker = L.marker([metar.latitude, metar.longitude], { 
+                icon: icon,
+                flightCategory: metar.flight_category,
+                airportTier: tier
+            });
+
+            marker.bindTooltip(metar.station_id + ' — ' + metar.flight_category, {
+                permanent: false,
+                direction: 'top',
+                offset: [0, -8]
+            });
+
+            marker.on('click', function() { showStationPopup(metar); });
+            marker.addTo(map);
+            metatMarkers.push(marker);
+        }
+
+        function getCategoryColor(cat) {
+            if (cat === 'VFR')  return '#00FF00';
+            if (cat === 'MVFR') return '#0000FF';
+            if (cat === 'IFR')  return '#FF0000';
+            if (cat === 'LIFR') return '#FF00FF';
+            return '#808080';
+        }
+
+        function celsiusToFahrenheit(c) {
+            return Math.round((c * 9/5) + 32);
+        }
+
+        function showStationPopup(metar) {
+            console.log(`Fetching METAR and TAF for ${metar.station_id}`);
             
-            prioritizeStations(stations) {
-                // Priority system: Military > Major > Regional > Small
-                return stations.sort((a, b) => {
-                    const aPriority = this.getStationPriority(a);
-                    const bPriority = this.getStationPriority(b);
-                    
-                    if (aPriority !== bPriority) {
-                        return aPriority - bPriority; // Lower number = higher priority
-                    }
-                    
-                    // Secondary sort by observation time (most recent first)
-                    const aTime = new Date(a.observation_time || 0);
-                    const bTime = new Date(b.observation_time || 0);
-                    return bTime - aTime;
-                });
-            }
-            
-            getStationPriority(station) {
-                if (station.is_military) return 1;
-                if (station.airport_type === 'large_airport') return 2;
-                if (station.airport_type === 'medium_airport') return 3;
-                return 4;
-            }
-            
-            createStationMarker(station) {
-                const icon = this.createStationIcon(station);
-                const marker = L.marker([station.latitude, station.longitude], { icon });
-                
-                // Enhanced popup
-                const popupContent = this.createEnhancedPopup(station);
-                marker.bindPopup(popupContent, {
-                    maxWidth: 500,
-                    className: station.is_military ? 'military-popup' : 'civilian-popup'
-                });
-                
-                // Store station data
-                marker.stationData = station;
-                
-                return marker;
-            }
-            
-            createStationIcon(station) {
-                const flightCategoryColors = {
-                    'VFR': '#10b981',
-                    'MVFR': '#3b82f6', 
-                    'IFR': '#f59e0b',
-                    'LIFR': '#ef4444',
-                    'UNKNOWN': '#6b7280'
-                };
-                
-                const color = flightCategoryColors[station.flight_category] || '#6b7280';
-                let iconClass, size;
-                
-                if (station.is_military) {
-                    iconClass = 'military-station';
-                    size = [18, 18];
-                } else if (station.airport_type === 'large_airport') {
-                    iconClass = 'major-station';
-                    size = [14, 14];
-                } else if (station.airport_type === 'medium_airport') {
-                    iconClass = 'regional-station';
-                    size = [12, 12];
+            Promise.all([
+                fetch('/CAP_WxCOP/api/weather/station/' + metar.station_id + '?hours=3')
+                    .then(function(r) { 
+                        if (!r.ok) throw new Error(`METAR API returned ${r.status}`);
+                        return r.json(); 
+                    }),
+                // TAF is embedded in the station response; this second call is a no-op catch
+                Promise.resolve(null)
+            ]).then(function(results) {
+                var md = results[0];
+                // /station/<id> returns {station, metars:[], taf:{raw_text,...}}
+                var obs = (md.metars && md.metars[0]) ? md.metars[0] : metar;
+                if (!obs.airport_name && md.station && md.station.name) {
+                    obs.airport_name = md.station.name;
+                }
+                var tafRawText = (md.taf && md.taf.raw_text) ? md.taf.raw_text : null;
+
+                var wind = (obs.wind_dir || '---') + '° @ ' + (obs.wind_speed_kts || 0) + ' kt';
+                if (obs.wind_gust_kts) wind += ' gusting ' + obs.wind_gust_kts + ' kt';
+
+                var tier = airportTiers[metar.station_id] || (metar.is_military === true ? 1 : null);
+                var badge = '';
+                if (tier === 1) {
+                    badge = ' <span style="background:rgba(200,30,30,0.9);color:white;' +
+                            'padding:1px 5px;border-radius:2px;font-size:10px;font-weight:700;">MIL</span>';
+                } else if (tier === 2) {
+                    badge = ' <span style="background:rgba(25,80,200,0.9);color:white;' +
+                            'padding:1px 5px;border-radius:2px;font-size:10px;font-weight:700;">HUB</span>';
+                } else if (tier === 3) {
+                    badge = ' <span style="background:rgba(180,180,180,0.9);color:#111;' +
+                            'padding:1px 5px;border-radius:2px;font-size:10px;font-weight:600;">RGNL</span>';
+                }
+
+                var tempText = '';
+                if (obs.temp_c !== null && obs.temp_c !== undefined) {
+                    tempText = obs.temp_c + '°C (' + celsiusToFahrenheit(obs.temp_c) + '°F)';
                 } else {
-                    iconClass = 'small-station';
-                    size = [8, 8];
+                    tempText = 'N/A';
                 }
-                
-                const html = `<div class="${iconClass}" style="background-color: ${color}">
-                    ${station.is_military ? '★' : ''}
-                </div>`;
-                
-                return L.divIcon({
-                    html: html,
-                    className: 'weather-station-icon',
-                    iconSize: size,
-                    iconAnchor: [size[0]/2, size[1]/2]
-                });
-            }
-            
-            createEnhancedPopup(station) {
-                const obsTime = new Date(station.observation_time).toLocaleString();
-                const headerClass = station.is_military ? 'military' : 'civilian';
-                
-                return `
-                    <div class="popup-header ${headerClass}">
-                        <strong>${station.station_id}</strong>
-                        ${station.airport_name ? `<br><span style="font-size: 14px;">${station.airport_name}</span>` : ''}
-                        ${station.municipality ? `<br><span style="font-size: 12px;">${station.municipality}</span>` : ''}
-                    </div>
+
+                var dewpointText = '';
+                if (obs.dewpoint_c !== null && obs.dewpoint_c !== undefined) {
+                    dewpointText = obs.dewpoint_c + '°C (' + celsiusToFahrenheit(obs.dewpoint_c) + '°F)';
+                } else {
+                    dewpointText = 'N/A';
+                }
+
+                var skyText = '';
+                if (obs.sky_conditions && obs.sky_conditions.length > 0) {
+                    skyText = obs.sky_conditions.map(function(s) {
+                        return s.cover + (s.height_ft ? ' ' + s.height_ft + 'ft' : '');
+                    }).join(', ');
+                } else {
+                    skyText = 'Clear';
+                }
+
+                var tafText = '';
+                if (tafRawText) {
+                    tafText = '<hr><h4>TAF</h4>' +
+                             '<div style="background:#f5f5f5;padding:8px;border-radius:4px;font-size:12px;font-family:monospace;">' +
+                             tafRawText + '</div>';
+                }
+
+                var content = '<div style="font-family:monospace;min-width:300px;">' +
+                             '<h3>' + metar.station_id + badge + '</h3>' +
+                             '<p style="font-weight:bold;">' + (obs.airport_name || 'Unknown Airport') + '</p><hr>' +
+                             '<p><strong>Flight Category:</strong> <span style="color:' + getCategoryColor(obs.flight_category) + 
+                             ';font-weight:bold;">' + obs.flight_category + '</span></p>' +
+                             '<p><strong>Wind:</strong> ' + wind + '</p>' +
+                             '<p><strong>Visibility:</strong> ' + (obs.visibility_sm || '---') + ' SM</p>' +
+                             '<p><strong>Sky:</strong> ' + skyText + '</p>' +
+                             '<p><strong>Temperature:</strong> ' + tempText + '</p>' +
+                             '<p><strong>Dewpoint:</strong> ' + dewpointText + '</p>' +
+                             '<p><strong>Altimeter:</strong> ' + (obs.altimeter_hg || '---') + ' inHg</p>' +
+                             '<p style="margin-top:8px;font-size:10px;color:#666;">' + 
+                             '<strong>Observed:</strong> ' + new Date(obs.observation_time).toLocaleString() + '</p>' +
+                             tafText + '</div>';
+
+                L.popup()
+                    .setLatLng([metar.latitude, metar.longitude])
+                    .setContent(content)
+                    .openOn(map);
                     
-                    <div class="flight-category cat-${station.flight_category}">
-                        ${station.flight_category || 'UNKNOWN'}
-                    </div>
-                    
-                    <div class="popup-data">
-                        <div class="popup-data-item">
-                            <div class="popup-data-label">Wind</div>
-                            <div class="popup-data-value">
-                                ${station.wind_dir || 'VRB'}°@${station.wind_speed_kts || 0}kt
-                                ${station.wind_gust_kts ? ` G${station.wind_gust_kts}kt` : ''}
-                            </div>
-                        </div>
-                        <div class="popup-data-item">
-                            <div class="popup-data-label">Visibility</div>
-                            <div class="popup-data-value">${station.visibility_sm || 'N/A'} SM</div>
-                        </div>
-                        <div class="popup-data-item">
-                            <div class="popup-data-label">Temperature</div>
-                            <div class="popup-data-value">${station.temp_c || 'N/A'}°C</div>
-                        </div>
-                        <div class="popup-data-item">
-                            <div class="popup-data-label">Dewpoint</div>
-                            <div class="popup-data-value">${station.dewpoint_c || 'N/A'}°C</div>
-                        </div>
-                        <div class="popup-data-item">
-                            <div class="popup-data-label">Altimeter</div>
-                            <div class="popup-data-value">${station.altimeter_hg || 'N/A'}" Hg</div>
-                        </div>
-                        <div class="popup-data-item">
-                            <div class="popup-data-label">Observed</div>
-                            <div class="popup-data-value">${obsTime}</div>
-                        </div>
-                    </div>
-                    
-                    ${station.raw_text ? `<div class="raw-metar">${station.raw_text}</div>` : ''}
-                `;
-            }
-            
-            updateLabelsVisibility() {
-                const zoom = this.map.getZoom();
+            }).catch(function(error) {
+                console.error(`Error loading detailed data for ${metar.station_id}:`, error);
                 
-                Object.values(this.layerGroups).forEach(group => {
-                    group.eachLayer(marker => {
-                        if (marker.stationData) {
-                            this.updateMarkerLabel(marker, zoom);
-                        }
-                    });
-                });
-            }
-            
-            updateMarkerLabel(marker, zoom) {
-                const station = marker.stationData;
-                let shouldShowLabel = false;
+                // Fallback popup with basic info
+                var tier = airportTiers[metar.station_id] || (metar.is_military === true ? 1 : null);
+                var badge = tier === 1 ? ' (MIL)' : '';
                 
-                if (this.labelsVisible) {
-                    // Military stations: Always show at zoom ≥ 6
-                    if (station.is_military && zoom >= 6) {
-                        shouldShowLabel = true;
-                    }
-                    // Major airports: Show at zoom ≥ 7 (but not if overlapping military)
-                    else if (station.airport_type === 'large_airport' && zoom >= 7) {
-                        shouldShowLabel = !this.hasNearbyMilitary(station, zoom);
-                    }
-                    // All others: Show at zoom ≥ 9
-                    else if (zoom >= 9) {
-                        shouldShowLabel = true;
-                    }
+                var content = '<div style="font-family:monospace;min-width:250px;">' +
+                             '<h3>' + metar.station_id + badge + '</h3>' +
+                             '<p style="font-weight:bold;">' + (metar.airport_name || 'Unknown Airport') + '</p><hr>' +
+                             '<p><strong>Flight Category:</strong> <span style="color:' + getCategoryColor(metar.flight_category) + 
+                             ';font-weight:bold;">' + metar.flight_category + '</span></p>' +
+                             '<p style="margin-top:8px;font-size:10px;color:#666;">Detailed METAR/TAF data unavailable - API Error: ' + error.message + '</p>' +
+                             '</div>';
+
+                L.popup()
+                    .setLatLng([metar.latitude, metar.longitude])
+                    .setContent(content)
+                    .openOn(map);
+            });
+        }
+
+        async function loadTFRs() {
+            try {
+                console.log('Loading TFRs...');
+                const response = await fetch('/CAP_WxCOP/api/tfr/active');
+                console.log('TFR response status:', response.status);
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log('TFR data:', data);
+                    displayTFRs(data.tfrs || data);
+                } else {
+                    console.log('TFR data not available, status:', response.status);
                 }
-                
-                // Remove existing tooltip
-                if (marker.getTooltip()) {
-                    marker.unbindTooltip();
-                }
-                
-                // Add tooltip if needed
-                if (shouldShowLabel) {
-                    const labelClass = station.is_military ? 'military' : 
-                                    station.airport_type === 'large_airport' ? 'major' : '';
-                    const labelText = station.is_military ? `${station.station_id} (MIL)` : station.station_id;
-                    
-                    marker.bindTooltip(labelText, {
-                        permanent: true,
-                        direction: 'bottom',
-                        offset: [0, 10],
-                        className: `station-label ${labelClass}`
-                    });
-                }
-            }
-            
-            hasNearbyMilitary(station, zoom) {
-                // Check if there are military stations nearby that would overlap
-                const threshold = zoom >= 8 ? 0.01 : 0.02; // Degrees
-                
-                for (let [id, otherStation] of this.stations) {
-                    if (otherStation.is_military && id !== station.station_id) {
-                        const latDiff = Math.abs(station.latitude - otherStation.latitude);
-                        const lonDiff = Math.abs(station.longitude - otherStation.longitude);
-                        if (latDiff < threshold && lonDiff < threshold) {
-                            return true;
-                        }
-                    }
-                }
-                return false;
-            }
-            
-            getStationLayer(station) {
-                if (station.is_military) return this.layerGroups.military;
-                if (station.airport_type === 'large_airport') return this.layerGroups.major;
-                if (station.airport_type === 'medium_airport') return this.layerGroups.regional;
-                return this.layerGroups.small;
-            }
-            
-            getLayerName(layerGroup) {
-                for (let [name, group] of Object.entries(this.layerGroups)) {
-                    if (group === layerGroup) return name;
-                }
-                return 'unknown';
-            }
-            
-            toggleLayerVisibility(layerName, visible) {
-                const layer = this.layerGroups[layerName];
-                if (layer) {
-                    if (visible) {
-                        if (!this.map.hasLayer(layer)) {
-                            layer.addTo(this.map);
-                        }
-                    } else {
-                        if (this.map.hasLayer(layer)) {
-                            this.map.removeLayer(layer);
-                        }
-                    }
-                }
-            }
-            
-            updateStationCounter(data) {
-                const counter = document.getElementById('stationCounter');
-                const militaryCount = data.metars?.filter(s => s.is_military).length || 0;
-                const totalCount = data.metars?.length || 0;
-                
-                counter.textContent = `${totalCount} stations (${militaryCount} military)`;
-                counter.style.background = 'linear-gradient(135deg, #10b981 0%, #059669 100%)';
+            } catch (error) {
+                console.log('Error loading TFRs:', error);
             }
         }
-        
-        // Additional CSS for markers
-        const style = document.createElement('style');
-        style.textContent = `
-            .military-station {
-                width: 18px;
-                height: 18px;
-                border-radius: 3px;
-                border: 2px solid #ffffff;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                font-weight: bold;
-                color: white;
-                font-size: 12px;
-                text-shadow: 1px 1px 1px rgba(0,0,0,0.8);
-                box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+
+        function displayTFRs(tfrs) {
+            if (tfrLayer) map.removeLayer(tfrLayer);
+            tfrLayer = L.layerGroup();
+            
+            if (tfrs && tfrs.length > 0) {
+                tfrs.forEach(tfr => {
+                    if (tfr.geometry || tfr.geojson) {
+                        const geometry = tfr.geometry || tfr.geojson;
+                        const tfrArea = L.geoJSON(geometry, {
+                            style: { color: '#ff0000', weight: 2, opacity: 0.8, fillOpacity: 0.3 }
+                        }).bindPopup(`
+                            <div style="font-family: monospace;">
+                                <h3>TFR</h3>
+                                <p><strong>Type:</strong> ${tfr.type || tfr.category || 'Temporary Flight Restriction'}</p>
+                                <p><strong>Valid:</strong> ${tfr.valid_from || tfr.start_time} - ${tfr.valid_to || tfr.end_time}</p>
+                                ${tfr.text || tfr.description ? `<p><strong>Details:</strong> ${tfr.text || tfr.description}</p>` : ''}
+                            </div>
+                        `);
+                        tfrLayer.addLayer(tfrArea);
+                    }
+                });
+                console.log(`Added ${tfrs.length} TFR areas`);
+                tfrLayer.addTo(map);
+            } else {
+                console.log('No TFR areas to display');
             }
-            .major-station {
-                width: 14px;
-                height: 14px;
-                border-radius: 2px;
-                border: 2px solid #ffffff;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-            }
-            .regional-station {
-                width: 12px;
-                height: 12px;
-                border-radius: 50%;
-                border: 1px solid #ffffff;
-                box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-            }
-            .small-station {
-                width: 8px;
-                height: 8px;
-                border-radius: 50%;
-                border: 1px solid #ffffff;
-                box-shadow: 0 1px 2px rgba(0,0,0,0.3);
-            }
-            .weather-station-icon {
-                transition: transform 0.2s ease;
-            }
-            .weather-station-icon:hover {
-                transform: scale(1.2);
-                z-index: 1000;
-            }
-        `;
-        document.head.appendChild(style);
-        
-        // Initialize the enhanced weather map
-        document.addEventListener('DOMContentLoaded', () => {
-            window.weatherMap = new EnhancedWeatherMap();
-        });
+        }
+
+        var COVERAGE_BOUNDS = {
+            'conus': { west: -125, south: 24,  east: -66,  north: 50,  center: [39.0, -98.0], zoom: 5 },
+            'ak':    { west: -180, south: 51,  east: -130, north: 72,  center: [64.0, -153.0], zoom: 5 },
+            'hi':    { west: -161, south: 18,  east: -154, north: 23,  center: [20.5, -157.0], zoom: 7 },
+            'carib': { west: -68,  south: 17,  east: -64,  north: 19,  center: [18.2, -66.0],  zoom: 8 }
+        };
+
+        function loadWeatherData() {
+            var coverage = document.getElementById('coverageSelector')
+                                   ? document.getElementById('coverageSelector').value
+                                   : 'conus';
+            var cb = COVERAGE_BOUNDS[coverage];
+
+            // Clear existing markers and labels
+            metatMarkers.forEach(function(m) { map.removeLayer(m); });
+            metatMarkers = [];
+            currentMetars = [];
+            labelsLayer.clearLayers();
+
+            document.getElementById('loading').style.display = 'block';
+
+            var boundsStr = cb.west + ',' + cb.south + ',' + cb.east + ',' + cb.north;
+            // ### Change 2500 below to adjust max stations returned
+            fetch('/CAP_WxCOP/api/weather/metar/recent?bounds=' + boundsStr + '&limit=2500')
+                .then(function(response) { 
+                    return response.json(); 
+                })
+                .then(function(data) {
+                    document.getElementById('loading').style.display = 'none';
+                    
+                    if (data.metars && data.metars.length > 0) {
+                        currentMetars = data.metars;
+                        data.metars.forEach(addMarker);
+                        updateLabels();
+                        console.log('Loaded ' + data.metars.length + ' METAR stations for ' + coverage.toUpperCase());
+                    } else {
+                        console.log('No METAR data for coverage area: ' + coverage);
+                    }
+                })
+                .catch(function(error) {
+                    console.error('Error loading weather data:', error);
+                    document.getElementById('loading').style.display = 'none';
+                });
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', initMap);
     </script>
 </body>
 </html>
+
