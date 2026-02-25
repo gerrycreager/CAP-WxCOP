@@ -315,8 +315,11 @@ let siteLabelsVisible = false;
         }
         
 function toggleSiteLabels() {
-    siteLabelsVisible = document.getElementById("showSiteLabels").checked;
+    siteLabelsVisible = !siteLabelsVisible;
+    const btn = document.getElementById('siteLabelsToggle');
+
     if (siteLabelsVisible) {
+        btn.classList.add('active');
         fetch("/CAP_WxCOP/radar/api/sites")
             .then(r => r.json())
             .then(data => {
@@ -328,13 +331,16 @@ function toggleSiteLabels() {
                             html: id,
                             iconSize: null,
                             iconAnchor: [0, -15]
-                        })
+                        }),
+                        interactive: false,
+                        zIndexOffset: 500
                     });
                     label.addTo(siteLabels);
                 });
                 siteLabels.addTo(map);
             });
     } else {
+        btn.classList.remove('active');
         map.removeLayer(siteLabels);
     }
 }
@@ -609,3 +615,4 @@ function toggleSiteLabels() {
     </script>
 </body>
 </html>
+
