@@ -18,18 +18,25 @@ log = logging.getLogger(__name__)
 
 # Civil Air Patrol Region bounding boxes
 REGION_BOUNDS = {
-    'CONUS':     {'west': -125, 'south': 24,  'east': -66,  'north': 50},
-    'NCR':       {'west': -104, 'south': 37,  'east': -89,  'north': 49},
-    'GLR':       {'west': -93,  'south': 37,  'east': -80,  'north': 49},
-    'MAR':       {'west': -84,  'south': 32,  'east': -75,  'north': 40},
-    'NER':       {'west': -80,  'south': 39,  'east': -66,  'north': 48},
-    'SER':       {'west': -92,  'south': 24,  'east': -79,  'north': 37},
-    'SWR':       {'west': -115, 'south': 25,  'east': -89,  'north': 37},
-    'RMR':       {'west': -117, 'south': 37,  'east': -102, 'north': 49},
-    'PCR':       {'west': -125, 'south': 32,  'east': -114, 'north': 49},
-    'AK':        {'west': -180, 'south': 51,  'east': -130, 'north': 72},
-    'HI':        {'west': -161, 'south': 18,  'east': -154, 'north': 23},
-    'CARIBBEAN': {'west': -80,  'south': 17,  'east': -64,  'north': 27},
+    'CONUS': {'west': -125, 'south': 24, 'east': -66, 'north': 50},
+    'NCR': {'west': -104, 'south': 37, 'east': -89, 'north': 49},
+    'GLR': {'west': -93, 'south': 37, 'east': -80, 'north': 49},
+    'MAR': {'west': -84, 'south': 32, 'east': -75, 'north': 40},
+    'NER': {'west': -80, 'south': 39, 'east': -66, 'north': 48},
+    'SER': {'west': -92, 'south': 24, 'east': -74, 'north': 37},
+    'SER-PR': {'west': -68, 'south': 17, 'east': -65, 'north': 19},
+    # CARIBBEAN: covers Puerto Rico, USVI, and the Bahamas chain
+    # PR ~18.5N 66-67W, USVI ~18.3N 64.6-65W, Bahamas 21-27N 72-80W
+    'CARIBBEAN': {'west': -80, 'south': 17, 'east': -64, 'north': 28},
+    # Aliases used by the region selector in wind_map_interactive.html
+    'AK': {'west': -180, 'south': 51, 'east': -130, 'north': 72},
+    'HI': {'west': -161, 'south': 18, 'east': -154, 'north': 23},
+    'SWR': {'west': -115, 'south': 25, 'east': -89, 'north': 37},
+    'RMR': {'west': -117, 'south': 37, 'east': -102, 'north': 49},
+    'PCR': {'west': -125, 'south': 32, 'east': -114, 'north': 49},
+    'PCR-AK': {'west': -180, 'south': 51, 'east': -130, 'north': 72},
+    'PCR-HI': {'west': -161, 'south': 18, 'east': -154, 'north': 23},
+    'PCR-GUAM': {'west': 144, 'south': 13, 'east': 145, 'north': 14},
 }
 
 
@@ -107,16 +114,15 @@ def get_wind_forecasts_in_bounds(west, south, east, north, limit=5000):
             mwf.model_name,
             mwf.wind_category,
             a.name as airport_name,
-            a.longest_runway_ft,
-            a.is_military
+            a.longest_runway_ft
         FROM observations.model_wind_forecasts mwf
         INNER JOIN observations.airports a ON mwf.station_id = a.station_id
         WHERE mwf.model_run = %s
             AND ST_X(mwf.location::geometry) BETWEEN %s AND %s
             AND ST_Y(mwf.location::geometry) BETWEEN %s AND %s
             AND mwf.forecast_hour <= 12
-        GROUP BY mwf.station_id, mwf.location, mwf.model_name, mwf.wind_category, a.name, a.longest_runway_ft, a.is_military
-        ORDER BY a.is_military DESC, MAX(mwf.wind_speed_kts) DESC
+        GROUP BY mwf.station_id, mwf.location, mwf.model_name, mwf.wind_category, a.name, a.longest_runway_ft
+        ORDER BY MAX(mwf.wind_speed_kts) DESC
         LIMIT %s
         """
         
@@ -127,13 +133,10 @@ def get_wind_forecasts_in_bounds(west, south, east, north, limit=5000):
             station_id = row[0]
             name = row[8] or station_id
             runway_ft = int(row[9]) if row[9] else None
-            is_military = bool(row[10]) if row[10] is not None else False
-
-            # get_label_priority uses name/runway keywords; override to 1 if DB flags military
+            
+            # Determine label priority
             label_priority = get_label_priority(name, runway_ft, station_id)
-            if is_military:
-                label_priority = 1
-
+            
             airports.append({
                 'station_id': station_id,
                 'lon': float(row[1]) if row[1] else 0,
@@ -147,8 +150,7 @@ def get_wind_forecasts_in_bounds(west, south, east, north, limit=5000):
                 'category': row[7] or 'NORMAL',
                 'name': name,
                 'longest_runway_ft': runway_ft,
-                'is_military': is_military,
-                'label_priority': label_priority,
+                'label_priority': label_priority,  # NEW: For smart labeling
                 'type': 'airport'
             })
         
@@ -257,7 +259,7 @@ def get_state_forecasts(state_code):
     # State bounding boxes (simplified - you may want more precise bounds)
     state_bounds = {
             'AL': {'west': -88.5, 'south': 30.1, 'east': -84.8, 'north': 35.1},
-        'AK': {'west': -180, 'south': 51, 'east': -129, 'north': 72},
+        'AK': {'west': 172, 'south': 51, 'east': -129, 'north': 72},
         'AZ': {'west': -114.8, 'south': 31.3, 'east': -109.0, 'north': 37.1},
         'AR': {'west': -94.6, 'south': 33.0, 'east': -89.6, 'north': 36.5},
         'CA': {'west': -124.5, 'south': 32.5, 'east': -114.1, 'north': 42.1},
