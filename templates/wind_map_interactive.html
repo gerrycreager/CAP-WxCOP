@@ -71,6 +71,21 @@
             border: 2px solid #000;
             flex-shrink: 0;
         }
+        .legend-swatch {
+            width: 28px; height: 13px;
+            border-radius: 2px;
+            margin-right: 8px;
+            flex-shrink: 0;
+            border-width: 2px;
+            border-style: solid;
+            opacity: 0.85;
+        }
+        #hazardLegend { display: none; margin-top: 6px; }
+        #hazardLegend .legend-section {
+            font-size: 11px; font-weight: 700; color: #555;
+            margin: 6px 0 3px;
+            text-transform: uppercase; letter-spacing: 0.04em;
+        }
         .legend-tag {
             min-width: 36px; height: 15px;
             border-radius: 3px;
@@ -123,6 +138,67 @@
             transform: translateX(-50%);
         }
 
+        .hazard-label {
+            background: transparent;
+            border: none;
+            box-shadow: none;
+        }
+        .hazard-label span {
+            font-family: monospace;
+            font-size: 13px;
+            font-weight: 700;
+            color: #fff;
+            padding: 2px 6px;
+            border-radius: 3px;
+            white-space: nowrap;
+            pointer-events: none;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+        }
+        #hazardPanel {
+            display: none;
+            position: absolute;
+            bottom: 30px;
+            left: 10px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.35);
+            z-index: 1000;
+            min-width: 260px;
+            max-width: 340px;
+            max-height: 50vh;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        #hazardPanel .hp-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 10px 6px;
+            border-bottom: 1px solid #ddd;
+            font-weight: 700;
+            font-size: 13px;
+            color: #2c3e50;
+            position: sticky;
+            top: 0;
+            background: white;
+            z-index: 1;
+        }
+        #hazardPanel .hp-close {
+            cursor: pointer; color: #999; font-size: 16px;
+            line-height: 1; padding: 0 2px;
+        }
+        #hazardPanel .hp-close:hover { color: #333; }
+        #hazardPanel .hp-none { padding: 10px; color: #666; font-style: italic; }
+        #hazardPanel .hp-item { padding: 7px 10px; border-bottom: 1px solid #eee; }
+        #hazardPanel .hp-item:last-child { border-bottom: none; }
+        #hazardPanel .hp-badge {
+            display: inline-block; padding: 1px 6px; border-radius: 3px;
+            color: white; font-size: 11px; font-weight: 700; margin-bottom: 4px;
+        }
+        #hazardPanel .hp-row { display: flex; gap: 6px; margin-top: 2px; }
+        #hazardPanel .hp-key { color: #888; white-space: nowrap; min-width: 52px; }
+        #hazardPanel .hp-val { color: #222; }
         .runway-info {
             font-family: 'Courier New', monospace;
             font-size: 0.8rem;
@@ -168,8 +244,20 @@
             <option value="region/RMR">Rocky Mountain Region</option>
             <option value="region/PCR">Pacific Region (Western US)</option>
         </select>
-        <label class="checkbox-label"><input type="checkbox" id="airmetToggle"> AIRMET</label>
+        <label class="checkbox-label"><input type="checkbox" id="airmetToggle"> G-AIRMET</label>
         <label class="checkbox-label"><input type="checkbox" id="sigmetToggle"> SIGMET</label>
+
+        <div id="hazardLegend">
+            <div class="legend-section">G-AIRMETs</div>
+            <div class="legend-item"><div class="legend-swatch" style="background:#FFA500;border-color:#FFA500"></div>Turbulence</div>
+            <div class="legend-item"><div class="legend-swatch" style="background:#87CEEB;border-color:#87CEEB"></div>Icing</div>
+            <div class="legend-item"><div class="legend-swatch" style="background:#808080;border-color:#808080"></div>IFR / Mtn Obscuration</div>
+            <div class="legend-section">SIGMETs</div>
+            <div class="legend-item"><div class="legend-swatch" style="background:#FF0000;border-color:#FF0000"></div>Convective / Tstorms</div>
+            <div class="legend-item"><div class="legend-swatch" style="background:#FFA500;border-color:#FFA500"></div>Severe Turbulence</div>
+            <div class="legend-item"><div class="legend-swatch" style="background:#87CEEB;border-color:#87CEEB"></div>Severe Icing</div>
+            <div class="legend-item"><div class="legend-swatch" style="background:#8B4513;border-color:#8B4513"></div>Volcanic Ash</div>
+        </div>
 
         <div class="divider"></div>
         <h3>CAPR 70-1 Wind Constraints</h3>
@@ -184,6 +272,14 @@
         <div style="font-size: 11px; color: #666;">
             Coverage: CONUS (HRRR Model)
         </div>
+    </div>
+
+    <div id="hazardPanel">
+        <div class="hp-header">
+            <span id="hazardPanelTitle">Hazards at this point</span>
+            <span class="hp-close" onclick="closeHazardPanel()">&times;</span>
+        </div>
+        <div id="hazardPanelBody"></div>
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -244,6 +340,13 @@
             loadWindForecastData();
 
             map.on('zoomend moveend', updateLabels);
+
+            // Show hazard panel on map click when a hazard layer is active
+            map.on('click', function(e) {
+                var airmetOn = document.getElementById('airmetToggle').checked;
+                var sigmetOn = document.getElementById('sigmetToggle').checked;
+                if (airmetOn || sigmetOn) showHazardPanel(e.latlng);
+            });
         }
 
         function setupControls() {
@@ -283,25 +386,29 @@
                 loadWindForecastData();
             });
 
-            // AIRMET/SIGMET toggles
+            // AIRMET/SIGMET toggles — also show/hide the hazard legend
+            function updateHazardLegend() {
+                var show = document.getElementById('airmetToggle').checked ||
+                           document.getElementById('sigmetToggle').checked;
+                document.getElementById('hazardLegend').style.display = show ? 'block' : 'none';
+            }
+
             document.getElementById('airmetToggle').addEventListener('change', function(e) {
                 if (e.target.checked) {
                     loadAirmets();
                 } else {
-                    if (airmetLayer) {
-                        map.removeLayer(airmetLayer);
-                    }
+                    if (airmetLayer) map.removeLayer(airmetLayer);
                 }
+                updateHazardLegend();
             });
-            
+
             document.getElementById('sigmetToggle').addEventListener('change', function(e) {
                 if (e.target.checked) {
                     loadSigmets();
                 } else {
-                    if (sigmetLayer) {
-                        map.removeLayer(sigmetLayer);
-                    }
+                    if (sigmetLayer) map.removeLayer(sigmetLayer);
                 }
+                updateHazardLegend();
             });
         }
 
@@ -369,92 +476,197 @@
             });
         }
 
+        // Map normalized phenomenon codes (from fetcher) to plain English
+        const PHENOMENON_LABELS = {
+            'TURB':          'Turbulence',
+            'ICE':           'Icing',
+            'IFR':           'IFR Conditions',
+            'MTN_OBSC':      'Mountain Obscuration',
+            'LLWS':          'Low-Level Wind Shear',
+            'STG_SFC_WINDS': 'Strong Surface Winds',
+            'CONVECTIVE':    'Convective',
+            'ASH':           'Volcanic Ash',
+            'TSGR':          'Thunderstorms / Hail',
+        };
+
+        // Format UTC ISO timestamp to compact aviation style: DDHHmmZ
+        function fmtTime(iso) {
+            if (!iso) return '?';
+            try {
+                const d = new Date(iso);
+                const dd = String(d.getUTCDate()).padStart(2,'0');
+                const hh = String(d.getUTCHours()).padStart(2,'0');
+                const mm = String(d.getUTCMinutes()).padStart(2,'0');
+                return `${dd}${hh}${mm}Z`;
+            } catch(e) { return iso; }
+        }
+
+        // Extract features array from any API response format:
+        //   GeoJSON FeatureCollection  { type: "FeatureCollection", features: [...] }
+        //   Legacy array               [{ phenomenon:..., geometry:... }, ...]
+        //   Legacy wrapper             { airmets: [...] }  or  { sigmets: [...] }
+        function extractFeatures(data, legacyKey) {
+            if (!data) return [];
+            if (data.type === 'FeatureCollection') return data.features || [];
+            if (Array.isArray(data)) return data;
+            if (data[legacyKey]) return data[legacyKey];
+            return [];
+        }
+
+        // Properties under feature.properties (GeoJSON) or flat on object (legacy)
+        function getProps(feature) {
+            return (feature.properties && Object.keys(feature.properties).length > 0)
+                   ? feature.properties : feature;
+        }
+
         async function loadAirmets() {
             try {
                 const response = await fetch('/CAP_WxCOP/api/airmet-sigmet/airmets');
-                console.log('AIRMET response status:', response.status);
                 if (response.ok) {
                     const data = await response.json();
-                    console.log('AIRMET data:', data);
-                    displayAirmets(data.airmets || data);
+                    const features = extractFeatures(data, 'airmets');
+                    console.log(`AIRMET: ${features.length} features`);
+                    displayAirmets(features);
                 } else {
-                    console.log('AIRMET data not available, status:', response.status);
+                    console.warn('AIRMET endpoint:', response.status);
                 }
             } catch (error) {
-                console.log('Error loading AIRMETs:', error);
+                console.error('Error loading AIRMETs:', error);
             }
         }
 
         async function loadSigmets() {
             try {
                 const response = await fetch('/CAP_WxCOP/api/airmet-sigmet/sigmets');
-                console.log('SIGMET response status:', response.status);
                 if (response.ok) {
                     const data = await response.json();
-                    console.log('SIGMET data:', data);
-                    displaySigmets(data.sigmets || data);
+                    const features = extractFeatures(data, 'sigmets');
+                    console.log(`SIGMET: ${features.length} features`);
+                    displaySigmets(features);
                 } else {
-                    console.log('SIGMET data not available, status:', response.status);
+                    console.warn('SIGMET endpoint:', response.status);
                 }
             } catch (error) {
-                console.log('Error loading SIGMETs:', error);
+                console.error('Error loading SIGMETs:', error);
             }
         }
 
-        function displayAirmets(airmets) {
+        // Fetcher puts: phenomenon, severity, flight_levels,
+        //               valid_from, valid_until, text, color, source
+        function airmetPopupHtml(p) {
+            const label    = PHENOMENON_LABELS[p.phenomenon] || p.phenomenon || 'Weather Hazard';
+            const severity = (p.severity && p.severity !== 'UNSPECIFIED') ? ' (' + p.severity + ')' : '';
+            const levels   = p.flight_levels || '';
+            const from     = fmtTime(p.valid_from);
+            const to       = fmtTime(p.valid_until);
+            const desc     = p.text || '';
+            return `<div style="font-family:monospace;font-size:12px;min-width:210px;max-width:300px">
+                <div style="background:#ff6b35;color:#fff;padding:3px 7px;margin:-8px -8px 7px;font-weight:bold;font-size:13px">G-AIRMET</div>
+                <table style="border-collapse:collapse;width:100%">
+                    <tr><td style="color:#888;padding:2px 6px 2px 0;white-space:nowrap">Hazard</td>
+                        <td style="font-weight:bold">${label}<span style="font-weight:normal;color:#888">${severity}</span></td></tr>
+                    ${levels ? `<tr><td style="color:#888;padding:2px 6px 2px 0;white-space:nowrap">Altitude</td>
+                        <td>${levels}</td></tr>` : ''}
+                    <tr><td style="color:#888;padding:2px 6px 2px 0;white-space:nowrap">Valid</td>
+                        <td>${from} &ndash; ${to}</td></tr>
+                </table>
+                ${desc ? `<div style="margin-top:6px;border-top:1px solid #ddd;padding-top:5px">
+                    <div style="color:#888;font-size:11px;margin-bottom:2px">Description</div>
+                    <div style="font-size:11px;line-height:1.5">${desc}</div></div>` : ''}
+            </div>`;
+        }
+
+        function sigmetPopupHtml(p) {
+            const label  = PHENOMENON_LABELS[p.phenomenon] || p.phenomenon || 'Severe Weather';
+            const levels = p.flight_levels || '';
+            const from   = fmtTime(p.valid_from);
+            const to     = fmtTime(p.valid_until);
+            const desc   = p.text || '';
+            return `<div style="font-family:monospace;font-size:12px;min-width:210px;max-width:300px">
+                <div style="background:#d63384;color:#fff;padding:3px 7px;margin:-8px -8px 7px;font-weight:bold;font-size:13px">SIGMET</div>
+                <table style="border-collapse:collapse;width:100%">
+                    <tr><td style="color:#888;padding:2px 6px 2px 0;white-space:nowrap">Hazard</td>
+                        <td style="font-weight:bold">${label}</td></tr>
+                    ${levels ? `<tr><td style="color:#888;padding:2px 6px 2px 0;white-space:nowrap">Altitude</td>
+                        <td>${levels}</td></tr>` : ''}
+                    <tr><td style="color:#888;padding:2px 6px 2px 0;white-space:nowrap">Valid</td>
+                        <td>${from} &ndash; ${to}</td></tr>
+                </table>
+                ${desc ? `<div style="margin-top:6px;border-top:1px solid #ddd;padding-top:5px">
+                    <div style="color:#888;font-size:11px;margin-bottom:2px">Description</div>
+                    <div style="font-size:11px;line-height:1.5">${desc}</div></div>` : ''}
+            </div>`;
+        }
+
+        // Centroid label helpers
+        function polyCentroid(coords) {
+            var ring = coords[0], lon = 0, lat = 0, n = ring.length;
+            for (var i = 0; i < n; i++) { lon += ring[i][0]; lat += ring[i][1]; }
+            return [lat / n, lon / n];
+        }
+
+        const HAZARD_SHORT = {
+            'TURB': 'Turb', 'ICE': 'Icing', 'IFR': 'IFR',
+            'MTN_OBSC': 'MtnOb', 'LLWS': 'LLWS', 'STG_SFC_WINDS': 'SfcWnd',
+            'CONVECTIVE': 'Conv', 'ASH': 'Ash', 'TSGR': 'TSGR',
+        };
+
+        function addCentroidLabel(geom, p, layerGroup) {
+            if (!geom || !geom.coordinates) return;
+            var short  = HAZARD_SHORT[p.phenomenon] || p.phenomenon || '?';
+            var bg     = p.color || 'rgba(0,0,0,0.6)';
+            var center = polyCentroid(geom.coordinates);
+            L.marker(center, {
+                icon: L.divIcon({
+                    className: 'hazard-label',
+                    html: `<span style="background:${bg}">${short}</span>`,
+                    iconSize: null, iconAnchor: null
+                }),
+                interactive: false,
+                zIndexOffset: 500
+            }).addTo(layerGroup);
+        }
+
+        // Feature stores for hit-testing on map click
+        var _airmetFeatures = [];
+        var _sigmetFeatures = [];
+
+        function displayAirmets(features) {
+            _airmetFeatures = features || [];
             if (airmetLayer) map.removeLayer(airmetLayer);
             airmetLayer = L.layerGroup();
-            
-            if (airmets && airmets.length > 0) {
-                airmets.forEach(airmet => {
-                    if (airmet.geometry || airmet.geojson) {
-                        const geometry = airmet.geometry || airmet.geojson;
-                        const airmetArea = L.geoJSON(geometry, {
-                            style: { color: '#ff6b35', weight: 2, opacity: 0.8, fillOpacity: 0.2 }
-                        }).bindPopup(`
-                            <div style="font-family: monospace;">
-                                <h3>AIRMET</h3>
-                                <p><strong>Type:</strong> ${airmet.hazard || airmet.type || 'Weather Hazard'}</p>
-                                <p><strong>Valid:</strong> ${airmet.valid_from || airmet.start_time} - ${airmet.valid_to || airmet.end_time}</p>
-                                ${airmet.text || airmet.raw_text ? `<p><strong>Text:</strong> ${airmet.text || airmet.raw_text}</p>` : ''}
-                            </div>
-                        `);
-                        airmetLayer.addLayer(airmetArea);
-                    }
+            if (features && features.length > 0) {
+                features.forEach(feature => {
+                    const geom = feature.geometry || feature.geojson;
+                    if (!geom) return;
+                    const p = getProps(feature);
+                    L.geoJSON(geom, {
+                        style: { color: p.color || '#ff6b35', weight: 2, opacity: 0.8, fillOpacity: 0.15 }
+                    }).bindPopup(airmetPopupHtml(p), { maxWidth: 320 }).addTo(airmetLayer);
+                    addCentroidLabel(geom, p, airmetLayer);
                 });
-                console.log(`Added ${airmets.length} AIRMET areas`);
+                console.log(`Displayed ${features.length} AIRMET areas`);
                 airmetLayer.addTo(map);
-            } else {
-                console.log('No AIRMET areas to display');
-            }
+            } else { console.log('No active AIRMETs'); }
         }
 
-        function displaySigmets(sigmets) {
+        function displaySigmets(features) {
+            _sigmetFeatures = features || [];
             if (sigmetLayer) map.removeLayer(sigmetLayer);
             sigmetLayer = L.layerGroup();
-            
-            if (sigmets && sigmets.length > 0) {
-                sigmets.forEach(sigmet => {
-                    if (sigmet.geometry || sigmet.geojson) {
-                        const geometry = sigmet.geometry || sigmet.geojson;
-                        const sigmetArea = L.geoJSON(geometry, {
-                            style: { color: '#d63384', weight: 3, opacity: 0.9, fillOpacity: 0.3 }
-                        }).bindPopup(`
-                            <div style="font-family: monospace;">
-                                <h3>SIGMET</h3>
-                                <p><strong>Type:</strong> ${sigmet.hazard || sigmet.type || 'Severe Weather'}</p>
-                                <p><strong>Valid:</strong> ${sigmet.valid_from || sigmet.start_time} - ${sigmet.valid_to || sigmet.end_time}</p>
-                                ${sigmet.text || sigmet.raw_text ? `<p><strong>Text:</strong> ${sigmet.text || sigmet.raw_text}</p>` : ''}
-                            </div>
-                        `);
-                        sigmetLayer.addLayer(sigmetArea);
-                    }
+            if (features && features.length > 0) {
+                features.forEach(feature => {
+                    const geom = feature.geometry || feature.geojson;
+                    if (!geom) return;
+                    const p = getProps(feature);
+                    L.geoJSON(geom, {
+                        style: { color: p.color || '#d63384', weight: 3, opacity: 0.9, fillOpacity: 0.2 }
+                    }).bindPopup(sigmetPopupHtml(p), { maxWidth: 320 }).addTo(sigmetLayer);
+                    addCentroidLabel(geom, p, sigmetLayer);
                 });
-                console.log(`Added ${sigmets.length} SIGMET areas`);
+                console.log(`Displayed ${features.length} SIGMET areas`);
                 sigmetLayer.addTo(map);
-            } else {
-                console.log('No SIGMET areas to display');
-            }
+            } else { console.log('No active SIGMETs'); }
         }
 
         function addWindMarker(airport) {
@@ -627,6 +839,77 @@
                 return true;
             }
         });
+        // Point-in-polygon (ray casting)
+        function pointInRing(pt, ring) {
+            var x = pt[0], y = pt[1], inside = false;
+            for (var i = 0, j = ring.length-1; i < ring.length; j = i++) {
+                var xi = ring[i][0], yi = ring[i][1], xj = ring[j][0], yj = ring[j][1];
+                if (((yi > y) !== (yj > y)) &&
+                    (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) inside = !inside;
+            }
+            return inside;
+        }
+
+        function pointInGeoJSONPolygon(latlng, geom) {
+            if (!geom || !geom.coordinates) return false;
+            var pt = [latlng.lng, latlng.lat];
+            if (!pointInRing(pt, geom.coordinates[0])) return false;
+            for (var h = 1; h < geom.coordinates.length; h++)
+                if (pointInRing(pt, geom.coordinates[h])) return false;
+            return true;
+        }
+
+        function closeHazardPanel() {
+            document.getElementById('hazardPanel').style.display = 'none';
+        }
+
+        function showHazardPanel(latlng) {
+            var hits = [];
+            _airmetFeatures.forEach(function(f) {
+                if (pointInGeoJSONPolygon(latlng, f.geometry || f.geojson))
+                    hits.push({ kind: 'G-AIRMET', bg: '#ff6b35', p: getProps(f) });
+            });
+            _sigmetFeatures.forEach(function(f) {
+                if (pointInGeoJSONPolygon(latlng, f.geometry || f.geojson))
+                    hits.push({ kind: 'SIGMET', bg: '#d63384', p: getProps(f) });
+            });
+
+            var airmetOn = document.getElementById('airmetToggle').checked;
+            var sigmetOn = document.getElementById('sigmetToggle').checked;
+            if (!airmetOn && !sigmetOn) return;
+
+            var title = document.getElementById('hazardPanelTitle');
+            var body  = document.getElementById('hazardPanelBody');
+            var panel = document.getElementById('hazardPanel');
+
+            if (hits.length === 0) {
+                title.textContent = 'Hazards at this point';
+                body.innerHTML = '<div class="hp-none">No active hazards at this location</div>';
+            } else {
+                title.textContent = hits.length + ' hazard' + (hits.length > 1 ? 's' : '') + ' at this point';
+                body.innerHTML = hits.map(function(h) {
+                    var p = h.p;
+                    var label = PHENOMENON_LABELS[p.phenomenon] || p.phenomenon || h.kind;
+                    var sev   = (p.severity && p.severity !== 'UNSPECIFIED') ? ' (' + p.severity + ')' : '';
+                    var alt   = p.flight_levels || '';
+                    var desc  = p.text || '';
+                    return '<div class="hp-item">'
+                        + '<div class="hp-badge" style="background:' + h.bg + '">' + h.kind + '</div>'
+                        + '<div class="hp-row"><span class="hp-key">Hazard</span>'
+                        + '<span class="hp-val"><strong>' + label + '</strong>' + sev + '</span></div>'
+                        + (alt ? '<div class="hp-row"><span class="hp-key">Altitude</span>'
+                               + '<span class="hp-val">' + alt + '</span></div>' : '')
+                        + '<div class="hp-row"><span class="hp-key">Valid</span>'
+                        + '<span class="hp-val">' + fmtTime(p.valid_from) + ' &ndash; ' + fmtTime(p.valid_until) + '</span></div>'
+                        + (desc ? '<div class="hp-row" style="margin-top:4px">'
+                                + '<span class="hp-key">Desc</span>'
+                                + '<span class="hp-val" style="font-size:11px;line-height:1.4">' + desc + '</span></div>' : '')
+                        + '</div>';
+                }).join('');
+            }
+            panel.style.display = 'block';
+        }
+
     </script>
 </body>
 </html>

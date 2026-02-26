@@ -209,12 +209,25 @@ class AviationWeatherAPI:
         }
     
     def _format_flight_levels(self, item: Dict) -> str:
-        """Format flight level information from airsigmet API data"""
-        alt_hi = item.get('altitudeHi1')
+        """Format flight level information from airsigmet API data.
+
+        Primary: structured altitudeHi1 / altitudeLow1 fields (feet MSL, integer).
+        Fallback: parse altitude from rawAirSigmet text when structured fields absent.
+
+        Common raw text patterns:
+          BLW FL190        -> Below FL190
+          ABV FL180        -> Above FL180
+          BTN FL180 AND FL300  -> FL180-FL300
+          SFC-FL180        -> SFC-FL180
+          FL180-FL300      -> FL180-FL300
+        """
+        import re
+
+        alt_hi  = item.get('altitudeHi1')
         alt_low = item.get('altitudeLow1')
-        
+
         if alt_hi and alt_low:
-            fl_hi = alt_hi // 100
+            fl_hi  = alt_hi  // 100
             fl_low = alt_low // 100
             return f"FL{fl_low:03d}-FL{fl_hi:03d}"
         elif alt_hi:
@@ -223,8 +236,44 @@ class AviationWeatherAPI:
         elif alt_low:
             fl_low = alt_low // 100
             return f"Above FL{fl_low:03d}"
-        else:
-            return "Not specified"
+
+        # --- Fallback: parse altitude from raw text ---
+        raw = (item.get('rawAirSigmet') or '').upper()
+
+        # BLW FL190  /  BELOW FL190
+        m = re.search(r'\bBL[OW]+\s+FL(\d{2,3})\b', raw)
+        if m:
+            return f"Below FL{int(m.group(1)):03d}"
+
+        # ABV FL180  /  ABOVE FL180
+        m = re.search(r'\bABV\s+FL(\d{2,3})\b', raw)
+        if m:
+            return f"Above FL{int(m.group(1)):03d}"
+
+        # BTN FL180 AND FL300  (between)
+        m = re.search(r'\bBTN\s+FL(\d{2,3})\s+AND\s+FL(\d{2,3})\b', raw)
+        if m:
+            return f"FL{int(m.group(1)):03d}-FL{int(m.group(2)):03d}"
+
+        # SFC/FL180  or  SFC-FL180
+        m = re.search(r'\bSFC[-/]FL(\d{2,3})\b', raw)
+        if m:
+            return f"SFC-FL{int(m.group(1)):03d}"
+
+        # FL180/FL300  or  FL180-FL300
+        m = re.search(r'\bFL(\d{2,3})[-/]FL(\d{2,3})\b', raw)
+        if m:
+            lo, hi = int(m.group(1)), int(m.group(2))
+            if lo > hi:
+                lo, hi = hi, lo
+            return f"FL{lo:03d}-FL{hi:03d}"
+
+        # Single FL mention as last resort
+        m = re.search(r'\bFL(\d{2,3})\b', raw)
+        if m:
+            return f"FL{int(m.group(1)):03d}"
+
+        return "Not specified"
     
     def _get_severity(self, item: Dict) -> str:
         """Determine severity from airsigmet API data"""
@@ -268,8 +317,11 @@ class AviationWeatherAPI:
                 valid_from = datetime.fromisoformat(item['valid_from'])
                 valid_until = datetime.fromisoformat(item['valid_until'])
                 
-                # Show AIRMETs valid now OR within next hour (G-AIRMETs issued early)
-                lookahead = timedelta(hours=1)
+                # G-AIRMETs are issued every 3h; expireTime == validTime on the AWC
+                # API (no overlap between cycles). The winds page covers a 12h forecast
+                # horizon, so show any G-AIRMET whose valid time falls within that
+                # window — lookahead matches the full forecast period.
+                lookahead = timedelta(hours=12)
                 if (valid_from - lookahead) <= timestamp <= valid_until:
                     airmets.append(item)
         
