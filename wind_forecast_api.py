@@ -17,62 +17,184 @@ wind_forecast_api = Blueprint('wind_forecast_api', __name__)
 log = logging.getLogger(__name__)
 
 # Civil Air Patrol Region bounding boxes
-REGION_BOUNDS = {
-    'CONUS': {'west': -125, 'south': 24, 'east': -66, 'north': 50},
-    'NCR': {'west': -104, 'south': 37, 'east': -89, 'north': 49},
-    'GLR': {'west': -93, 'south': 37, 'east': -80, 'north': 49},
-    'MAR': {'west': -84, 'south': 32, 'east': -75, 'north': 40},
-    'NER': {'west': -80, 'south': 39, 'east': -66, 'north': 48},
-    'SER': {'west': -92, 'south': 24, 'east': -74, 'north': 37},
-    'SER-PR': {'west': -68, 'south': 17, 'east': -65, 'north': 19},
-    # CARIBBEAN: covers Puerto Rico, USVI, and the Bahamas chain
-    # PR ~18.5N 66-67W, USVI ~18.3N 64.6-65W, Bahamas 21-27N 72-80W
-    'CARIBBEAN': {'west': -80, 'south': 17, 'east': -64, 'north': 28},
-    # Aliases used by the region selector in wind_map_interactive.html
-    'AK': {'west': -180, 'south': 51, 'east': -130, 'north': 72},
-    'HI': {'west': -161, 'south': 18, 'east': -154, 'north': 23},
-    'SWR': {'west': -115, 'south': 25, 'east': -89, 'north': 37},
-    'RMR': {'west': -117, 'south': 37, 'east': -102, 'north': 49},
-    'PCR': {'west': -125, 'south': 32, 'east': -114, 'north': 49},
-    'PCR-AK': {'west': -180, 'south': 51, 'east': -130, 'north': 72},
-    'PCR-HI': {'west': -161, 'south': 18, 'east': -154, 'north': 23},
-    'PCR-GUAM': {'west': 144, 'south': 13, 'east': 145, 'north': 14},
+# Regions defined by state membership (iso_region codes) for accurate polygon coverage.
+# Bounding-box approach caused edge truncation (e.g. eastern NC/SC in SER).
+# OCONUS territories and CONUS overview retain bounding boxes.
+REGION_STATES = {
+    # North Central Region
+    'NCR': ['US-IA','US-IL','US-KS','US-MN','US-MO','US-ND','US-NE','US-SD','US-WI'],
+    # Great Lakes Region
+    'GLR': ['US-IN','US-KY','US-MI','US-OH','US-WV'],
+    # Mid-Atlantic Region (NY included — NY Wing is in MAR)
+    'MAR': ['US-DC','US-DE','US-MD','US-NJ','US-NY','US-PA','US-VA'],
+    # Northeast Region (NY excluded — avoid duplicate; NER covers New England only)
+    'NER': ['US-CT','US-MA','US-ME','US-NH','US-RI','US-VT'],
+    # Southeast Region — state-based to capture full eastern NC/SC coastline
+    'SER': ['US-AL','US-FL','US-GA','US-MS','US-NC','US-SC','US-TN'],
+    # Southwest Region — AZ added (was missing)
+    'SWR': ['US-AR','US-AZ','US-LA','US-NM','US-OK','US-TX'],
+    # Rocky Mountain Region — ID added (was missing; 101 airports)
+    'RMR': ['US-CO','US-ID','US-MT','US-UT','US-WY'],
+    # Pacific Region (CONUS — AK/HI handled by OCONUS bounding boxes)
+    'PCR': ['US-CA','US-NV','US-OR','US-WA'],
 }
 
+# Bounding boxes for CONUS overview and OCONUS territories
+REGION_BOUNDS = {
+    'CONUS':    {'west': -125, 'south': 24,  'east': -66,  'north': 50},
+    'SER-PR':   {'west': -68,  'south': 17,  'east': -65,  'north': 19},
+    'PCR-AK':   {'west': -180, 'south': 51,  'east': -130, 'north': 72},
+    'PCR-HI':   {'west': -161, 'south': 18,  'east': -154, 'north': 23},
+    'PCR-GUAM': {'west': 144,  'south': 13,  'east': 145,  'north': 14},
+}
 
-def get_label_priority(name, runway_ft, station_id):
+# All valid region codes
+ALL_REGIONS = set(REGION_STATES.keys()) | set(REGION_BOUNDS.keys())
+
+
+def get_label_priority(name, runway_ft, station_id, is_military=False):
     """
-    Determine label priority for map display
-    Returns: 1 (military), 2 (major), 3 (medium), 4 (small/no label)
+    Determine label priority for map display.
+    Primary:  is_military from DB (authoritative).
+    Fallback: keyword matching for unambiguous military designators only,
+              covering airports not yet flagged in the DB (ARB, ANGB, etc.)
+    Returns: 1 (military), 2 (major/international), 3 (regional), 4 (small)
     """
+    if is_military:
+        return 1
+
     if not name:
         return 4
-    
+
     name_upper = name.upper()
-    
-    # Priority 1: Military installations
+
+    # Keyword fallback — restricted to unambiguous military-only designators
     military_keywords = [
-        'AIR FORCE BASE', 'AFB', 'NAVAL', 'NAVY', 'MARINE', 'MCAS',
-        'AIR STATION', 'NAS', 'AIR GUARD', 'ANG', 'MILITARY',
-        'ARMY', 'COAST GUARD', 'SPACE FORCE'
+        'AIR FORCE BASE', 'AFB',
+        'AIR RESERVE BASE', 'ARB',
+        'AIR NATIONAL GUARD BASE', 'ANGB',
+        'AIR GUARD BASE',
+        'NAVAL AIR STATION', 'NAS',
+        'NAVAL AIR FACILITY', 'NAF',
+        'MARINE CORPS AIR STATION', 'MCAS',
+        'COAST GUARD AIR STATION', 'CGAS',
+        'JOINT BASE',
+        'AIR STATION',
+        'SPACE FORCE BASE',
     ]
-    if any(keyword in name_upper for keyword in military_keywords):
+    if any(kw in name_upper for kw in military_keywords):
         return 1
-    
-    # Priority 2: Major airports (long runways >= 10,000 ft)
-    if runway_ft and runway_ft >= 10000:
+
+    # Priority 2: Major airports (runway >= 10,000 ft or International)
+    if (runway_ft and runway_ft >= 10000) or 'INTERNATIONAL' in name_upper:
         return 2
-    
-    # Priority 2: International airports (by name)
-    if 'INTERNATIONAL' in name_upper:
-        return 2
-    
-    # Priority 3: Medium airports (6,000 - 10,000 ft runways)
-    if runway_ft and runway_ft >= 6000:
+
+    # Priority 3: Regional airports (runway 5,000 - 9,999 ft)
+    if runway_ft and runway_ft >= 5000:
         return 3
-    
-    # Priority 4: Small airports (don't label)
+
     return 4
+
+
+def get_wind_forecasts_by_states(state_list, limit=5000):
+    """
+    Query wind forecasts for a list of iso_region codes (e.g. ['US-NC','US-SC']).
+    Uses state membership rather than bounding box so irregular region shapes
+    don't clip airports near the edges (e.g. eastern Carolinas in SER).
+    Returns same dict structure as get_wind_forecasts_in_bounds().
+    Also computes the actual bounds of returned airports for map fitting.
+    """
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            SELECT DISTINCT model_run
+            FROM observations.model_wind_forecasts
+            ORDER BY model_run DESC LIMIT 1
+        """)
+        result = cur.fetchone()
+        if not result:
+            cur.close(); conn.close()
+            log.warning("No model runs found")
+            return [], None
+
+        latest_run = result[0]
+
+        placeholders = ','.join(['%s'] * len(state_list))
+        query = f"""
+        SELECT
+            mwf.station_id,
+            ST_X(mwf.location::geometry) as lon,
+            ST_Y(mwf.location::geometry) as lat,
+            MAX(mwf.wind_speed_kts) as max_wind_kts,
+            MAX(mwf.wind_gust_kts) as max_gust_kts,
+            MIN(mwf.wind_speed_kts) as min_wind_kts,
+            mwf.model_name,
+            mwf.wind_category,
+            a.name as airport_name,
+            a.longest_runway_ft,
+            a.is_military
+        FROM observations.model_wind_forecasts mwf
+        INNER JOIN observations.airports a ON mwf.station_id = a.station_id
+        WHERE mwf.model_run = %s
+            AND a.iso_region IN ({placeholders})
+            AND mwf.forecast_hour <= 12
+        GROUP BY mwf.station_id, mwf.location, mwf.model_name, mwf.wind_category,
+                 a.name, a.longest_runway_ft, a.is_military
+        ORDER BY MAX(mwf.wind_speed_kts) DESC
+        LIMIT %s
+        """
+
+        cur.execute(query, [latest_run] + state_list + [limit])
+
+        airports = []
+        lats, lons = [], []
+        for row in cur.fetchall():
+            name      = row[8] or row[0]
+            runway_ft = int(row[9]) if row[9] else None
+            is_mil    = bool(row[10]) if row[10] is not None else False
+            label_priority = get_label_priority(name, runway_ft, row[0], is_mil)
+
+            lat, lon = float(row[2]) if row[2] else 0, float(row[1]) if row[1] else 0
+            lats.append(lat); lons.append(lon)
+
+            airports.append({
+                'station_id':      row[0],
+                'lon':             lon,
+                'lat':             lat,
+                'max_wind_kts':    int(row[3]) if row[3] else 0,
+                'max_gust_kts':    int(row[4]) if row[4] else None,
+                'min_wind_kts':    int(row[5]) if row[5] else 0,
+                'max_wind_time':   None,
+                'max_gust_time':   None,
+                'model':           row[6] or 'HRRR',
+                'category':        row[7] or 'NORMAL',
+                'name':            name,
+                'longest_runway_ft': runway_ft,
+                'label_priority':  label_priority,
+                'is_military':     is_mil,
+                'type':            'airport',
+            })
+
+        cur.close(); conn.close()
+
+        bounds = None
+        if lats:
+            pad = 0.5
+            bounds = {
+                'west':  min(lons) - pad, 'east':  max(lons) + pad,
+                'south': min(lats) - pad, 'north': max(lats) + pad,
+            }
+
+        log.info(f"State query returned {len(airports)} airports for {state_list}")
+        return airports, bounds
+
+    except Exception as e:
+        log.error(f"Error querying wind forecasts by state: {e}", exc_info=True)
+        try: cur.close(); conn.close()
+        except: pass
+        return [], None
 
 
 def get_wind_forecasts_in_bounds(west, south, east, north, limit=5000):
@@ -114,14 +236,15 @@ def get_wind_forecasts_in_bounds(west, south, east, north, limit=5000):
             mwf.model_name,
             mwf.wind_category,
             a.name as airport_name,
-            a.longest_runway_ft
+            a.longest_runway_ft,
+            a.is_military
         FROM observations.model_wind_forecasts mwf
         INNER JOIN observations.airports a ON mwf.station_id = a.station_id
         WHERE mwf.model_run = %s
             AND ST_X(mwf.location::geometry) BETWEEN %s AND %s
             AND ST_Y(mwf.location::geometry) BETWEEN %s AND %s
             AND mwf.forecast_hour <= 12
-        GROUP BY mwf.station_id, mwf.location, mwf.model_name, mwf.wind_category, a.name, a.longest_runway_ft
+        GROUP BY mwf.station_id, mwf.location, mwf.model_name, mwf.wind_category, a.name, a.longest_runway_ft, a.is_military
         ORDER BY MAX(mwf.wind_speed_kts) DESC
         LIMIT %s
         """
@@ -131,11 +254,10 @@ def get_wind_forecasts_in_bounds(west, south, east, north, limit=5000):
         airports = []
         for row in cur.fetchall():
             station_id = row[0]
-            name = row[8] or station_id
+            name      = row[8] or station_id
             runway_ft = int(row[9]) if row[9] else None
-            
-            # Determine label priority
-            label_priority = get_label_priority(name, runway_ft, station_id)
+            is_mil    = bool(row[10]) if row[10] is not None else False
+            label_priority = get_label_priority(name, runway_ft, station_id, is_mil)
             
             airports.append({
                 'station_id': station_id,
@@ -150,7 +272,8 @@ def get_wind_forecasts_in_bounds(west, south, east, north, limit=5000):
                 'category': row[7] or 'NORMAL',
                 'name': name,
                 'longest_runway_ft': runway_ft,
-                'label_priority': label_priority,  # NEW: For smart labeling
+                'label_priority': label_priority,
+                'is_military': is_mil,
                 'type': 'airport'
             })
         
@@ -219,17 +342,27 @@ def generate_wind_grid(airports, bounds, grid_resolution=50):
 
 @wind_forecast_api.route('/region/<region_code>')
 def get_region_forecasts(region_code):
-    """Get wind forecasts for a CAP region"""
+    """Get wind forecasts for a CAP region.
+    State-based regions use iso_region filter for accurate edge coverage.
+    OCONUS territories fall back to bounding box.
+    """
     region_code = region_code.upper()
-    
-    if region_code not in REGION_BOUNDS:
+
+    if region_code not in ALL_REGIONS:
         return jsonify({'error': 'Invalid region code'}), 400
-    
-    bounds = REGION_BOUNDS[region_code]
-    airports = get_wind_forecasts_in_bounds(
-        bounds['west'], bounds['south'], 
-        bounds['east'], bounds['north']
-    )
+
+    # State-based query for CONUS regions
+    if region_code in REGION_STATES:
+        airports, bounds = get_wind_forecasts_by_states(REGION_STATES[region_code])
+        if not bounds:
+            bounds = REGION_BOUNDS.get(region_code, {'west':-125,'south':24,'east':-66,'north':50})
+    else:
+        # OCONUS / CONUS overview — bounding box
+        bounds = REGION_BOUNDS[region_code]
+        airports = get_wind_forecasts_in_bounds(
+            bounds['west'], bounds['south'],
+            bounds['east'], bounds['north']
+        )
     
     # Generate wind grid for contours
     wind_grid = None

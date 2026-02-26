@@ -137,10 +137,47 @@
             box-shadow: 0 1px 2px rgba(0,0,0,0.3);
             transform: translateX(-50%);
         }
+        /* ── Title bar ───────────────────────────────────────── */
+        #titleBar {
+            position: fixed;
+            top: 0; left: 0; right: 0;
+            height: 44px;
+            background: linear-gradient(135deg, #1a3a2a, #2c5f41);
+            color: white;
+            display: flex;
+            align-items: center;
+            padding: 0 16px;
+            z-index: 1100;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+            gap: 16px;
+        }
+        #titleBar .tb-home {
+            color: white; text-decoration: none;
+            font-size: 18px; line-height: 1; flex-shrink: 0;
+            opacity: 0.85; transition: opacity 0.15s;
+        }
+        #titleBar .tb-home:hover { opacity: 1; }
+        #titleBar .tb-title {
+            font-size: 16px; font-weight: 700;
+            letter-spacing: 0.03em; white-space: nowrap; flex: 1;
+        }
+        #titleBar .tb-utc {
+            font-size: 13px; font-family: 'Courier New', monospace;
+            opacity: 0.85; flex-shrink: 0;
+        }
+        /* Shift map and controls down; hide old home button */
+        #map          { height: calc(100vh - 44px); margin-top: 44px; }
+        .controls     { top: 54px; }
+        .home-btn     { display: none; }
     </style>
 </head>
 <body>
-    <a href="/" class="home-btn">🏠 Home</a>
+    <div id="titleBar">
+        <a href="/" class="tb-home" title="Home">&#127968;</a>
+        <span class="tb-title">Weather Common Operating Picture</span>
+        <span class="tb-utc" id="tbUtc"></span>
+    </div>
+    <a href="/" class="home-btn">&#127968; Home</a>
     <div id="map"></div>
     <div id="loading">Loading weather data...</div>
 
@@ -155,28 +192,11 @@
         </select>
 
         <div class="divider"></div>
-        <h3>Coverage Area</h3>
-        <select id="coverageSelector" class="layer-selector">
-            <option value="conus">CONUS</option>
-            <option value="ak">Alaska</option>
-            <option value="hi">Hawaii</option>
-            <option value="carib">Caribbean / Bahamas</option>
-            <option disabled>──────────────</option>
-            <option value="ncr">North Central Region</option>
-            <option value="glr">Great Lakes Region</option>
-            <option value="mar">Mid-Atlantic Region</option>
-            <option value="ner">Northeast Region</option>
-            <option value="ser">Southeast Region</option>
-            <option value="swr">Southwest Region</option>
-            <option value="rmr">Rocky Mountain Region</option>
-            <option value="pcr">Pacific Region (Western US)</option>
-        </select>
-
-        <div class="divider"></div>
         <h3>Display Options</h3>
         <label class="checkbox-label"><input type="checkbox" id="showMilitary" checked> Military Airfields</label>
         <label class="checkbox-label"><input type="checkbox" id="showHubs" checked> Major Hubs</label>
         <label class="checkbox-label"><input type="checkbox" id="showRegional" checked> Regional Airfields</label>
+        <label class="checkbox-label"><input type="checkbox" id="labelToggle" checked> Show labels</label>
 
         <div class="divider"></div>
         <h3>Weather Hazards</h3>
@@ -184,15 +204,23 @@
 
         <div class="divider"></div>
         <h3>Flight Categories</h3>
-        <div class="legend-item"><div class="legend-dot" style="background:#00FF00;"></div>VFR</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#0000FF;"></div>MVFR</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#FF0000;"></div>IFR</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#FF00FF;"></div>LIFR</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#28a745;"></div>VFR</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#ffc107;"></div>MVFR</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#fd7e14;"></div>IFR</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#dc3545;"></div>LIFR</div>
 
         <div class="divider"></div>
         <div class="legend-item"><div class="legend-tag" style="background:rgba(200,30,30,0.9);color:white;">MIL</div>Military</div>
         <div class="legend-item"><div class="legend-tag" style="background:rgba(25,80,200,0.9);color:white;">HUB</div>Major Hub</div>
         <div class="legend-item"><div class="legend-tag" style="background:rgba(180,180,180,0.9);color:#111;">RGNL</div>Regional</div>
+        <div class="legend-item">
+            <div style="width:12px;height:12px;border-radius:50%;border:2px solid #555;
+                        background:white;flex-shrink:0;margin-right:8px;"></div>
+            Paved &gt;2500 ft (no METAR)
+        </div>
+
+        <div class="divider"></div>
+        <label class="checkbox-label"><input type="checkbox" id="showNoMetar" checked> No-METAR Airfields</label>
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -200,10 +228,15 @@
         var map, labelsLayer, baseLayers = {}, tfrLayer;
         var currentMetars = [];
         var metatMarkers = [];
+        var noMetarAirports = [];
+        var noMetarMarkers = [];
         var labelsVisible = true;
         var currentLayerName = 'street';
 
-        var TIER_MIN_ZOOM = { 1: 0, 2: 6, 3: 8 }; // Military always visible
+        // ### ZOOM THRESHOLDS — edit here to change when labels appear by tier
+        // Tier 1 = Military (always), Tier 2 = Major hub, Tier 3 = Regional/all others
+        var TIER_MIN_ZOOM = { 1: 0, 2: 5, 3: 6 }; // Military always, hub z5+, regional z6+
+        // ###
 
         var airportTiers = {
             'KATL': 2, 'KORD': 2, 'KLAX': 2, 'KDFW': 2, 'KDEN': 2, 'KJFK': 2,
@@ -293,17 +326,22 @@
                 }
             });
 
-            // Coverage selector
-            document.getElementById('coverageSelector').addEventListener('change', function() {
-                var coverage = this.value;
-                var cb = COVERAGE_BOUNDS[coverage];
-                map.setView(cb.center, cb.zoom);
-                loadWeatherData();
-            });
-
             // Display options
             ['Military', 'Hubs', 'Regional'].forEach(function(type) {
                 document.getElementById('show' + type).addEventListener('change', filterMarkers);
+            });
+
+            document.getElementById('showNoMetar').addEventListener('change', function(e) {
+                noMetarMarkers.forEach(function(m) {
+                    if (e.target.checked) { m.addTo(map); } else { map.removeLayer(m); }
+                });
+                updateLabels();
+            });
+
+            document.getElementById('labelToggle').addEventListener('change', function(e) {
+                labelsVisible = e.target.checked;
+                if (labelsVisible) { labelsLayer.addTo(map); updateLabels(); }
+                else { map.removeLayer(labelsLayer); }
             });
 
             // TFR toggle
@@ -347,60 +385,95 @@
             var zoom = map.getZoom();
             var bounds = map.getBounds();
 
+            // Labels for no-METAR airports
+            if (document.getElementById('showNoMetar') && document.getElementById('showNoMetar').checked) {
+                noMetarAirports.forEach(function(apt) {
+                    if (!bounds.contains([apt.latitude, apt.longitude])) return;
+                    var sid  = apt.station_id;
+                    var tier = apt.is_military ? 1 : null;
+                    if (tier === 1) {
+                        L.marker([apt.latitude, apt.longitude], {
+                            icon: L.divIcon({ className: 'apt-t1', html: sid,
+                                iconSize: null, iconAnchor: [0, 22] }),
+                            interactive: false, zIndexOffset: 1000
+                        }).addTo(labelsLayer);
+                    } else if (zoom >= 6) { // ### no-METAR non-military label zoom threshold ###
+                        L.marker([apt.latitude, apt.longitude], {
+                            icon: L.divIcon({ className: 'apt-t3', html: sid,
+                                iconSize: null, iconAnchor: [0, 22] }),
+                            interactive: false, zIndexOffset: 50
+                        }).addTo(labelsLayer);
+                    }
+                });
+            }
+
             currentMetars.forEach(function(metar) {
                 if (!bounds.contains([metar.latitude, metar.longitude])) return;
 
                 var sid = metar.station_id;
-                // Use hard-coded tier table first; then fall back to is_military DB flag
-                var tier = airportTiers[sid] || (metar.is_military === true ? 1 : null);
+                // Tier 1 = military, 2 = major hub, 3 = regional (default for all others)
+                var tier = airportTiers[sid]
+                        || (metar.is_military === true || metar.military === true ? 1 : 3);
 
-                // Tier 1 (Military): always visible at every zoom level
-                if (tier === 1) {
-                    var label = L.marker([metar.latitude, metar.longitude], {
-                        icon: L.divIcon({
-                            className: 'apt-t1',
-                            html: sid,
-                            iconSize: null,
-                            iconAnchor: [0, 22]
-                        }),
-                        interactive: false,
-                        zIndexOffset: 1000
-                    });
-                    label.addTo(labelsLayer);
-                    return;
-                }
+                if (zoom < TIER_MIN_ZOOM[tier]) return;
 
-                // Tier 2 (Major hub): visible at zoom >= 5
-                if (tier === 2 && zoom >= 5) {
-                    var label = L.marker([metar.latitude, metar.longitude], {
-                        icon: L.divIcon({
-                            className: 'apt-t2',
-                            html: sid,
-                            iconSize: null,
-                            iconAnchor: [0, 22]
-                        }),
-                        interactive: false,
-                        zIndexOffset: 500
-                    });
-                    label.addTo(labelsLayer);
-                    return;
-                }
-
-                // Tier 3 (Regional): visible at zoom >= 8
-                if (tier === 3 && zoom >= 8) {
-                    var label = L.marker([metar.latitude, metar.longitude], {
-                        icon: L.divIcon({
-                            className: 'apt-t3',
-                            html: sid,
-                            iconSize: null,
-                            iconAnchor: [0, 22]
-                        }),
-                        interactive: false,
-                        zIndexOffset: 100
-                    });
-                    label.addTo(labelsLayer);
-                }
+                var label = L.marker([metar.latitude, metar.longitude], {
+                    icon: L.divIcon({
+                        className: 'apt-t' + Math.min(tier, 3),
+                        html: sid,
+                        iconSize: null,
+                        iconAnchor: [0, 22]
+                    }),
+                    interactive: false,
+                    zIndexOffset: Math.max(0, (3 - tier)) * 100
+                });
+                label.addTo(labelsLayer);
             });
+        }
+
+        function addNoMetarMarker(airport) {
+            var lat = airport.latitude;
+            var lon = airport.longitude;
+            if (!lat || !lon) return;
+
+            var icon = L.divIcon({
+                className: '',
+                html: '<div style="width:12px;height:12px;background:white;'
+                    + 'border:2px solid #555;border-radius:50%;'
+                    + 'box-shadow:0 0 3px rgba(0,0,0,0.4);"></div>',
+                iconSize: [12, 12],
+                iconAnchor: [6, 6]
+            });
+
+            var tier = airport.is_military ? 1 : null;
+            var rnwy = airport.longest_runway_ft
+                ? (Math.round(airport.longest_runway_ft / 100) * 100 + ' ft') : 'unknown';
+
+            var marker = L.marker([lat, lon], { icon: icon, airportTier: tier });
+
+            marker.bindTooltip(
+                airport.station_id + ' — No METAR',
+                { permanent: false, direction: 'top', offset: [0, -8] }
+            );
+
+            marker.on('click', function() {
+                var badge = airport.is_military
+                    ? ' <span style="background:rgba(200,30,30,0.9);color:white;'
+                      + 'padding:1px 5px;border-radius:2px;font-size:10px;font-weight:700;">MIL</span>'
+                    : '';
+                var content =
+                    '<div style="font-family:monospace;min-width:260px;">'
+                    + '<h3>' + airport.station_id + badge + '</h3>'
+                    + '<p style="font-weight:bold;">' + (airport.airport_name || airport.station_id) + '</p>'
+                    + '<hr style="margin:0.4rem 0;">'
+                    + '<p style="color:#888;">No METAR in past 2 hours — weather data unavailable</p>'
+                    + '<p>Longest runway: ' + rnwy + '</p>'
+                    + '</div>';
+                L.popup().setLatLng([lat, lon]).setContent(content).openOn(map);
+            });
+
+            marker.addTo(map);
+            noMetarMarkers.push(marker);
         }
 
         function addMarker(metar) {
@@ -414,7 +487,7 @@
                 iconAnchor: [6, 6]
             });
 
-            var tier = airportTiers[metar.station_id] || (metar.is_military === true ? 1 : null);
+            var tier = airportTiers[metar.station_id] || (metar.is_military === true || metar.military === true ? 1 : null);
             var marker = L.marker([metar.latitude, metar.longitude], { 
                 icon: icon,
                 flightCategory: metar.flight_category,
@@ -433,10 +506,10 @@
         }
 
         function getCategoryColor(cat) {
-            if (cat === 'VFR')  return '#00FF00';
-            if (cat === 'MVFR') return '#0000FF';
-            if (cat === 'IFR')  return '#FF0000';
-            if (cat === 'LIFR') return '#FF00FF';
+            if (cat === 'VFR')  return '#28a745';  // Green
+            if (cat === 'MVFR') return '#ffc107';  // Yellow
+            if (cat === 'IFR')  return '#fd7e14';  // Orange
+            if (cat === 'LIFR') return '#dc3545';  // Red
             return '#808080';
         }
 
@@ -448,29 +521,34 @@
             console.log(`Fetching METAR and TAF for ${metar.station_id}`);
             
             Promise.all([
-                fetch('/CAP_WxCOP/api/weather/station/' + metar.station_id + '?hours=3')
+                fetch('/CAP_WxCOP/api/weather/metar/station/' + metar.station_id + '?hours=3')
                     .then(function(r) { 
+                        console.log(`METAR API status for ${metar.station_id}:`, r.status);
                         if (!r.ok) throw new Error(`METAR API returned ${r.status}`);
                         return r.json(); 
                     }),
-                // TAF is embedded in the station response; this second call is a no-op catch
-                Promise.resolve(null)
+                fetch('/CAP_WxCOP/api/weather/taf/station/' + metar.station_id)
+                    .then(function(r) { 
+                        console.log(`TAF API status for ${metar.station_id}:`, r.status);
+                        if (!r.ok) throw new Error(`TAF API returned ${r.status}`);
+                        return r.json(); 
+                    })
+                    .catch(function(e) { 
+                        console.log(`TAF error for ${metar.station_id}:`, e.message);
+                        return null; 
+                    })
             ]).then(function(results) {
+                console.log(`METAR data for ${metar.station_id}:`, results[0]);
+                console.log(`TAF data for ${metar.station_id}:`, results[1]);
+                
                 var md = results[0];
-                // /station/<id> returns {station, metars:[], taf:{raw_text,...}}
+                var taf = results[1];
                 var obs = (md.metars && md.metars[0]) ? md.metars[0] : metar;
-                if (!obs.airport_name && md.station && md.station.name) {
-                    obs.airport_name = md.station.name;
-                }
-                var tafRawText = (md.taf && md.taf.raw_text) ? md.taf.raw_text : null;
 
-                var windDir = obs.wind_dir != null
-                    ? String(obs.wind_dir).padStart(3, '0')
-                    : '---';
-                var wind = windDir + '° @ ' + (obs.wind_speed_kts || 0) + ' kts';
-                if (obs.wind_gust_kts) wind += ' gusts ' + obs.wind_gust_kts + ' kts';
+                var wind = (obs.wind_dir || '---') + '° @ ' + (obs.wind_speed_kts || 0) + ' kt';
+                if (obs.wind_gust_kts) wind += ' gusting ' + obs.wind_gust_kts + ' kt';
 
-                var tier = airportTiers[metar.station_id] || (metar.is_military === true ? 1 : null);
+                var tier = airportTiers[metar.station_id] || (metar.is_military === true || metar.military === true ? 1 : null);
                 var badge = '';
                 if (tier === 1) {
                     badge = ' <span style="background:rgba(200,30,30,0.9);color:white;' +
@@ -507,10 +585,10 @@
                 }
 
                 var tafText = '';
-                if (tafRawText) {
+                if (taf && taf.tafs && taf.tafs.length > 0) {
                     tafText = '<hr><h4>TAF</h4>' +
                              '<div style="background:#f5f5f5;padding:8px;border-radius:4px;font-size:12px;font-family:monospace;">' +
-                             tafRawText + '</div>';
+                             taf.tafs[0].raw_text + '</div>';
                 }
 
                 var content = '<div style="font-family:monospace;min-width:300px;">' +
@@ -520,7 +598,7 @@
                              ';font-weight:bold;">' + obs.flight_category + '</span></p>' +
                              '<p><strong>Wind:</strong> ' + wind + '</p>' +
                              '<p><strong>Visibility:</strong> ' + (obs.visibility_sm || '---') + ' SM</p>' +
-                             '<p><strong>Sky Cond:</strong> ' + skyText + '</p>' +
+                             '<p><strong>Sky:</strong> ' + skyText + '</p>' +
                              '<p><strong>Temperature:</strong> ' + tempText + '</p>' +
                              '<p><strong>Dewpoint:</strong> ' + dewpointText + '</p>' +
                              '<p><strong>Altimeter:</strong> ' + (obs.altimeter_hg || '---') + ' inHg</p>' +
@@ -537,7 +615,7 @@
                 console.error(`Error loading detailed data for ${metar.station_id}:`, error);
                 
                 // Fallback popup with basic info
-                var tier = airportTiers[metar.station_id] || (metar.is_military === true ? 1 : null);
+                var tier = airportTiers[metar.station_id] || (metar.is_military === true || metar.military === true ? 1 : null);
                 var badge = tier === 1 ? ' (MIL)' : '';
                 
                 var content = '<div style="font-family:monospace;min-width:250px;">' +
@@ -600,53 +678,69 @@
             }
         }
 
-        var COVERAGE_BOUNDS = {
-            'conus': { west: -125, south: 24,  east: -66,  north: 50,  center: [39.0,  -98.0],  zoom: 5 },
-            'ak':    { west: -180, south: 51,  east: -130, north: 72,  center: [64.0, -153.0],  zoom: 5 },
-            'hi':    { west: -161, south: 18,  east: -154, north: 23,  center: [20.5, -157.0],  zoom: 7 },
-            // Caribbean: PR/USVI + Bahamas (to ~77W, 27N) + Turks & Caicos (~72W, 22N)
-            'carib': { west: -80,  south: 17,  east: -64,  north: 27,  center: [22.5,  -72.0],  zoom: 6 },
-            // CAP Regions
-            'ncr':   { west: -104, south: 37,  east: -89,  north: 49,  center: [43.5,  -96.5],  zoom: 6 },
-            'glr':   { west: -93,  south: 37,  east: -80,  north: 49,  center: [43.5,  -86.5],  zoom: 6 },
-            'mar':   { west: -84,  south: 32,  east: -75,  north: 40,  center: [36.0,  -79.5],  zoom: 6 },
-            'ner':   { west: -80,  south: 39,  east: -66,  north: 48,  center: [43.5,  -73.0],  zoom: 6 },
-            'ser':   { west: -92,  south: 24,  east: -79,  north: 37,  center: [30.5,  -85.5],  zoom: 6 },
-            'swr':   { west: -115, south: 25,  east: -89,  north: 37,  center: [31.5, -102.0],  zoom: 6 },
-            'rmr':   { west: -117, south: 37,  east: -102, north: 49,  center: [43.0, -109.5],  zoom: 6 },
-            'pcr':   { west: -125, south: 32,  east: -114, north: 49,  center: [40.5, -119.5],  zoom: 6 }
-        };
+        function loadNoMetarAirports() {
+            var b = map.getBounds();
+            var bounds = [
+                b.getWest().toFixed(4), b.getSouth().toFixed(4),
+                b.getEast().toFixed(4), b.getNorth().toFixed(4)
+            ].join(',');
+            fetch('/CAP_WxCOP/api/weather/no-metar-airports?bounds=' + bounds + '&limit=5000')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    // Remove old markers
+                    noMetarMarkers.forEach(function(m) {
+                        if (m._map) map.removeLayer(m);
+                    });
+                    noMetarMarkers = [];
+                    noMetarAirports = [];
+
+                    if (data.airports && data.airports.length > 0) {
+                        // Deduplicate against stations that already have METAR markers
+                        var metatIds = new Set(currentMetars.map(function(m) { return m.station_id; }));
+                        var fresh = data.airports.filter(function(a) {
+                            return !metatIds.has(a.station_id);
+                        });
+                        noMetarAirports = fresh;
+                        if (document.getElementById('showNoMetar').checked) {
+                            fresh.forEach(addNoMetarMarker);
+                        }
+                        updateLabels();
+                        console.log('Loaded ' + fresh.length + ' no-METAR airports');
+                    }
+                })
+                .catch(function(err) {
+                    console.warn('No-METAR airports load failed:', err);
+                });
+        }
 
         function loadWeatherData() {
-            var coverage = document.getElementById('coverageSelector')
-                                   ? document.getElementById('coverageSelector').value
-                                   : 'conus';
-            var cb = COVERAGE_BOUNDS[coverage];
-
-            // Clear existing markers and labels
-            metatMarkers.forEach(function(m) { map.removeLayer(m); });
-            metatMarkers = [];
-            currentMetars = [];
-            labelsLayer.clearLayers();
-
-            document.getElementById('loading').style.display = 'block';
-
-            var boundsStr = cb.west + ',' + cb.south + ',' + cb.east + ',' + cb.north;
-            // ### Change 2500 below to adjust max stations returned
-            fetch('/CAP_WxCOP/api/weather/metar/recent?bounds=' + boundsStr + '&limit=2500')
+            console.log('Loading weather data...');
+            fetch('/CAP_WxCOP/api/weather/metar/recent?bounds=-125,24,-66,50&limit=2500')
                 .then(function(response) { 
+                    console.log('Weather API response status:', response.status);
                     return response.json(); 
                 })
                 .then(function(data) {
                     document.getElementById('loading').style.display = 'none';
+                    console.log('Weather data loaded:', data);
                     
                     if (data.metars && data.metars.length > 0) {
                         currentMetars = data.metars;
                         data.metars.forEach(addMarker);
                         updateLabels();
-                        console.log('Loaded ' + data.metars.length + ' METAR stations for ' + coverage.toUpperCase());
+                        console.log(`Loaded ${data.metars.length} METAR stations`);
+                        loadNoMetarAirports();
+                        
+                        // Log sample of military flags
+                        const militaryCount = data.metars.filter(m => m.is_military === true || m.military === true).length;
+                        console.log(`Found ${militaryCount} military weather stations out of ${data.metars.length} total`);
+                        
+                        // Show sample military stations
+                        data.metars.filter(m => m.is_military === true || m.military === true).slice(0, 5).forEach(m => {
+                            console.log(`Military weather station: ${m.station_id}, is_military=${m.is_military}, military=${m.military}`);
+                        });
                     } else {
-                        console.log('No METAR data for coverage area: ' + coverage);
+                        console.log('No METAR data available');
                     }
                 })
                 .catch(function(error) {
@@ -657,6 +751,20 @@
 
         // Initialize
         document.addEventListener('DOMContentLoaded', initMap);
+
+        // UTC clock
+        (function utcClock() {
+            function pad(n) { return String(n).padStart(2,'0'); }
+            function tick() {
+                var el = document.getElementById('tbUtc');
+                if (!el) return;
+                var d = new Date();
+                el.textContent = d.getUTCFullYear()+'-'+pad(d.getUTCMonth()+1)+'-'+
+                    pad(d.getUTCDate())+' '+pad(d.getUTCHours())+':'+
+                    pad(d.getUTCMinutes())+':'+pad(d.getUTCSeconds())+'Z';
+            }
+            tick(); setInterval(tick, 1000);
+        })();
     </script>
 </body>
 </html>

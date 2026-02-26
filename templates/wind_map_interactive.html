@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <link rel="icon" href="data:,">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CAP Wind Constraints Forecast</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -138,55 +139,51 @@
             transform: translateX(-50%);
         }
 
+        .highlight-ring {
+            background: transparent; border: none; box-shadow: none;
+        }
+        .highlight-ring div {
+            width: 24px; height: 24px;
+            border: 3px solid #fff;
+            border-radius: 50%;
+            background: rgba(255,255,0,0.35);
+            box-shadow: 0 0 0 3px #000, 0 0 10px rgba(255,255,0,0.8);
+            margin: -6px 0 0 -6px;
+        }
+        .highlight-label {
+            background: transparent; border: none; box-shadow: none;
+        }
+        .highlight-label span {
+            font-family: monospace; font-size: 14px; font-weight: 900;
+            color: #fff; background: rgba(0,0,0,0.85);
+            padding: 2px 6px; border-radius: 3px;
+            white-space: nowrap; border: 1px solid #fff;
+        }
         .hazard-label {
-            background: transparent;
-            border: none;
-            box-shadow: none;
+            background: transparent; border: none; box-shadow: none;
         }
         .hazard-label span {
-            font-family: monospace;
-            font-size: 13px;
-            font-weight: 700;
-            color: #fff;
-            padding: 2px 6px;
-            border-radius: 3px;
-            white-space: nowrap;
-            pointer-events: none;
+            font-family: monospace; font-size: 13px; font-weight: 700;
+            color: #fff; padding: 2px 6px; border-radius: 3px;
+            white-space: nowrap; pointer-events: none;
             text-shadow: 0 1px 2px rgba(0,0,0,0.6);
         }
         #hazardPanel {
-            display: none;
-            position: absolute;
-            bottom: 30px;
-            left: 10px;
-            background: white;
-            border-radius: 8px;
+            display: none; position: absolute; bottom: 30px; left: 10px;
+            background: white; border-radius: 8px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.35);
-            z-index: 1000;
-            min-width: 260px;
-            max-width: 340px;
-            max-height: 50vh;
-            overflow-y: auto;
-            font-family: monospace;
-            font-size: 12px;
+            z-index: 1000; min-width: 260px; max-width: 340px;
+            max-height: 50vh; overflow-y: auto;
+            font-family: monospace; font-size: 12px;
         }
         #hazardPanel .hp-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 8px 10px 6px;
-            border-bottom: 1px solid #ddd;
-            font-weight: 700;
-            font-size: 13px;
-            color: #2c3e50;
-            position: sticky;
-            top: 0;
-            background: white;
-            z-index: 1;
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 8px 10px 6px; border-bottom: 1px solid #ddd;
+            font-weight: 700; font-size: 13px; color: #2c3e50;
+            position: sticky; top: 0; background: white; z-index: 1;
         }
         #hazardPanel .hp-close {
-            cursor: pointer; color: #999; font-size: 16px;
-            line-height: 1; padding: 0 2px;
+            cursor: pointer; color: #999; font-size: 16px; line-height: 1; padding: 0 2px;
         }
         #hazardPanel .hp-close:hover { color: #333; }
         #hazardPanel .hp-none { padding: 10px; color: #666; font-style: italic; }
@@ -211,10 +208,111 @@
         .crosswind-high { color: #dc3545; font-weight: bold; }
         .crosswind-med { color: #ffc107; font-weight: bold; }
         .crosswind-low { color: #28a745; font-weight: bold; }
+        /* ── Title bar ───────────────────────────────────────── */
+        #titleBar {
+            position: fixed;
+            top: 0; left: 0; right: 0;
+            height: 44px;
+            background: linear-gradient(135deg, #1a3a2a, #2c5f41);
+            color: white;
+            display: flex;
+            align-items: center;
+            padding: 0 16px;
+            z-index: 1100;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+            gap: 16px;
+        }
+        #titleBar .tb-home {
+            color: white; text-decoration: none;
+            font-size: 18px; line-height: 1; flex-shrink: 0;
+            opacity: 0.85; transition: opacity 0.15s;
+        }
+        #titleBar .tb-home:hover { opacity: 1; }
+        #titleBar .tb-title {
+            font-size: 16px; font-weight: 700;
+            letter-spacing: 0.03em; white-space: nowrap; flex: 1;
+        }
+        #titleBar .tb-utc {
+            font-size: 13px; font-family: 'Courier New', monospace;
+            opacity: 0.85; flex-shrink: 0;
+        }
+        /* Shift map and controls down; hide old home button */
+        #map          { height: calc(100vh - 44px); margin-top: 44px; }
+        .controls     { top: 54px; }
+        .home-btn     { display: none; }
+        /* ── Hazard sidebar ──────────────────────────────────── */
+        #hazardSidebar {
+            display: none;
+            position: fixed;
+            top: 44px; left: 0; bottom: 0;
+            width: 320px;
+            background: white;
+            box-shadow: 2px 0 12px rgba(0,0,0,0.25);
+            z-index: 1050;
+            display: flex;
+            flex-direction: column;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+        }
+        #hazardSidebar.sb-hidden { display: none !important; }
+        #hazardSidebar .sb-header {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 10px 12px 8px;
+            background: #2c3e50; color: white;
+            font-size: 13px; font-weight: 700;
+            flex-shrink: 0;
+        }
+        #hazardSidebar .sb-header .sb-coords {
+            font-size: 10px; font-weight: 400; opacity: 0.75; margin-top: 1px;
+        }
+        #hazardSidebar .sb-close {
+            cursor: pointer; font-size: 18px; line-height: 1;
+            opacity: 0.7; padding: 0 2px;
+        }
+        #hazardSidebar .sb-close:hover { opacity: 1; }
+        #hazardSidebar .sb-body {
+            flex: 1; overflow-y: auto; padding: 0;
+        }
+        #hazardSidebar .sb-none {
+            padding: 16px 12px; color: #666; font-style: italic;
+        }
+        #hazardSidebar .sb-item {
+            padding: 8px 12px; border-bottom: 1px solid #eee;
+        }
+        #hazardSidebar .sb-item:last-child { border-bottom: none; }
+        #hazardSidebar .sb-badge {
+            display: inline-block; padding: 2px 7px; border-radius: 3px;
+            color: white; font-size: 11px; font-weight: 700;
+            margin-bottom: 5px; letter-spacing: 0.03em;
+        }
+        #hazardSidebar .sb-phenom {
+            font-size: 13px; font-weight: 700; color: #1a1a1a;
+            margin-bottom: 3px;
+        }
+        #hazardSidebar .sb-row {
+            display: flex; gap: 6px; margin-top: 2px; font-size: 11px;
+        }
+        #hazardSidebar .sb-key {
+            color: #888; white-space: nowrap; min-width: 48px; flex-shrink: 0;
+        }
+        #hazardSidebar .sb-val { color: #222; }
+        #hazardSidebar .sb-desc {
+            margin-top: 5px; font-size: 11px; line-height: 1.45;
+            color: #333; background: #f8f8f8;
+            padding: 4px 6px; border-radius: 3px;
+        }
+        /* Shift controls right when sidebar open */
+        body.sb-open .controls { right: 10px; }
+        body.sb-open #map      { margin-left: 320px; }
     </style>
 </head>
 <body>
-    <a href="/" class="home-btn">🏠 Home</a>
+    <div id="titleBar">
+        <a href="/" class="tb-home" title="Home">&#127968;</a>
+        <span class="tb-title">Wind Constraints Forecast</span>
+        <span class="tb-utc" id="tbUtc"></span>
+    </div>
+    <a href="/" class="home-btn">&#127968; Home</a>
     <div id="map"></div>
     <div id="loading">Loading wind constraint forecast data...</div>
 
@@ -267,7 +365,40 @@
 
         <div class="divider"></div>
         <div class="legend-item"><div class="legend-tag" style="background:rgba(200,30,30,0.9);color:white;">MIL</div>Military</div>
+        <div class="legend-item">
+            <div style="width:12px;height:12px;border-radius:50%;border:2px solid #555;
+                        background:white;flex-shrink:0;margin-right:8px;"></div>
+            Paved &gt;2500 ft (no METAR)
+        </div>
+
+        <div class="divider"></div>
+        <label class="checkbox-label">
+            <input type="checkbox" id="labelToggle" checked> Show labels
+        </label>
+        <div style="margin-top:6px;">
+            <div style="font-size:12px;color:#555;margin-bottom:3px;">Highlight airfield</div>
+            <div style="display:flex;gap:4px;">
+                <input type="text" id="highlightInput" placeholder="e.g. KCOS"
+                    style="flex:1;padding:4px 6px;border:1px solid #ccc;border-radius:4px;
+                           font-family:monospace;font-size:13px;text-transform:uppercase;"
+                    maxlength="6">
+                <button id="highlightBtn"
+                    style="padding:4px 8px;background:#2c3e50;color:white;border:none;
+                           border-radius:4px;cursor:pointer;font-size:12px;">Go</button>
+                <button id="highlightClear"
+                    style="padding:4px 6px;background:#aaa;color:white;border:none;
+                           border-radius:4px;cursor:pointer;font-size:12px;">&#x2715;</button>
+            </div>
+        </div>
         
+        <div class="divider"></div>
+        <button id="captureBtn"
+            style="width:100%;padding:6px;background:#2c3e50;color:white;border:none;
+                   border-radius:4px;cursor:pointer;font-size:13px;font-weight:bold;">
+            &#128247; Capture PNG
+        </button>
+        <div id="captureStatus" style="font-size:11px;color:#666;margin-top:4px;display:none;"></div>
+
         <div class="divider"></div>
         <div style="font-size: 11px; color: #666;">
             Coverage: CONUS (HRRR Model)
@@ -282,12 +413,26 @@
         <div id="hazardPanelBody"></div>
     </div>
 
+    <div id="hazardSidebar" class="sb-hidden">
+        <div class="sb-header">
+            <div>
+                <div id="sbTitle">Hazards at clicked point</div>
+                <div class="sb-coords" id="sbCoords"></div>
+            </div>
+            <span class="sb-close" onclick="closeSidebar()">&times;</span>
+        </div>
+        <div class="sb-body" id="sbBody"></div>
+    </div>
+
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script>
         var map, labelsLayer, baseLayers = {};
         var airmetLayer, sigmetLayer;
         var currentAirports = [];
         var windMarkers = [];
+        var highlightMarker = null;
+        var highlightStation = null;
         var currentLayerName = 'street';
 
         function initMap() {
@@ -341,12 +486,25 @@
 
             map.on('zoomend moveend', updateLabels);
 
-            // Show hazard panel on map click when a hazard layer is active
             map.on('click', function(e) {
-                var airmetOn = document.getElementById('airmetToggle').checked;
-                var sigmetOn = document.getElementById('sigmetToggle').checked;
-                if (airmetOn || sigmetOn) showHazardPanel(e.latlng);
+                showSidebar(e.latlng);
             });
+
+            document.getElementById('labelToggle').addEventListener('change', function(e) {
+                if (e.target.checked) {
+                    labelsLayer.addTo(map);
+                    updateLabels();
+                } else {
+                    map.removeLayer(labelsLayer);
+                }
+            });
+
+            document.getElementById('highlightBtn').addEventListener('click', applyHighlight);
+            document.getElementById('highlightInput').addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') applyHighlight();
+            });
+            document.getElementById('highlightClear').addEventListener('click', clearHighlight);
+            document.getElementById('captureBtn').addEventListener('click', captureMapPNG);
         }
 
         function setupControls() {
@@ -414,66 +572,92 @@
 
         function updateLabels() {
             labelsLayer.clearLayers();
-            var zoom = map.getZoom();
+            var labelsOn = document.getElementById('labelToggle') ?
+                           document.getElementById('labelToggle').checked : true;
+            var zoom   = map.getZoom();
             var bounds = map.getBounds();
 
-            // Zoom thresholds: priority 1 (MIL) always, P2 at zoom>=5, P3 at zoom>=8
-            // P1 must show at CONUS zoom (~4-5) and even zoomed out further
             currentAirports.forEach(function(airport) {
                 if (!bounds.contains([airport.lat, airport.lon])) return;
-
                 var sid = airport.station_id;
-                // Use label_priority from API; fall back to is_military flag
-                var priority = airport.label_priority ||
-                               (airport.is_military === true ? 1 : 3);
 
-                // Priority 1 (military): always visible at every zoom level
+                // Highlighted airport always shows regardless of toggle/zoom
+                if (sid === highlightStation) {
+                    L.marker([airport.lat, airport.lon], {
+                        icon: L.divIcon({
+                            className: 'highlight-label',
+                            html: '<span>' + sid + '</span>',
+                            iconSize: null, iconAnchor: [-4, 22]
+                        }),
+                        interactive: false, zIndexOffset: 2000
+                    }).addTo(labelsLayer);
+                    return;
+                }
+
+                if (!labelsOn) return;
+
+                var priority = airport.label_priority || 3;
+
                 if (priority === 1) {
-                    var label = L.marker([airport.lat, airport.lon], {
+                    L.marker([airport.lat, airport.lon], {
                         icon: L.divIcon({
-                            className: 'apt-t1',
-                            html: sid,
-                            iconSize: null,
-                            iconAnchor: [0, 22]
+                            className: 'apt-t1', html: sid,
+                            iconSize: null, iconAnchor: [0, 22]
                         }),
-                        interactive: false,
-                        zIndexOffset: 1000
-                    });
-                    label.addTo(labelsLayer);
+                        interactive: false, zIndexOffset: 1000
+                    }).addTo(labelsLayer);
                     return;
                 }
-
-                // Priority 2 (major hub / large runway): zoom >= 5
                 if (priority === 2 && zoom >= 5) {
-                    var label = L.marker([airport.lat, airport.lon], {
+                    L.marker([airport.lat, airport.lon], {
                         icon: L.divIcon({
-                            className: 'apt-t2',
-                            html: sid,
-                            iconSize: null,
-                            iconAnchor: [0, 22]
+                            className: 'apt-t2', html: sid,
+                            iconSize: null, iconAnchor: [0, 22]
                         }),
-                        interactive: false,
-                        zIndexOffset: 500
-                    });
-                    label.addTo(labelsLayer);
+                        interactive: false, zIndexOffset: 500
+                    }).addTo(labelsLayer);
                     return;
                 }
-
-                // Priority 3 (regional / medium): zoom >= 8
-                if (priority === 3 && zoom >= 8) {
-                    var label = L.marker([airport.lat, airport.lon], {
+                // Regional: zoom >= 6 (was 8 — too restrictive)
+                if (priority === 3 && zoom >= 6) {
+                    L.marker([airport.lat, airport.lon], {
                         icon: L.divIcon({
-                            className: 'apt-t2',
-                            html: sid,
-                            iconSize: null,
-                            iconAnchor: [0, 22]
+                            className: 'apt-t2', html: sid,
+                            iconSize: null, iconAnchor: [0, 22]
                         }),
-                        interactive: false,
-                        zIndexOffset: 100
-                    });
-                    label.addTo(labelsLayer);
+                        interactive: false, zIndexOffset: 100
+                    }).addTo(labelsLayer);
                 }
             });
+        }
+
+        function applyHighlight() {
+            var sid = document.getElementById('highlightInput').value.trim().toUpperCase();
+            if (!sid) return;
+            clearHighlight();
+            var airport = currentAirports.find(function(a) { return a.station_id === sid; });
+            if (!airport) {
+                alert('Airport ' + sid + ' not found in current view.');
+                return;
+            }
+            highlightStation = sid;
+            highlightMarker = L.marker([airport.lat, airport.lon], {
+                icon: L.divIcon({
+                    className: 'highlight-ring',
+                    html: '<div></div>',
+                    iconSize: [12, 12], iconAnchor: [6, 6]
+                }),
+                interactive: false, zIndexOffset: 1900
+            }).addTo(map);
+            updateLabels();
+            map.panTo([airport.lat, airport.lon]);
+        }
+
+        function clearHighlight() {
+            if (highlightMarker) { map.removeLayer(highlightMarker); highlightMarker = null; }
+            highlightStation = null;
+            document.getElementById('highlightInput').value = '';
+            updateLabels();
         }
 
         // Map normalized phenomenon codes (from fetcher) to plain English
@@ -598,36 +782,28 @@
             </div>`;
         }
 
-        // Centroid label helpers
         function polyCentroid(coords) {
             var ring = coords[0], lon = 0, lat = 0, n = ring.length;
             for (var i = 0; i < n; i++) { lon += ring[i][0]; lat += ring[i][1]; }
             return [lat / n, lon / n];
         }
-
         const HAZARD_SHORT = {
-            'TURB': 'Turb', 'ICE': 'Icing', 'IFR': 'IFR',
-            'MTN_OBSC': 'MtnOb', 'LLWS': 'LLWS', 'STG_SFC_WINDS': 'SfcWnd',
-            'CONVECTIVE': 'Conv', 'ASH': 'Ash', 'TSGR': 'TSGR',
+            'TURB':'Turb','ICE':'Icing','IFR':'IFR','MTN_OBSC':'MtnOb',
+            'LLWS':'LLWS','STG_SFC_WINDS':'SfcWnd','CONVECTIVE':'Conv','ASH':'Ash','TSGR':'TSGR',
         };
-
-        function addCentroidLabel(geom, p, layerGroup) {
+        function addCentroidLabel(geom, p, lg) {
             if (!geom || !geom.coordinates) return;
-            var short  = HAZARD_SHORT[p.phenomenon] || p.phenomenon || '?';
-            var bg     = p.color || 'rgba(0,0,0,0.6)';
-            var center = polyCentroid(geom.coordinates);
-            L.marker(center, {
+            var short = HAZARD_SHORT[p.phenomenon] || p.phenomenon || '?';
+            var bg = p.color || 'rgba(0,0,0,0.6)';
+            L.marker(polyCentroid(geom.coordinates), {
                 icon: L.divIcon({
                     className: 'hazard-label',
-                    html: `<span style="background:${bg}">${short}</span>`,
+                    html: '<span style="background:' + bg + '">' + short + '</span>',
                     iconSize: null, iconAnchor: null
                 }),
-                interactive: false,
-                zIndexOffset: 500
-            }).addTo(layerGroup);
+                interactive: false, zIndexOffset: 500
+            }).addTo(lg);
         }
-
-        // Feature stores for hit-testing on map click
         var _airmetFeatures = [];
         var _sigmetFeatures = [];
 
@@ -640,16 +816,19 @@
                     const geom = feature.geometry || feature.geojson;
                     if (!geom) return;
                     const p = getProps(feature);
+                    // Click on polygon opens sidebar — no popup so event isn't swallowed
                     L.geoJSON(geom, {
                         style: { color: p.color || '#ff6b35', weight: 2, opacity: 0.8, fillOpacity: 0.15 }
-                    }).bindPopup(airmetPopupHtml(p), { maxWidth: 320 }).addTo(airmetLayer);
+                    }).on('click', function(e) {
+                        L.DomEvent.stopPropagation(e);
+                        showSidebar(e.latlng);
+                    }).addTo(airmetLayer);
                     addCentroidLabel(geom, p, airmetLayer);
                 });
-                console.log(`Displayed ${features.length} AIRMET areas`);
+                console.log('Displayed ' + features.length + ' AIRMET areas');
                 airmetLayer.addTo(map);
             } else { console.log('No active AIRMETs'); }
         }
-
         function displaySigmets(features) {
             _sigmetFeatures = features || [];
             if (sigmetLayer) map.removeLayer(sigmetLayer);
@@ -661,10 +840,13 @@
                     const p = getProps(feature);
                     L.geoJSON(geom, {
                         style: { color: p.color || '#d63384', weight: 3, opacity: 0.9, fillOpacity: 0.2 }
-                    }).bindPopup(sigmetPopupHtml(p), { maxWidth: 320 }).addTo(sigmetLayer);
+                    }).on('click', function(e) {
+                        L.DomEvent.stopPropagation(e);
+                        showSidebar(e.latlng);
+                    }).addTo(sigmetLayer);
                     addCentroidLabel(geom, p, sigmetLayer);
                 });
-                console.log(`Displayed ${features.length} SIGMET areas`);
+                console.log('Displayed ' + features.length + ' SIGMET areas');
                 sigmetLayer.addTo(map);
             } else { console.log('No active SIGMETs'); }
         }
@@ -677,6 +859,30 @@
             var windDir = airport.wind_direction || 270;
             var maxWind = Math.max(windSpeed, windGust || 0);
             var model = airport.model || 'HRRR';
+
+            // No-METAR airports: white hollow dot, no wind constraint
+            if (airport.no_metar) {
+                var nmIcon = L.divIcon({
+                    className: '',
+                    html: '<div style="width:12px;height:12px;background:white;'
+                        + 'border:2px solid #555;border-radius:50%;'
+                        + 'box-shadow:0 0 3px rgba(0,0,0,0.4);"></div>',
+                    iconSize: [12,12], iconAnchor: [6,6]
+                });
+                var rnwy = airport.longest_runway_ft
+                    ? (Math.round(airport.longest_runway_ft/100)*100 + ' ft') : 'unknown';
+                var nmPopup = '<div style="font-family:\'Courier New\',monospace;min-width:220px;">'
+                    + '<h3 style="margin:0 0 0.4rem;">' + airport.station_id
+                    + (airport.is_military ? ' <span style="color:#c00">(MIL)</span>' : '') + '</h3>'
+                    + '<p style="margin:0 0 0.3rem;font-weight:bold;">' + (airport.name||airport.station_id) + '</p>'
+                    + '<hr style="margin:0.4rem 0;border:none;border-top:1px solid #ddd;">'
+                    + '<p style="color:#888;">No METAR — wind data unavailable</p>'
+                    + '<p>Runway: ' + rnwy + '</p></div>';
+                L.marker([lat,lon],{icon:nmIcon}).bindPopup(nmPopup)
+                 .on('add', function() { windMarkers.push(this); });
+                windMarkers.push(L.marker([lat,lon],{icon:nmIcon}).bindPopup(nmPopup));
+                return;
+            }
 
             if (maxWind === 0) return;
 
@@ -759,7 +965,6 @@
             `;
 
             marker.bindPopup(popupContent);
-            marker.addTo(map);
             windMarkers.push(marker);
         }
 
@@ -790,7 +995,7 @@
             var url = '/CAP_WxCOP/api/wind-forecast/' + region;
 
             // Clear existing markers
-            windMarkers.forEach(function(m) { map.removeLayer(m); });
+            windMarkers.forEach(function(m) { if (m._map) map.removeLayer(m); });
             windMarkers = [];
             currentAirports = [];
             labelsLayer.clearLayers();
@@ -807,7 +1012,9 @@
 
                     if (data.airports && data.airports.length > 0) {
                         currentAirports = data.airports;
+                        windMarkers = [];
                         data.airports.forEach(addWindMarker);
+                        L.layerGroup(windMarkers).addTo(map);
                         updateLabels();
 
                         // Fit map to region bounds if provided
@@ -839,77 +1046,181 @@
                 return true;
             }
         });
-        // Point-in-polygon (ray casting)
-        function pointInRing(pt, ring) {
-            var x = pt[0], y = pt[1], inside = false;
-            for (var i = 0, j = ring.length-1; i < ring.length; j = i++) {
-                var xi = ring[i][0], yi = ring[i][1], xj = ring[j][0], yj = ring[j][1];
-                if (((yi > y) !== (yj > y)) &&
-                    (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) inside = !inside;
-            }
-            return inside;
-        }
-
-        function pointInGeoJSONPolygon(latlng, geom) {
-            if (!geom || !geom.coordinates) return false;
-            var pt = [latlng.lng, latlng.lat];
-            if (!pointInRing(pt, geom.coordinates[0])) return false;
-            for (var h = 1; h < geom.coordinates.length; h++)
-                if (pointInRing(pt, geom.coordinates[h])) return false;
-            return true;
-        }
-
-        function closeHazardPanel() {
-            document.getElementById('hazardPanel').style.display = 'none';
-        }
-
-        function showHazardPanel(latlng) {
-            var hits = [];
-            _airmetFeatures.forEach(function(f) {
-                if (pointInGeoJSONPolygon(latlng, f.geometry || f.geojson))
-                    hits.push({ kind: 'G-AIRMET', bg: '#ff6b35', p: getProps(f) });
+        function captureMapPNG() {
+            var btn    = document.getElementById('captureBtn');
+            var status = document.getElementById('captureStatus');
+            btn.disabled = true;
+            btn.textContent = 'Capturing…';
+            status.style.display = 'block';
+            status.textContent = 'Rendering map…';
+            var panel = document.querySelector('.controls');
+            panel.style.display = 'none';
+            var now    = new Date();
+            var ts     = now.toISOString().replace(/[-:]/g,'').replace('T','_').slice(0,15) + 'Z';
+            var region = document.getElementById('regionSelector')
+                             .selectedOptions[0].text.replace(/[^A-Za-z0-9_-]/g,'_');
+            var filename = 'CAP_Winds_' + region + '_' + ts + '.png';
+            html2canvas(document.getElementById('map'), {
+                useCORS: true, allowTaint: true,
+                scale: window.devicePixelRatio || 1, logging: false
+            }).then(function(canvas) {
+                panel.style.display = '';
+                canvas.toBlob(function(blob) {
+                    var url = URL.createObjectURL(blob);
+                    var a   = document.createElement('a');
+                    a.href  = url; a.download = filename;
+                    document.body.appendChild(a); a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    status.textContent = 'Saved: ' + filename;
+                    setTimeout(function() { status.style.display='none'; }, 4000);
+                }, 'image/png');
+            }).catch(function(err) {
+                panel.style.display = '';
+                status.textContent = 'Capture failed: ' + err.message;
+            }).finally(function() {
+                btn.disabled = false;
+                btn.textContent = '📷 Capture PNG';
             });
-            _sigmetFeatures.forEach(function(f) {
-                if (pointInGeoJSONPolygon(latlng, f.geometry || f.geojson))
-                    hits.push({ kind: 'SIGMET', bg: '#d63384', p: getProps(f) });
-            });
+        }
 
+        // ── Hazard sidebar ────────────────────────────────────────────
+        function showSidebar(latlng) {
             var airmetOn = document.getElementById('airmetToggle').checked;
             var sigmetOn = document.getElementById('sigmetToggle').checked;
             if (!airmetOn && !sigmetOn) return;
 
-            var title = document.getElementById('hazardPanelTitle');
-            var body  = document.getElementById('hazardPanelBody');
-            var panel = document.getElementById('hazardPanel');
+            var hits = [];
+            _airmetFeatures.forEach(function(f) {
+                if (pointInGeoJSONPolygon(latlng, f.geometry || f.geojson))
+                    hits.push({ kind: 'G-AIRMET', bg: '#e8601a', p: getProps(f) });
+            });
+            _sigmetFeatures.forEach(function(f) {
+                if (pointInGeoJSONPolygon(latlng, f.geometry || f.geojson))
+                    hits.push({ kind: 'SIGMET', bg: '#c0186e', p: getProps(f) });
+            });
+
+            var sidebar = document.getElementById('hazardSidebar');
+            var sbBody  = document.getElementById('sbBody');
+            var sbTitle = document.getElementById('sbTitle');
+            var sbCoords = document.getElementById('sbCoords');
+
+            // Coords
+            sbCoords.textContent = latlng.lat.toFixed(3) + '°N  ' +
+                                   Math.abs(latlng.lng).toFixed(3) + '°W';
 
             if (hits.length === 0) {
-                title.textContent = 'Hazards at this point';
-                body.innerHTML = '<div class="hp-none">No active hazards at this location</div>';
+                sbTitle.textContent = 'No active hazards';
+                sbBody.innerHTML = '<div class="sb-none">No G-AIRMETs or SIGMETs active at this location.</div>';
             } else {
-                title.textContent = hits.length + ' hazard' + (hits.length > 1 ? 's' : '') + ' at this point';
-                body.innerHTML = hits.map(function(h) {
-                    var p = h.p;
+                sbTitle.textContent = hits.length + ' hazard' + (hits.length > 1 ? 's' : '') + ' active';
+                sbBody.innerHTML = hits.map(function(h) {
+                    var p     = h.p;
                     var label = PHENOMENON_LABELS[p.phenomenon] || p.phenomenon || h.kind;
-                    var sev   = (p.severity && p.severity !== 'UNSPECIFIED') ? ' (' + p.severity + ')' : '';
+                    var sev   = (p.severity && p.severity !== 'UNSPECIFIED') ? ' — ' + p.severity : '';
                     var alt   = p.flight_levels || '';
                     var desc  = p.text || '';
-                    return '<div class="hp-item">'
-                        + '<div class="hp-badge" style="background:' + h.bg + '">' + h.kind + '</div>'
-                        + '<div class="hp-row"><span class="hp-key">Hazard</span>'
-                        + '<span class="hp-val"><strong>' + label + '</strong>' + sev + '</span></div>'
-                        + (alt ? '<div class="hp-row"><span class="hp-key">Altitude</span>'
-                               + '<span class="hp-val">' + alt + '</span></div>' : '')
-                        + '<div class="hp-row"><span class="hp-key">Valid</span>'
-                        + '<span class="hp-val">' + fmtTime(p.valid_from) + ' &ndash; ' + fmtTime(p.valid_until) + '</span></div>'
-                        + (desc ? '<div class="hp-row" style="margin-top:4px">'
-                                + '<span class="hp-key">Desc</span>'
-                                + '<span class="hp-val" style="font-size:11px;line-height:1.4">' + desc + '</span></div>' : '')
+                    var src   = p.source || '';
+                    return '<div class="sb-item">'
+                        + '<div class="sb-badge" style="background:' + h.bg + '">' + h.kind + '</div>'
+                        + '<div class="sb-phenom">' + label + sev + '</div>'
+                        + (alt  ? '<div class="sb-row"><span class="sb-key">Altitude</span>'
+                               + '<span class="sb-val">' + alt + '</span></div>' : '')
+                        + '<div class="sb-row"><span class="sb-key">Valid</span>'
+                        + '<span class="sb-val">' + fmtTime(p.valid_from) + ' &ndash; ' + fmtTime(p.valid_until) + '</span></div>'
+                        + (src  ? '<div class="sb-row"><span class="sb-key">Source</span>'
+                               + '<span class="sb-val">' + src + '</span></div>' : '')
+                        + (desc ? '<div class="sb-desc">' + desc + '</div>' : '')
                         + '</div>';
                 }).join('');
             }
-            panel.style.display = 'block';
+
+            sidebar.classList.remove('sb-hidden');
+            document.body.classList.add('sb-open');
         }
 
+        function closeSidebar() {
+            document.getElementById('hazardSidebar').classList.add('sb-hidden');
+            document.body.classList.remove('sb-open');
+        }
+
+        function pointInRing(pt, ring) {
+            var x=pt[0],y=pt[1],inside=false;
+            for(var i=0,j=ring.length-1;i<ring.length;j=i++){
+                var xi=ring[i][0],yi=ring[i][1],xj=ring[j][0],yj=ring[j][1];
+                if(((yi>y)!==(yj>y))&&(x<(xj-xi)*(y-yi)/(yj-yi)+xi)) inside=!inside;
+            }
+            return inside;
+        }
+        function pointInGeoJSONPolygon(latlng,geom){
+            if(!geom||!geom.coordinates) return false;
+            var pt=[latlng.lng,latlng.lat];
+            if(!pointInRing(pt,geom.coordinates[0])) return false;
+            for(var h=1;h<geom.coordinates.length;h++)
+                if(pointInRing(pt,geom.coordinates[h])) return false;
+            return true;
+        }
+        function closeHazardPanel(){
+            document.getElementById('hazardPanel').style.display='none';
+        }
+        function showHazardPanel(latlng){
+            var hits=[];
+            _airmetFeatures.forEach(function(f){
+                if(pointInGeoJSONPolygon(latlng,f.geometry||f.geojson))
+                    hits.push({kind:'G-AIRMET',bg:'#ff6b35',p:getProps(f)});
+            });
+            _sigmetFeatures.forEach(function(f){
+                if(pointInGeoJSONPolygon(latlng,f.geometry||f.geojson))
+                    hits.push({kind:'SIGMET',bg:'#d63384',p:getProps(f)});
+            });
+            var airmetOn=document.getElementById('airmetToggle').checked;
+            var sigmetOn=document.getElementById('sigmetToggle').checked;
+            if(!airmetOn&&!sigmetOn) return;
+            var title=document.getElementById('hazardPanelTitle');
+            var body=document.getElementById('hazardPanelBody');
+            var panel=document.getElementById('hazardPanel');
+            if(hits.length===0){
+                title.textContent='Hazards at this point';
+                body.innerHTML='<div class="hp-none">No active hazards at this location</div>';
+            } else {
+                title.textContent=hits.length+' hazard'+(hits.length>1?'s':'')+' at this point';
+                body.innerHTML=hits.map(function(h){
+                    var p=h.p;
+                    var label=PHENOMENON_LABELS[p.phenomenon]||p.phenomenon||h.kind;
+                    var sev=(p.severity&&p.severity!=='UNSPECIFIED')?' ('+p.severity+')':'';
+                    var alt=p.flight_levels||'';
+                    var desc=p.text||'';
+                    return '<div class="hp-item">'
+                        +'<div class="hp-badge" style="background:'+h.bg+'">'+h.kind+'</div>'
+                        +'<div class="hp-row"><span class="hp-key">Hazard</span>'
+                        +'<span class="hp-val"><strong>'+label+'</strong>'+sev+'</span></div>'
+                        +(alt?'<div class="hp-row"><span class="hp-key">Altitude</span>'
+                              +'<span class="hp-val">'+alt+'</span></div>':'')
+                        +'<div class="hp-row"><span class="hp-key">Valid</span>'
+                        +'<span class="hp-val">'+fmtTime(p.valid_from)+' &ndash; '+fmtTime(p.valid_until)+'</span></div>'
+                        +(desc?'<div class="hp-row" style="margin-top:4px">'
+                               +'<span class="hp-key">Desc</span>'
+                               +'<span class="hp-val" style="font-size:11px;line-height:1.4">'+desc+'</span></div>':'')
+                        +'</div>';
+                }).join('');
+            }
+            panel.style.display='block';
+        }
+
+
+        // UTC clock
+        (function utcClock() {
+            function pad(n) { return String(n).padStart(2,'0'); }
+            function tick() {
+                var el = document.getElementById('tbUtc');
+                if (!el) return;
+                var d = new Date();
+                el.textContent = d.getUTCFullYear()+'-'+pad(d.getUTCMonth()+1)+'-'+
+                    pad(d.getUTCDate())+' '+pad(d.getUTCHours())+':'+
+                    pad(d.getUTCMinutes())+':'+pad(d.getUTCSeconds())+'Z';
+            }
+            tick(); setInterval(tick, 1000);
+        })();
     </script>
 </body>
 </html>

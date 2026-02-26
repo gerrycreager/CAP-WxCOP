@@ -575,6 +575,99 @@ def health_check():
             'timestamp': datetime.utcnow().isoformat()
         }), 500
 
+@weather_api.route('/no-metar-airports', methods=['GET'])
+def get_no_metar_airports():
+    """
+    Return airports with paved runways > 2500 ft that have had no METAR
+    observation in the past 2 hours.  These are shown on the weather map
+    as white/hollow dots to indicate the airfield exists but has no wx data.
+
+    Optional query params:
+      bounds=west,south,east,north  (default: CONUS)
+      limit=N                       (default: 5000)
+    """
+    try:
+        bounds_param = request.args.get('bounds', '-125,24,-66,50')
+        limit        = int(request.args.get('limit', 5000))
+
+        try:
+            bounds = list(map(float, bounds_param.split(',')))
+            if len(bounds) != 4:
+                raise ValueError()
+            west, south, east, north = bounds
+        except (ValueError, TypeError):
+            return jsonify({'error': 'Invalid bounds format. Expected: west,south,east,north'}), 400
+
+        conn = get_connection()
+        cur  = conn.cursor()
+
+        # LEFT JOIN metar — keep only airports with no recent observation.
+        # is_military airports are included regardless of runway flag so
+        # military fields without METARs still appear.
+        cur.execute("""
+            SELECT
+                a.station_id,
+                ST_Y(a.location::geometry) AS latitude,
+                ST_X(a.location::geometry) AS longitude,
+                a.name AS airport_name,
+                a.iso_region,
+                a.is_military,
+                a.longest_runway_ft,
+                CASE
+                    WHEN a.is_major_hub              THEN 'large_airport'
+                    WHEN a.longest_runway_ft >= 8000 THEN 'medium_airport'
+                    ELSE                                  'small_airport'
+                END AS airport_type
+            FROM observations.airports a
+            LEFT JOIN (
+                SELECT DISTINCT ON (station_id) station_id
+                FROM observations.metar
+                WHERE observation_time >= NOW() - INTERVAL '2 hours'
+            ) recent ON a.station_id = recent.station_id
+            WHERE recent.station_id IS NULL        -- no recent METAR
+              AND (
+                  (a.has_paved_runway = true AND a.longest_runway_ft > 2500)
+                  OR a.is_military = true
+              )
+              AND a.location IS NOT NULL
+              AND ST_Y(a.location::geometry) BETWEEN %s AND %s
+              AND ST_X(a.location::geometry) BETWEEN %s AND %s
+            ORDER BY a.is_military DESC, a.longest_runway_ft DESC NULLS LAST
+            LIMIT %s
+        """, (south, north, west, east, limit))
+
+        airports = []
+        for row in cur.fetchall():
+            airports.append({
+                'station_id':        row[0],
+                'latitude':          float(row[1]) if row[1] is not None else None,
+                'longitude':         float(row[2]) if row[2] is not None else None,
+                'airport_name':      row[3],
+                'municipality':      row[4],
+                'is_military':       bool(row[5]) if row[5] is not None else False,
+                'longest_runway_ft': int(row[6]) if row[6] else None,
+                'airport_type':      row[7],
+                'no_metar':          True,
+            })
+
+        cur.close()
+        conn.close()
+
+        return jsonify({
+            'airports': airports,
+            'count':    len(airports),
+            'query_time': datetime.utcnow().isoformat(),
+        })
+
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'error':     str(e),
+            'type':      type(e).__name__,
+            'traceback': traceback.format_exc(),
+        }), 500
+
+
 # Backwards compatibility routes
 @weather_api.route('/metar', methods=['GET'])
 def get_metar_compat():
