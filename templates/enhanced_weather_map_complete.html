@@ -520,32 +520,17 @@
         }
 
         function showStationPopup(metar) {
-            console.log(`Fetching METAR and TAF for ${metar.station_id}`);
-            
-            Promise.all([
-                fetch('/CAP_WxCOP/api/weather/metar/station/' + metar.station_id + '?hours=3')
-                    .then(function(r) { 
-                        console.log(`METAR API status for ${metar.station_id}:`, r.status);
-                        if (!r.ok) throw new Error(`METAR API returned ${r.status}`);
-                        return r.json(); 
-                    }),
-                fetch('/CAP_WxCOP/api/weather/taf/station/' + metar.station_id)
-                    .then(function(r) { 
-                        console.log(`TAF API status for ${metar.station_id}:`, r.status);
-                        if (!r.ok) throw new Error(`TAF API returned ${r.status}`);
-                        return r.json(); 
-                    })
-                    .catch(function(e) { 
-                        console.log(`TAF error for ${metar.station_id}:`, e.message);
-                        return null; 
-                    })
-            ]).then(function(results) {
-                console.log(`METAR data for ${metar.station_id}:`, results[0]);
-                console.log(`TAF data for ${metar.station_id}:`, results[1]);
-                
-                var md = results[0];
-                var taf = results[1];
-                var obs = (md.metars && md.metars[0]) ? md.metars[0] : metar;
+            fetch('/CAP_WxCOP/api/weather/station/' + metar.station_id)
+                .then(function(r) {
+                    if (!r.ok) throw new Error('Station API returned ' + r.status);
+                    return r.json();
+                })
+                .then(function(md) {
+                    var obs = (md.metars && md.metars[0]) ? md.metars[0] : metar;
+                    // TAF and airport name are in the station detail response
+                    var taf = md.taf || null;
+                    var airportName = (md.station && md.station.airport_name)
+                                   || metar.airport_name || metar.station_id;
 
                 var wind = (obs.wind_dir || '---') + '° @ ' + (obs.wind_speed_kts || 0) + ' kt';
                 if (obs.wind_gust_kts) wind += ' gusting ' + obs.wind_gust_kts + ' kt';
@@ -587,15 +572,15 @@
                 }
 
                 var tafText = '';
-                if (taf && taf.tafs && taf.tafs.length > 0) {
+                if (taf && taf.raw_text) {
                     tafText = '<hr><h4>TAF</h4>' +
                              '<div style="background:#f5f5f5;padding:8px;border-radius:4px;font-size:12px;font-family:monospace;">' +
-                             taf.tafs[0].raw_text + '</div>';
+                             taf.raw_text + '</div>';
                 }
 
                 var content = '<div style="font-family:monospace;min-width:300px;">' +
                              '<h3>' + metar.station_id + badge + '</h3>' +
-                             '<p style="font-weight:bold;">' + (obs.airport_name || 'Unknown Airport') + '</p><hr>' +
+                             '<p style="font-weight:bold;">' + airportName + '</p><hr>' +
                              '<p><strong>Flight Category:</strong> <span style="color:' + getCategoryColor(obs.flight_category) + 
                              ';font-weight:bold;">' + obs.flight_category + '</span></p>' +
                              '<p><strong>Wind:</strong> ' + wind + '</p>' +
@@ -613,26 +598,24 @@
                     .setContent(content)
                     .openOn(map);
                     
-            }).catch(function(error) {
-                console.error(`Error loading detailed data for ${metar.station_id}:`, error);
-                
-                // Fallback popup with basic info
-                var tier = airportTiers[metar.station_id] || (metar.is_military === true || metar.military === true ? 1 : null);
-                var badge = tier === 1 ? ' (MIL)' : '';
-                
-                var content = '<div style="font-family:monospace;min-width:250px;">' +
-                             '<h3>' + metar.station_id + badge + '</h3>' +
-                             '<p style="font-weight:bold;">' + (metar.airport_name || 'Unknown Airport') + '</p><hr>' +
-                             '<p><strong>Flight Category:</strong> <span style="color:' + getCategoryColor(metar.flight_category) + 
-                             ';font-weight:bold;">' + metar.flight_category + '</span></p>' +
-                             '<p style="margin-top:8px;font-size:10px;color:#666;">Detailed METAR/TAF data unavailable - API Error: ' + error.message + '</p>' +
-                             '</div>';
-
-                L.popup()
-                    .setLatLng([metar.latitude, metar.longitude])
-                    .setContent(content)
-                    .openOn(map);
-            });
+                })
+                .catch(function(error) {
+                    console.error('Error loading station data for ' + metar.station_id + ':', error);
+                    // Fallback popup with basic info from the dot marker data
+                    var tier = airportTiers[metar.station_id] || (metar.is_military === true || metar.military === true ? 1 : null);
+                    var badge = tier === 1 ? ' (MIL)' : '';
+                    var content = '<div style="font-family:monospace;min-width:250px;">' +
+                                 '<h3>' + metar.station_id + badge + '</h3>' +
+                                 '<p style="font-weight:bold;">' + (metar.airport_name || 'Unknown Airport') + '</p><hr>' +
+                                 '<p><strong>Flight Category:</strong> <span style="color:' + getCategoryColor(metar.flight_category) +
+                                 ';font-weight:bold;">' + metar.flight_category + '</span></p>' +
+                                 '<p style="margin-top:8px;font-size:10px;color:#666;">Detail unavailable: ' + error.message + '</p>' +
+                                 '</div>';
+                    L.popup()
+                        .setLatLng([metar.latitude, metar.longitude])
+                        .setContent(content)
+                        .openOn(map);
+                });
         }
 
         async function loadTFRs() {
