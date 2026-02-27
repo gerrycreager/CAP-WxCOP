@@ -340,8 +340,10 @@
 
             document.getElementById('labelToggle').addEventListener('change', function(e) {
                 labelsVisible = e.target.checked;
-                if (labelsVisible) { labelsLayer.addTo(map); updateLabels(); }
-                else { map.removeLayer(labelsLayer); }
+                // Always clear first — prevents stale labels replaying on re-enable.
+                // labelsLayer stays on the map permanently; updateLabels() controls content.
+                labelsLayer.clearLayers();
+                if (labelsVisible) { updateLabels(); }
             });
 
             // TFR toggle
