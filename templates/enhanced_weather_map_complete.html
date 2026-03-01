@@ -277,7 +277,29 @@
         var currentLayerName = 'street';
         var highlightLayer = null;   // airport highlight ring
 
+        // TAF formatting — insert newline before each change group keyword.
+        // Keywords per FAA METAR/TAF Key: FM, TEMPO, BECMG, WS (wind shear line).
+        // Also handles PROB30/PROB40 which precede TEMPO or stand alone.
+        function formatTAF(raw) {
+            if (!raw) return '';
+            // Escape HTML entities first
+            var s = raw.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            // Insert newline before each change group indicator.
+            // FM is followed by 6 digits (DDHHMM) to avoid false matches on e.g. "FM" in METAR.
+            s = s.replace(/ (FM\d{6})/g, '\n$1');
+            s = s.replace(/ (TEMPO\b)/g, '\nTEMPO');
+            s = s.replace(/ (BECMG\b)/g, '\nBECMG');
+            s = s.replace(/ (PROB\d{2}\b)/g, '\n$1');
+            s = s.replace(/ (WS\d{3}\/)/g, '\n$1');
+            return s.trim();
+        }
+
         var TIER_MIN_ZOOM = { 1: 0, 2: 5, 3: 6 };
+
+        // No-METAR symbol zoom thresholds:
+        //   Military fields (tier 1): z5 — same as METAR hub threshold, these matter operationally
+        //   Civilian paved >2500ft:   z7 — local awareness only, don't clutter regional view
+        var NO_METAR_SYM_ZOOM = { mil: 5, civ: 7 };
 
         var airportTiers = {
             'KATL': 2, 'KORD': 2, 'KLAX': 2, 'KDFW': 2, 'KDEN': 2, 'KJFK': 2,
@@ -346,9 +368,11 @@
             });
 
             document.getElementById('showNoMetar').addEventListener('change', function(e) {
-                noMetarMarkers.forEach(function(m) {
-                    if (e.target.checked) { m.addTo(map); } else { map.removeLayer(m); }
-                });
+                if (e.target.checked) {
+                    updateNoMetarSymbols();
+                } else {
+                    noMetarMarkers.forEach(function(m) { if (m._map) map.removeLayer(m); });
+                }
                 updateLabels();
             });
 
@@ -460,7 +484,26 @@
             updateLabels();
         }
 
+        // Controls no-METAR dot visibility based on current zoom.
+        // Military no-METAR fields appear at z5+; civilian paved >2500ft at z7+.
+        function updateNoMetarSymbols() {
+            if (!document.getElementById('showNoMetar').checked) return;
+            var zoom   = map.getZoom();
+            var bounds = map.getBounds();
+            noMetarMarkers.forEach(function(m) {
+                var pos      = m.getLatLng();
+                var inBounds = bounds.contains(pos);
+                var minZ     = m._noMetarMilitary ? NO_METAR_SYM_ZOOM.mil : NO_METAR_SYM_ZOOM.civ;
+                if (inBounds && zoom >= minZ) {
+                    if (!m._map) m.addTo(map);
+                } else {
+                    if (m._map) map.removeLayer(m);
+                }
+            });
+        }
+
         function updateLabels() {
+            updateNoMetarSymbols();
             labelsLayer.clearLayers();
             if (!labelsVisible) return;
 
@@ -534,7 +577,8 @@
                     '<p>Longest runway: ' + rnwy + '</p></div>'
                 ).openOn(map);
             });
-            marker.addTo(map);
+            // Do NOT add to map here — updateNoMetarSymbols() controls visibility by zoom
+            marker._noMetarMilitary = !!airport.is_military;
             noMetarMarkers.push(marker);
         }
 
@@ -598,7 +642,7 @@
                           }).join(', ')
                         : 'Clear';
                     var tafText  = (taf && taf.raw_text)
-                        ? '<hr><h4>TAF</h4><div style="background:#f5f5f5;padding:8px;border-radius:4px;font-size:12px;font-family:monospace;">' + taf.raw_text + '</div>'
+                        ? '<hr><h4>TAF</h4><div style="background:#f5f5f5;padding:8px;border-radius:4px;font-size:12px;font-family:monospace;white-space:pre-wrap;line-height:1.6;">' + formatTAF(taf.raw_text) + '</div>'
                         : '';
                     L.popup()
                         .setLatLng([metar.latitude, metar.longitude])
