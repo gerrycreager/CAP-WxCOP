@@ -65,3 +65,13 @@ static/output/
 .vscode/
 .idea/
 
+
+# Tarballs and tree dumps
+*.tgz
+*.tree
+.cache/
+model_data/
+
+# One-off scripts
+git_init_sequence.sh
+simple_status_test.sh
