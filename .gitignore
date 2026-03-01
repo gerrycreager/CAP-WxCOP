@@ -1,89 +1,67 @@
 # Python
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
+*.pyo
+*.pyd
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
 *.egg
+*.egg-info/
+dist/
+build/
+.eggs/
 
-# Virtual Environment
+# Virtual environments
 venv/
-ENV/
 env/
+.venv/
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
+# Flask / runtime
+instance/
+.webassets-cache
+*.wsgi.bak
+
+# Logs
+logs/
+*.log
+
+# Rendered radar tiles — ephemeral, too large for git
+mrms_tiles/
+/LDM/
+
+# Backups created during deployment
+templates.bak*/
+*.bak.*
+*.bak
+*.backup*
+
+# Downloaded/cached data
+downloads/
+*.grib2
+*.grib2.gz
+tmp/
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Logs and databases
-*.log
-*.sqlite3
-*.db
+# Editor
+*.swp
+*.swo
+*~
+.vim/
+.viminfo
+*.orig
 
-# Weather Model Data - EXCLUDE ALL GRIB FILES AND MODEL DATA
-model_data/
-*.grib2
-*.grb2
-*.grib
-*.grb
-*.grib2.part
-
-# Application specific - EXCLUDE TRANSIENT PRODUCTS
-static/radar_images/
-uploads/
-temp/
-archive/
-
-# Keep batch_maps directory but exclude contents
-static/batch_maps/*
-!static/batch_maps/.gitkeep
-
-# Sensitive files
-config.py
+# Secrets / config with credentials
 secrets.py
+config_local.py
 .env
 
-# Large data files
-*.tgz
-*.tar.gz
-pqact_debug.log
-pqact_nexrad3.log
-tree.cap
-.cache/
-*.tree
+# Static generated outputs (wind maps, shapefiles)
+static/batch_maps/
+static/output/
 
-# LDM - Exclude everything except essential configs
-ldm/
-!ldm/etc/
-ldm/etc/archive/
-ldm/etc/*.out
-ldm/etc/registry.xml
-ldm/etc/SDUS51*
-!ldm/etc/ldmd.conf
-!ldm/etc/pqact*.conf
-!ldm/etc/scour.conf
-!ldm/etc/netcheck.conf
-!ldm/etc/radar.lst
-!ldm/etc/*.tbl
-!ldm/etc/*.sh
+# IDE
+.vscode/
+.idea/
+

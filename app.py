@@ -115,6 +115,11 @@ def interactive_wind_map():
     """Interactive wind forecast map"""
     return render_template('wind_map_interactive.html')
 
+@app.route('/mrms')
+def mrms_radar():
+    """MRMS composite reflectivity / MESH / lightning / azshear animated radar"""
+    return render_template('radar_map.html')
+
 # ============================================================================
 # LEGACY ROUTES - Maintain compatibility
 # ============================================================================

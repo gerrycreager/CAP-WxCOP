@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <link rel="icon" href="data:,">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CAP Radar</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; overflow: hidden; }
+
+        #titleBar {
+            position: fixed; top: 0; left: 0; right: 0; height: 44px;
+            background: linear-gradient(135deg, #1a3a2a, #2c5f41);
+            color: white; display: flex; align-items: center;
+            padding: 0 16px; z-index: 1100;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.5); gap: 16px;
+        }
+        #titleBar .tb-home { color: white; text-decoration: none; font-size: 18px; line-height: 1; flex-shrink: 0; opacity: 0.85; transition: opacity 0.15s; }
+        #titleBar .tb-home:hover { opacity: 1; }
+        #titleBar .tb-title { font-size: 16px; font-weight: 700; letter-spacing: 0.03em; white-space: nowrap; flex: 1; }
+        #titleBar .tb-utc { font-size: 13px; font-family: 'Courier New', monospace; opacity: 0.85; flex-shrink: 0; }
+
+        #map { position: fixed; top: 44px; left: 0; right: 0; bottom: 110px; }
+
+        .controls {
+            position: absolute; top: 10px; right: 10px;
+            background: white; padding: 12px 14px; border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3); z-index: 1000; min-width: 215px;
+        }
+        .controls h3 { margin-bottom: 8px; font-size: 14px; color: #2c3e50; }
+        .layer-selector { width: 100%; padding: 6px 8px; margin-bottom: 8px; border: 1px solid #ddd; border-radius: 4px; background: white; font-size: 13px; }
+        .checkbox-label { display: flex; align-items: center; font-size: 13px; cursor: pointer; margin: 4px 0; }
+        input[type="checkbox"] { margin-right: 7px; cursor: pointer; }
+        .divider { margin: 8px 0; border-top: 1px solid #ddd; }
+        .ctrl-section { font-size: 11px; font-weight: 700; color: #666; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px; }
+
+        .radar-btns { display: flex; gap: 4px; margin-bottom: 4px; }
+        .radar-btn {
+            flex: 1; padding: 5px 4px; border: 2px solid #ccc;
+            border-radius: 4px; background: white; cursor: pointer;
+            font-size: 11px; font-weight: 600; color: #555;
+            transition: all 0.15s; text-align: center;
+        }
+        .radar-btn:hover { border-color: #888; color: #222; }
+        .radar-btn.active { border-color: #2c5f41; background: #2c5f41; color: white; }
+        .radar-btn.disabled { opacity: 0.4; cursor: not-allowed; }
+
+        #opacitySlider { width: 100%; margin: 4px 0; accent-color: #2c5f41; }
+        .opacity-row { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #555; }
+
+        /* Airport search */
+        #aptSearch { display: flex; gap: 4px; margin-top: 4px; }
+        #aptSearchInput {
+            flex: 1; padding: 4px 6px; border: 1px solid #ccc;
+            border-radius: 4px; font-size: 12px; font-family: monospace;
+            text-transform: uppercase;
+        }
+        #aptSearchInput::placeholder { text-transform: none; }
+        #aptSearchBtn { padding: 4px 8px; background: #2c5f41; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; }
+        #aptSearchBtn:hover { background: #4a7c59; }
+        #aptClearBtn  { padding: 4px 7px; background: #888; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; }
+        #aptClearBtn:hover { background: #555; }
+        #aptSearchMsg { font-size: 10px; color: #888; margin-top: 2px; min-height: 14px; }
+
+        .legend-item { display: flex; align-items: center; margin: 3px 0; font-size: 11px; color: #444; }
+        .leg-sym { flex-shrink: 0; margin-right: 7px; border-radius: 50%; border: 1.5px solid rgba(0,0,0,0.45); }
+
+        #colorbarWrap { position: absolute; bottom: 120px; left: 10px; z-index: 1000; display: none; }
+        .colorbar-panel { background: rgba(255,255,255,0.93); border-radius: 6px; padding: 6px 8px; box-shadow: 0 1px 6px rgba(0,0,0,0.3); font-size: 10px; font-family: 'Courier New', monospace; }
+        .colorbar-title { font-weight: 700; font-size: 11px; margin-bottom: 4px; color: #222; }
+        .colorbar-strip { height: 14px; width: 200px; border-radius: 2px; border: 1px solid #aaa; margin-bottom: 2px; }
+        .colorbar-labels { display: flex; justify-content: space-between; font-size: 9px; color: #444; width: 200px; }
+
+        /* Airport label classes */
+        .apt-t1-lbl { font-size: 11px; font-weight: 700; color: white; background: rgba(200,30,30,0.93); padding: 2px 5px; border-radius: 3px; border: 1px solid #800; white-space: nowrap; pointer-events: none; box-shadow: 0 1px 4px rgba(0,0,0,0.5); transform: translateX(-50%); }
+        .apt-t2-lbl { font-size: 11px; font-weight: 700; color: white; background: rgba(25,80,200,0.93); padding: 2px 5px; border-radius: 3px; border: 1px solid #003a99; white-space: nowrap; pointer-events: none; box-shadow: 0 1px 3px rgba(0,0,0,0.4); transform: translateX(-50%); }
+        .apt-t3-lbl { font-size: 10px; font-weight: 600; color: #111; background: rgba(220,220,220,0.93); padding: 1px 4px; border-radius: 3px; border: 1px solid #888; white-space: nowrap; pointer-events: none; box-shadow: 0 1px 2px rgba(0,0,0,0.3); transform: translateX(-50%); }
+
+        /* Player bar */
+        #playerBar { position: fixed; bottom: 0; left: 0; right: 0; height: 110px; background: #1a1a2e; color: white; z-index: 1100; display: flex; flex-direction: column; padding: 8px 16px 10px; box-shadow: 0 -2px 10px rgba(0,0,0,0.5); }
+        #timeline { position: relative; height: 28px; margin-bottom: 6px; cursor: pointer; }
+        #timelineTrack { position: absolute; top: 50%; left: 0; right: 0; transform: translateY(-50%); height: 4px; background: #444; border-radius: 2px; }
+        #timelineFill { height: 100%; background: #4a9c6f; border-radius: 2px; width: 0%; transition: width 0.1s linear; }
+        .frame-tick { position: absolute; top: 50%; width: 2px; height: 10px; background: #4a9c6f; border-radius: 1px; transform: translate(-50%,-50%); }
+        #timelineThumb { position: absolute; top: 50%; width: 14px; height: 14px; background: white; border-radius: 50%; transform: translate(-50%,-50%); box-shadow: 0 0 4px rgba(0,0,0,0.6); transition: left 0.1s linear; pointer-events: none; }
+        #timelineLabel { position: absolute; top: -18px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.75); color: white; font-size: 10px; padding: 1px 5px; border-radius: 3px; white-space: nowrap; pointer-events: none; display: none; }
+
+        #playerControls { display: flex; align-items: center; gap: 10px; }
+        .pb-btn { background: none; border: none; color: white; font-size: 20px; cursor: pointer; padding: 2px 6px; border-radius: 4px; transition: background 0.15s; line-height: 1; }
+        .pb-btn:hover { background: rgba(255,255,255,0.15); }
+        .pb-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+        #frameDisplay { font-family: 'Courier New', monospace; font-size: 13px; color: #ccc; min-width: 60px; }
+        #validTimeDisplay { font-family: 'Courier New', monospace; font-size: 12px; color: #8bc4a8; flex: 1; }
+        #pollStatus { font-size: 10px; color: #666; white-space: nowrap; }
+        .speed-label { font-size: 11px; color: #aaa; white-space: nowrap; }
+        #speedSelect, #rangeSelect, #loopSelect { background: #2a2a3e; color: white; border: 1px solid #555; border-radius: 4px; padding: 3px 6px; font-size: 12px; cursor: pointer; }
+        #statusMsg { font-size: 11px; color: #f0a500; white-space: nowrap; }
+        #loading { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); background: white; padding: 20px 40px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); z-index: 2000; font-size: 18px; }
+    </style>
+</head>
+<body>
+    <div id="titleBar">
+        <a href="/" class="tb-home" title="Home">&#127968;</a>
+        <span class="tb-title">MRMS Radar</span>
+        <span class="tb-utc" id="tbUtc"></span>
+    </div>
+
+    <div id="map"></div>
+    <div id="loading">Loading radar data...</div>
+
+    <div class="controls">
+        <h3>Base Map</h3>
+        <select id="layerSelector" class="layer-selector">
+            <option value="street">Street Map</option>
+            <option value="sectional">VFR Sectional (zoom 5+)</option>
+            <option value="satellite">Satellite</option>
+            <option value="dark">Dark Mode</option>
+            <option value="topo">Topographic</option>
+        </select>
+
+        <div class="divider"></div>
+        <div class="ctrl-section">Radar Product</div>
+        <div class="radar-btns">
+            <div class="radar-btn active"    data-product="composite" title="Composite Reflectivity">Refl</div>
+            <div class="radar-btn disabled"  data-product="mesh"      title="MESH Hail Size">MESH</div>
+            <div class="radar-btn disabled"  data-product="lightning" title="Lightning Probability 60min">Ltng</div>
+            <div class="radar-btn disabled"  data-product="azshear"   title="Azimuthal Shear 0-2km AGL">AzShr</div>
+        </div>
+
+        <div class="divider"></div>
+        <div class="ctrl-section">Opacity</div>
+        <div class="opacity-row">
+            <span>Low</span>
+            <input type="range" id="opacitySlider" min="20" max="100" value="75">
+            <span>High</span>
+        </div>
+
+        <div class="divider"></div>
+        <div class="ctrl-section">Airports</div>
+        <label class="checkbox-label"><input type="checkbox" id="symbolToggle" checked> Show symbols</label>
+        <label class="checkbox-label"><input type="checkbox" id="labelToggle"  checked> Show labels</label>
+        <div id="aptSearch">
+            <input type="text" id="aptSearchInput" maxlength="4" placeholder="ICAO e.g. KLSF">
+            <button id="aptSearchBtn">Go</button>
+            <button id="aptClearBtn" title="Clear highlight">✕</button>
+        </div>
+        <div id="aptSearchMsg"></div>
+
+        <div class="divider"></div>
+        <div class="ctrl-section">Legend</div>
+        <div class="legend-item"><div class="leg-sym" style="width:12px;height:12px;background:rgba(200,30,30,0.9);"></div>Military sym z2+, lbl z5+</div>
+        <div class="legend-item"><div class="leg-sym" style="width:10px;height:10px;background:rgba(25,80,200,0.9);"></div>Major Hub sym z4+, lbl z6+</div>
+        <div class="legend-item"><div class="leg-sym" style="width:8px;height:8px;background:rgba(80,80,80,0.85);"></div>Regional sym z6+, lbl z7+</div>
+        <div class="legend-item"><div class="leg-sym" style="width:7px;height:7px;background:rgba(255,255,255,0.9);border-color:#666;"></div>Paved &gt;2500ft sym z7+</div>
+    </div>
+
+    <div id="colorbarWrap">
+        <div class="colorbar-panel">
+            <div class="colorbar-title" id="colorbarTitle">Composite Reflectivity (dBZ)</div>
+            <canvas class="colorbar-strip" id="colorbarCanvas" width="200" height="14"></canvas>
+            <div class="colorbar-labels" id="colorbarLabels"></div>
+        </div>
+    </div>
+
+    <div id="playerBar">
+        <div id="timeline">
+            <div id="timelineTrack"><div id="timelineFill"></div></div>
+            <div id="timelineThumb"></div>
+            <div id="timelineLabel"></div>
+        </div>
+        <div id="playerControls">
+            <button class="pb-btn" id="btnFirst" title="First frame">&#9198;</button>
+            <button class="pb-btn" id="btnPrev"  title="Previous frame">&#9664;</button>
+            <button class="pb-btn" id="btnPlay"  title="Play/Pause">&#9654;</button>
+            <button class="pb-btn" id="btnNext"  title="Next frame">&#9654;&#x7C;</button>
+            <button class="pb-btn" id="btnLast"  title="Latest frame">&#9197;</button>
+            <div id="frameDisplay">— / —</div>
+            <div id="validTimeDisplay">No data</div>
+            <span class="speed-label">Speed:</span>
+            <select id="speedSelect">
+                <option value="800">Slow</option>
+                <option value="500" selected>Normal</option>
+                <option value="250">Fast</option>
+                <option value="100">Fastest</option>
+            </select>
+            <span class="speed-label">Range:</span>
+            <select id="rangeSelect">
+                <option value="15">15 min</option>
+                <option value="30">30 min</option>
+                <option value="60" selected>1 hr</option>
+                <option value="120">All</option>
+            </select>
+            <span class="speed-label">Loop:</span>
+            <select id="loopSelect">
+                <option value="loop">Loop</option>
+                <option value="rock">Rock</option>
+            </select>
+            <span id="pollStatus"></span>
+            <span id="statusMsg"></span>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+    // ── Colormaps ──────────────────────────────────────────────────────────
+    const CMAPS = {
+        composite: {
+            title: 'Composite Reflectivity (dBZ)',
+            vmin: -30, vmax: 80,
+            labels: ['-30','0','20','40','60','80'],
+            stops: [
+                [-30,[0,0,0,0]],[5,[4,233,231,200]],[10,[1,159,244,220]],
+                [15,[3,0,244,220]],[20,[3,0,244,220]],[25,[2,253,2,220]],
+                [30,[0,200,0,220]],[35,[0,144,0,220]],[40,[255,255,0,220]],
+                [45,[231,192,0,220]],[50,[255,144,0,220]],[55,[255,0,0,220]],
+                [60,[214,0,0,220]],[65,[192,0,0,220]],[70,[255,0,255,230]],
+                [75,[192,0,192,230]],[80,[255,255,255,240]]
+            ]
+        },
+        mesh: {
+            title: 'MESH Hail Size (mm)',
+            vmin: 0, vmax: 75,
+            labels: ['0','6','12','25','38','50','75mm'],
+            stops: [
+                [0,[0,0,0,0]],[1,[0,255,255,180]],[6,[0,200,255,200]],
+                [12,[0,255,0,210]],[19,[255,255,0,220]],[25,[255,165,0,230]],
+                [38,[255,0,0,230]],[50,[200,0,200,240]],[75,[255,255,255,250]]
+            ]
+        },
+        lightning: {
+            title: 'Lightning Probability 60min (%)',
+            vmin: 0, vmax: 100,
+            labels: ['0%','25%','50%','75%','100%'],
+            stops: [
+                [0,[0,0,0,0]],[5,[255,255,100,160]],[20,[255,200,0,190]],
+                [40,[255,140,0,210]],[60,[255,0,0,220]],[80,[200,0,200,230]],
+                [100,[255,255,255,250]]
+            ]
+        },
+        azshear: {
+            title: 'Azimuthal Shear 0-2km AGL (s⁻¹)',
+            vmin: -0.05, vmax: 0.05,
+            labels: ['-.05','-.02','-.01','0','.01','.02','.05'],
+            stops: [
+                [-0.050,[100,0,255,230]],[-0.020,[0,100,255,220]],
+                [-0.010,[0,200,255,160]],[-0.005,[0,0,0,0]],
+                [ 0.000,[0,0,0,0]],     [ 0.005,[0,0,0,0]],
+                [ 0.010,[255,200,0,160]],[ 0.020,[255,100,0,220]],
+                [ 0.030,[255,0,0,230]],  [ 0.050,[255,255,255,240]]
+            ]
+        }
+    };
+
+    function interpColor(stops, vmin, vmax, t) {
+        var v = vmin + t * (vmax - vmin);
+        if (v <= stops[0][0]) return stops[0][1];
+        if (v >= stops[stops.length-1][0]) return stops[stops.length-1][1];
+        for (var i = 0; i < stops.length-1; i++) {
+            var v0=stops[i][0], c0=stops[i][1];
+            var v1=stops[i+1][0], c1=stops[i+1][1];
+            if (v >= v0 && v <= v1) {
+                var f = (v1>v0) ? (v-v0)/(v1-v0) : 0;
+                return [
+                    Math.round(c0[0]+f*(c1[0]-c0[0])),
+                    Math.round(c0[1]+f*(c1[1]-c0[1])),
+                    Math.round(c0[2]+f*(c1[2]-c0[2])),
+                    Math.round(c0[3]+f*(c1[3]-c0[3]))
+                ];
+            }
+        }
+        return [0,0,0,0];
+    }
+
+    function drawColorbar(product) {
+        var cm = CMAPS[product];
+        var canvas = document.getElementById('colorbarCanvas');
+        var ctx = canvas.getContext('2d');
+        var W = canvas.width;
+        for (var x=0; x<W; x++) {
+            var c = interpColor(cm.stops, cm.vmin, cm.vmax, x/W);
+            ctx.fillStyle = 'rgba('+c[0]+','+c[1]+','+c[2]+','+(c[3]/255).toFixed(2)+')';
+            ctx.fillRect(x, 0, 1, canvas.height);
+        }
+        document.getElementById('colorbarTitle').textContent = cm.title;
+        document.getElementById('colorbarLabels').innerHTML =
+            cm.labels.map(function(l){ return '<span>'+l+'</span>'; }).join('');
+    }
+
+    // ── Airport display tiers ──────────────────────────────────────────────
+    // Tier 1 Military:      sym z2+  lbl z5+
+    // Tier 2 Major Hub:     sym z4+  lbl z6+
+    // Tier 3 Regional:      sym z6+  lbl z7+
+    // Tier 4 Paved >2500ft: sym z7+  no label
+    var TIER_SYM_ZOOM = { 1:2, 2:4, 3:6, 4:7 };
+    var TIER_LBL_ZOOM = { 1:5, 2:6, 3:7, 4:999 };
+    var TIER_SYM_PX   = { 1:12, 2:10, 3:8, 4:7 };
+    var TIER_SYM_COLOR  = { 1:'rgba(200,30,30,0.92)', 2:'rgba(25,80,200,0.92)', 3:'rgba(80,80,80,0.85)', 4:'rgba(255,255,255,0.85)' };
+    var TIER_SYM_BORDER = { 1:'rgba(100,0,0,0.9)', 2:'rgba(0,30,120,0.9)', 3:'rgba(40,40,40,0.8)', 4:'rgba(80,80,80,0.8)' };
+
+    // ── State ──────────────────────────────────────────────────────────────
+    var map, symbolsLayer, labelsLayer, highlightLayer, baseLayers = {};
+    var currentLayerName = 'street';
+    var airports = [];
+    var radarLayer = null, radarLayers = {}, indexData = {};
+    var frames = [], currentFrame = -1, currentProduct = 'composite';
+    var playing = false, rockDir = 1, playTimer = null;
+    var pollTimer = null, dragging = false;
+    var lastPollTime = null;
+
+    // ── Map init ───────────────────────────────────────────────────────────
+    function initMap() {
+        map = L.map('map', {
+            center: [39.0, -98.0], zoom: 5,
+            zoomControl: true,
+            minZoom: 3,
+            maxZoom: 8     // Phase 1 limit; z8 = ~10km/tile for 1km MRMS data
+        });
+
+        baseLayers = {
+            street:    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap', maxZoom: 18 }),
+            sectional: L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Specialty/World_Navigation_Charts/MapServer/tile/{z}/{y}/{x}', { attribution: 'VFR Sectional &copy; FAA/Esri', maxZoom: 12, minZoom: 5 }),
+            satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: '&copy; Esri', maxZoom: 18 }),
+            dark:      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { attribution: '&copy; OSM/CARTO', subdomains: 'abcd', maxZoom: 18 }),
+            topo:      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', { attribution: '&copy; Esri', maxZoom: 18 })
+        };
+        baseLayers.street.addTo(map);
+
+        L.control.scale({ position: 'bottomleft', imperial: true, metric: false, maxWidth: 150 }).addTo(map);
+
+        symbolsLayer  = L.featureGroup().addTo(map);
+        labelsLayer   = L.featureGroup().addTo(map);
+        highlightLayer = L.featureGroup().addTo(map);
+
+        setupControls();
+        loadAirports();
+        fetchIndex(currentProduct);
+
+        map.on('zoomend moveend', updateAirports);
+
+        // Poll every 4 minutes for new frames
+        pollTimer = setInterval(pollAllProducts, 4 * 60 * 1000);
+    }
+
+    // ── Poll all active products ────────────────────────────────────────────
+    function pollAllProducts() {
+        lastPollTime = new Date();
+        document.getElementById('pollStatus').textContent =
+            'Updated ' + lastPollTime.getUTCHours().toString().padStart(2,'0') + ':' +
+            lastPollTime.getUTCMinutes().toString().padStart(2,'0') + 'Z';
+        // Fetch index for all products that have data (not just current)
+        Object.keys(indexData).forEach(function(p) { fetchIndex(p); });
+        // Also fetch current product even if not yet in indexData
+        if (!indexData[currentProduct]) fetchIndex(currentProduct);
+    }
+
+    // ── Controls ───────────────────────────────────────────────────────────
+    function setupControls() {
+        document.getElementById('layerSelector').addEventListener('change', function(e) {
+            var nl = e.target.value;
+            if (nl === 'sectional' && map.getZoom() < 5) {
+                alert('VFR Sectional requires zoom 5+.');
+                this.value = currentLayerName; return;
+            }
+            Object.values(baseLayers).forEach(function(l){ if (map.hasLayer(l)) map.removeLayer(l); });
+            baseLayers[nl].addTo(map);
+            currentLayerName = nl;
+        });
+
+        document.querySelectorAll('.radar-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                if (this.classList.contains('disabled')) return;
+                document.querySelectorAll('.radar-btn').forEach(function(b){ b.classList.remove('active'); });
+                this.classList.add('active');
+                switchProduct(this.dataset.product);
+            });
+        });
+
+        document.getElementById('opacitySlider').addEventListener('input', function() {
+            if (radarLayer) radarLayer.setOpacity(this.value / 100);
+        });
+
+        document.getElementById('symbolToggle').addEventListener('change', updateAirports);
+        document.getElementById('labelToggle').addEventListener('change', function() {
+            labelsLayer.clearLayers();
+            if (this.checked && document.getElementById('symbolToggle').checked) updateAirports();
+        });
+
+        // Airport search
+        document.getElementById('aptSearchInput').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') searchAirport();
+        });
+        document.getElementById('aptSearchBtn').addEventListener('click', searchAirport);
+        document.getElementById('aptClearBtn').addEventListener('click', clearHighlight);
+
+        document.getElementById('btnPlay').addEventListener('click', togglePlay);
+        document.getElementById('btnFirst').addEventListener('click', function(){ goToFrame(0); });
+        document.getElementById('btnLast').addEventListener('click',  function(){ goToFrame(frames.length-1); });
+        document.getElementById('btnPrev').addEventListener('click', function(){ stopPlay(); goToFrame(Math.max(0, currentFrame-1)); });
+        document.getElementById('btnNext').addEventListener('click', function(){ stopPlay(); goToFrame(Math.min(frames.length-1, currentFrame+1)); });
+
+        document.getElementById('speedSelect').addEventListener('change', function() { if (playing) { stopPlay(); startPlay(); } });
+        document.getElementById('rangeSelect').addEventListener('change', rebuildFrameList);
+        document.getElementById('loopSelect').addEventListener('change', function() { rockDir = 1; });
+
+        var tl = document.getElementById('timeline');
+        tl.addEventListener('mousedown', function(e){ dragging=true; stopPlay(); scrubToMouse(e); });
+        document.addEventListener('mousemove', function(e){ if (!dragging) return; scrubToMouse(e); showTimelineLabel(e); });
+        document.addEventListener('mouseup', function(){ dragging=false; hideTimelineLabel(); });
+        tl.addEventListener('touchstart', function(e){ dragging=true; stopPlay(); scrubToMouse(e.touches[0]); }, {passive:true});
+        document.addEventListener('touchmove', function(e){ if (!dragging) return; scrubToMouse(e.touches[0]); }, {passive:true});
+        document.addEventListener('touchend', function(){ dragging=false; });
+    }
+
+    function scrubToMouse(e) {
+        if (!frames.length) return;
+        var rect = document.getElementById('timeline').getBoundingClientRect();
+        var pct  = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+        goToFrame(Math.round(pct * (frames.length - 1)));
+    }
+    function showTimelineLabel(e) {
+        if (!frames.length) return;
+        var rect = document.getElementById('timeline').getBoundingClientRect();
+        var pct  = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+        var idx  = Math.round(pct * (frames.length - 1));
+        var lbl  = document.getElementById('timelineLabel');
+        lbl.textContent = frames[idx] ? fmtTime(frames[idx].valid_time) : '';
+        lbl.style.left  = (pct * 100) + '%';
+        lbl.style.display = 'block';
+    }
+    function hideTimelineLabel() { document.getElementById('timelineLabel').style.display = 'none'; }
+
+    // ── Airport search / highlight ─────────────────────────────────────────
+    function searchAirport() {
+        var raw = document.getElementById('aptSearchInput').value.trim().toUpperCase();
+        if (!raw) return;
+        var msg = document.getElementById('aptSearchMsg');
+        var found = null;
+        for (var i=0; i<airports.length; i++) {
+            if (airports[i].station_id === raw) { found = airports[i]; break; }
+        }
+        if (!found) {
+            msg.style.color = '#c00';
+            msg.textContent = raw + ' not found';
+            return;
+        }
+        var lat = found.lat || found.latitude;
+        var lon = found.lon || found.longitude;
+        msg.style.color = '#2c5f41';
+        msg.textContent = found.name || found.airport_name || raw;
+
+        clearHighlight();
+
+        L.circle([lat, lon], {
+            radius: 5000,
+            color: '#ff9800', weight: 3, opacity: 0.9,
+            fillColor: '#ff9800', fillOpacity: 0.08, dashArray: '6 4'
+        }).addTo(highlightLayer);
+
+        L.circleMarker([lat, lon], {
+            radius: 8, color: '#ff9800', weight: 3,
+            fillColor: '#fff', fillOpacity: 0.9
+        }).bindTooltip(raw + (found.name||found.airport_name ? ' — '+(found.name||found.airport_name) : ''),
+            { permanent: true, direction: 'top', offset: [0, -12] })
+          .addTo(highlightLayer);
+
+        highlightLayer.bringToFront();
+        map.setView([lat, lon], Math.max(map.getZoom(), 8));
+    }
+
+    function clearHighlight() {
+        highlightLayer.clearLayers();
+        document.getElementById('aptSearchMsg').textContent = '';
+    }
+
+    // ── Airport loading + rendering ────────────────────────────────────────
+    function loadAirports() {
+        fetch('/CAP_WxCOP/api/wind-forecast/conus')
+            .then(function(r){ if (!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+            .then(function(data){
+                airports = data.airports || [];
+                updateAirports();
+                document.getElementById('loading').style.display = 'none';
+            })
+            .catch(function(err){
+                console.warn('Airport load failed:', err);
+                document.getElementById('loading').style.display = 'none';
+            });
+    }
+
+    function updateAirports() {
+        var showSymbols = document.getElementById('symbolToggle').checked;
+        var showLabels  = document.getElementById('labelToggle').checked;
+        symbolsLayer.clearLayers();
+        labelsLayer.clearLayers();
+        if (!showSymbols) return;
+
+        var zoom = map.getZoom(), bounds = map.getBounds();
+
+        airports.forEach(function(apt) {
+            var lat = apt.lat || apt.latitude;
+            var lon = apt.lon || apt.longitude;
+            if (!lat || !lon || !bounds.contains([lat, lon])) return;
+
+            var tier = Math.min(apt.label_priority || (apt.is_military ? 1 : 3), 3);
+            if (zoom < TIER_SYM_ZOOM[tier]) return;
+
+            var sz = TIER_SYM_PX[tier];
+            var zOff = tier===1 ? 1000 : tier===2 ? 500 : 100;
+            var tip  = apt.station_id + (apt.name ? ' — '+apt.name : '');
+
+            L.marker([lat, lon], {
+                icon: L.divIcon({
+                    className: '',
+                    html: '<div style="width:'+sz+'px;height:'+sz+'px;background:'+TIER_SYM_COLOR[tier]+';border:1.5px solid '+TIER_SYM_BORDER[tier]+';border-radius:50%;box-shadow:0 1px 3px rgba(0,0,0,0.5);"></div>',
+                    iconSize: [sz,sz], iconAnchor: [sz/2,sz/2]
+                }),
+                interactive: true, zIndexOffset: zOff
+            }).bindTooltip(tip, { permanent:false, direction:'top', offset:[0,-sz/2-2] })
+              .addTo(symbolsLayer);
+
+            if (showLabels && zoom >= TIER_LBL_ZOOM[tier]) {
+                L.marker([lat, lon], {
+                    icon: L.divIcon({ className:'apt-t'+tier+'-lbl', html:apt.station_id, iconSize:null, iconAnchor:[0, sz+14] }),
+                    interactive: false, zIndexOffset: zOff+10
+                }).addTo(labelsLayer);
+            }
+        });
+
+        if (radarLayer) { symbolsLayer.bringToFront(); labelsLayer.bringToFront(); }
+        highlightLayer.bringToFront();
+    }
+
+    // ── Radar product switching ────────────────────────────────────────────
+    function switchProduct(product) {
+        currentProduct = product;
+        drawColorbar(product);
+        document.getElementById('colorbarWrap').style.display = 'block';
+        if (indexData[product]) rebuildFrameList();
+        else fetchIndex(product);
+    }
+
+    // ── Index fetch ────────────────────────────────────────────────────────
+    function fetchIndex(product) {
+        var url = '/CAP_WxCOP/static/mrms_tiles/'+product+'/CONUS/index.json?_='+Date.now();
+        fetch(url)
+            .then(function(r){ if (!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+            .then(function(data) {
+                var wasEmpty = !indexData[product] || !indexData[product].frames.length;
+                indexData[product] = data;
+                document.querySelectorAll('.radar-btn').forEach(function(btn){
+                    if (btn.dataset.product === product) btn.classList.remove('disabled');
+                });
+                if (product === currentProduct) rebuildFrameList(wasEmpty);
+            })
+            .catch(function(err) {
+                if (product === currentProduct) setStatus('No '+product+' data');
+                console.warn('fetchIndex '+product+':', err);
+            });
+    }
+
+    function rebuildFrameList(jumpToLatest) {
+        var data = indexData[currentProduct];
+        if (!data || !data.frames.length) { frames=[]; updatePlayer(); return; }
+
+        var rangeMin = parseInt(document.getElementById('rangeSelect').value, 10);
+        var cutoff   = new Date(Date.now() - rangeMin*60000).toISOString();
+
+        // "All" option (120) shows everything in index regardless of age
+        if (rangeMin >= 120) {
+            frames = data.frames.slice();
+        } else {
+            frames = data.frames.filter(function(f){ return f.valid_time >= cutoff; });
+        }
+        frames.sort(function(a,b){ return a.timestamp < b.timestamp ? -1 : 1; });
+
+        buildTimeline();
+
+        var newIdx = frames.length-1;
+        if (!jumpToLatest && currentFrame >= 0 && currentFrame < frames.length) newIdx = currentFrame;
+        goToFrame(newIdx);
+    }
+
+    // ── Timeline ───────────────────────────────────────────────────────────
+    function buildTimeline() {
+        var track = document.getElementById('timelineTrack');
+        Array.from(track.querySelectorAll('.frame-tick')).forEach(function(t){ t.remove(); });
+        if (!frames.length) return;
+        frames.forEach(function(f, i) {
+            var tick = document.createElement('div');
+            tick.className = 'frame-tick';
+            tick.style.left = (i / Math.max(frames.length-1, 1) * 100) + '%';
+            track.appendChild(tick);
+        });
+    }
+
+    // ── Crossfade frame swap with preload ──────────────────────────────────
+    function ensureLayer(f) {
+        if (!radarLayers[f.tile_url]) {
+            radarLayers[f.tile_url] = L.tileLayer(f.tile_url, {
+                opacity: 0,
+                maxZoom: indexData[currentProduct].zoom_max,
+                minZoom: indexData[currentProduct].zoom_min,
+                errorTileUrl: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
+            });
+        }
+        return radarLayers[f.tile_url];
+    }
+
+    function preloadAdjacent(idx) {
+        [-1, 1, 2].forEach(function(offset) {
+            var ni = idx + offset;
+            if (ni < 0 || ni >= frames.length) return;
+            var layer = ensureLayer(frames[ni]);
+            if (!map.hasLayer(layer)) {
+                layer.setOpacity(0);
+                layer.addTo(map);
+                if (radarLayer) radarLayer.bringToFront();
+            }
+        });
+    }
+
+    function goToFrame(idx) {
+        if (!frames.length) return;
+        idx = Math.max(0, Math.min(frames.length-1, idx));
+        currentFrame = idx;
+
+        var f         = frames[idx];
+        var opacity   = document.getElementById('opacitySlider').value / 100;
+        var prevLayer = radarLayer;
+        var nextLayer = ensureLayer(f);
+
+        nextLayer.setOpacity(opacity);
+        if (!map.hasLayer(nextLayer)) nextLayer.addTo(map);
+
+        function onLoad() {
+            nextLayer.off('load', onLoad);
+            if (prevLayer && prevLayer !== nextLayer && map.hasLayer(prevLayer)) map.removeLayer(prevLayer);
+        }
+        nextLayer.on('load', onLoad);
+        setTimeout(function() {
+            nextLayer.off('load', onLoad);
+            if (prevLayer && prevLayer !== nextLayer && map.hasLayer(prevLayer)) map.removeLayer(prevLayer);
+        }, 600);
+
+        radarLayer = nextLayer;
+        symbolsLayer.bringToFront();
+        labelsLayer.bringToFront();
+        highlightLayer.bringToFront();
+
+        preloadAdjacent(idx);
+        updatePlayer();
+    }
+
+    function updatePlayer() {
+        var pct = frames.length > 1 ? (currentFrame / (frames.length-1) * 100) : 0;
+        document.getElementById('timelineFill').style.width = pct + '%';
+        document.getElementById('timelineThumb').style.left = pct + '%';
+        document.getElementById('frameDisplay').textContent =
+            frames.length ? (currentFrame+1)+' / '+frames.length : '— / —';
+        document.getElementById('validTimeDisplay').textContent =
+            frames.length ? fmtTime(frames[currentFrame].valid_time) : 'No data';
+        document.getElementById('btnFirst').disabled = currentFrame === 0;
+        document.getElementById('btnPrev').disabled  = currentFrame === 0;
+        document.getElementById('btnNext').disabled  = currentFrame === frames.length-1;
+        document.getElementById('btnLast').disabled  = currentFrame === frames.length-1;
+    }
+
+    // ── Playback ───────────────────────────────────────────────────────────
+    function togglePlay() { if (playing) stopPlay(); else startPlay(); }
+    function startPlay() {
+        if (!frames.length) return;
+        playing = true;
+        document.getElementById('btnPlay').textContent = '⏸';
+        rockDir = 1; scheduleNext();
+    }
+    function stopPlay() {
+        playing = false;
+        document.getElementById('btnPlay').textContent = '▶';
+        if (playTimer) { clearTimeout(playTimer); playTimer = null; }
+    }
+    function scheduleNext() {
+        if (!playing) return;
+        var ms = parseInt(document.getElementById('speedSelect').value, 10);
+        var isEdge = (rockDir>0 && currentFrame===frames.length-1) ||
+                     (rockDir<0 && currentFrame===0);
+        playTimer = setTimeout(advanceFrame, isEdge ? ms*2 : ms);
+    }
+    function advanceFrame() {
+        if (!playing || !frames.length) return;
+        var mode = document.getElementById('loopSelect').value;
+        if (mode === 'rock') {
+            var next = currentFrame + rockDir;
+            if (next >= frames.length) { rockDir=-1; next=frames.length-2; }
+            else if (next < 0)         { rockDir=1;  next=1; }
+            goToFrame(Math.max(0, Math.min(frames.length-1, next)));
+        } else {
+            goToFrame((currentFrame+1) % frames.length);
+        }
+        scheduleNext();
+    }
+
+    // ── Utilities ──────────────────────────────────────────────────────────
+    function fmtTime(iso) {
+        if (!iso) return '?';
+        try {
+            var d = new Date(iso);
+            return String(d.getUTCDate()).padStart(2,'0') +
+                   String(d.getUTCHours()).padStart(2,'0') +
+                   String(d.getUTCMinutes()).padStart(2,'0') + 'Z';
+        } catch(e) { return iso; }
+    }
+    function setStatus(msg) {
+        document.getElementById('statusMsg').textContent = msg;
+        setTimeout(function(){ document.getElementById('statusMsg').textContent=''; }, 4000);
+    }
+
+    // ── UTC clock ──────────────────────────────────────────────────────────
+    (function utcClock() {
+        function pad(n){ return String(n).padStart(2,'0'); }
+        function tick(){
+            var el = document.getElementById('tbUtc');
+            if (!el) return;
+            var d = new Date();
+            el.textContent = d.getUTCFullYear()+'-'+pad(d.getUTCMonth()+1)+'-'+
+                pad(d.getUTCDate())+' '+pad(d.getUTCHours())+':'+
+                pad(d.getUTCMinutes())+':'+pad(d.getUTCSeconds())+'Z';
+        }
+        tick(); setInterval(tick, 1000);
+    })();
+
+    // ── Boot ───────────────────────────────────────────────────────────────
+    document.addEventListener('DOMContentLoaded', function() {
+        initMap();
+        drawColorbar('composite');
+        document.getElementById('colorbarWrap').style.display = 'block';
+    });
+    window.addEventListener('error', function(e) {
+        if (e.message && e.message.includes('message channel closed')) return true;
+    });
+    </script>
+</body>
+</html>
+

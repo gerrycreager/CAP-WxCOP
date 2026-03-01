@@ -11,150 +11,112 @@
         #map { height: 100vh; width: 100%; }
 
         .home-btn {
-            position: fixed;
-            top: 20px;
-            left: 20px;
-            z-index: 1000;
+            position: fixed; top: 20px; left: 20px; z-index: 1000;
             background: linear-gradient(135deg, #2c5f41, #4a7c59);
-            color: white;
-            padding: 10px 20px;
-            border-radius: 8px;
-            text-decoration: none;
-            font-weight: 600;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-            transition: all 0.2s ease;
+            color: white; padding: 10px 20px; border-radius: 8px;
+            text-decoration: none; font-weight: 600;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4); transition: all 0.2s ease;
         }
         .home-btn:hover {
             background: linear-gradient(135deg, #4a7c59, #2c5f41);
-            transform: translateY(-2px);
-            color: white;
-            text-decoration: none;
+            transform: translateY(-2px); color: white; text-decoration: none;
         }
 
         .controls {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            background: white;
-            padding: 15px;
-            border-radius: 8px;
+            position: absolute; top: 10px; right: 10px;
+            background: white; padding: 15px; border-radius: 8px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.3);
-            z-index: 1000;
-            max-width: 285px;
+            z-index: 1000; max-width: 285px;
         }
         .controls h3 { margin-bottom: 10px; font-size: 16px; color: #2c3e50; }
-        
+
         .layer-selector {
-            width: 100%;
-            padding: 8px;
-            margin-bottom: 10px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            background: white;
-            font-size: 14px;
+            width: 100%; padding: 8px; margin-bottom: 10px;
+            border: 1px solid #ddd; border-radius: 4px;
+            background: white; font-size: 14px;
         }
-        
         .checkbox-label {
-            display: flex;
-            align-items: center;
-            font-size: 14px;
-            cursor: pointer;
-            margin: 5px 0;
+            display: flex; align-items: center;
+            font-size: 14px; cursor: pointer; margin: 5px 0;
         }
         input[type="checkbox"] { margin-right: 8px; cursor: pointer; }
         .divider { margin: 10px 0; border-top: 1px solid #ddd; }
+
         .legend-item { display: flex; align-items: center; margin: 4px 0; font-size: 12px; }
         .legend-dot {
-            width: 14px; height: 14px;
-            border-radius: 50%;
-            margin-right: 8px;
-            border: 2px solid #000;
-            flex-shrink: 0;
+            width: 14px; height: 14px; border-radius: 50%;
+            margin-right: 8px; border: 2px solid #000; flex-shrink: 0;
         }
         .legend-tag {
-            min-width: 36px; height: 15px;
-            border-radius: 3px;
-            margin-right: 8px;
-            font-size: 9px; font-weight: 700;
-            display: flex; align-items: center; justify-content: center;
-            flex-shrink: 0;
+            min-width: 36px; height: 15px; border-radius: 3px;
+            margin-right: 8px; font-size: 9px; font-weight: 700;
+            display: flex; align-items: center; justify-content: center; flex-shrink: 0;
         }
+
+        /* ── Airport search / highlight ──────────────────────── */
+        #aptSearch {
+            display: flex; gap: 4px; margin-top: 6px;
+        }
+        #aptSearchInput {
+            flex: 1; padding: 5px 7px; border: 1px solid #ccc;
+            border-radius: 4px; font-size: 12px; font-family: monospace;
+            text-transform: uppercase;
+        }
+        #aptSearchInput::placeholder { text-transform: none; }
+        #aptSearchBtn {
+            padding: 5px 10px; background: #2c5f41; color: white;
+            border: none; border-radius: 4px; cursor: pointer; font-size: 12px;
+        }
+        #aptSearchBtn:hover { background: #4a7c59; }
+        #aptClearBtn {
+            padding: 5px 8px; background: #888; color: white;
+            border: none; border-radius: 4px; cursor: pointer; font-size: 12px;
+        }
+        #aptClearBtn:hover { background: #555; }
+        #aptSearchMsg { font-size: 10px; color: #888; margin-top: 3px; min-height: 14px; }
 
         #loading {
-            position: absolute;
-            top: 50%;
-            left: 50%;
+            position: absolute; top: 50%; left: 50%;
             transform: translate(-50%, -50%);
-            background: white;
-            padding: 20px 40px;
-            border-radius: 8px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
-            z-index: 2000;
-            font-size: 18px;
+            background: white; padding: 20px 40px;
+            border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            z-index: 2000; font-size: 18px;
         }
 
-        /* Military labels - always visible */
+        /* ── Airport label classes ───────────────────────────── */
         .apt-t1 {
-            font-size: 11px;
-            font-weight: 700;
-            color: white;
-            background: rgba(200, 30, 30, 0.93);
-            padding: 2px 5px;
-            border-radius: 3px;
-            border: 1px solid #800;
-            white-space: nowrap;
-            pointer-events: none;
-            box-shadow: 0 1px 4px rgba(0,0,0,0.5);
-            transform: translateX(-50%);
+            font-size: 11px; font-weight: 700;
+            color: white; background: rgba(200, 30, 30, 0.93);
+            padding: 2px 5px; border-radius: 3px; border: 1px solid #800;
+            white-space: nowrap; pointer-events: none;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.5); transform: translateX(-50%);
         }
-
-        /* Major hub: blue */
         .apt-t2 {
-            font-size: 11px;
-            font-weight: 700;
-            color: white;
-            background: rgba(25, 80, 200, 0.93);
-            padding: 2px 5px;
-            border-radius: 3px;
-            border: 1px solid #003a99;
-            white-space: nowrap;
-            pointer-events: none;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.4);
-            transform: translateX(-50%);
+            font-size: 11px; font-weight: 700;
+            color: white; background: rgba(25, 80, 200, 0.93);
+            padding: 2px 5px; border-radius: 3px; border: 1px solid #003a99;
+            white-space: nowrap; pointer-events: none;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.4); transform: translateX(-50%);
+        }
+        .apt-t3 {
+            font-size: 10px; font-weight: 600;
+            color: #111; background: rgba(220, 220, 220, 0.93);
+            padding: 1px 4px; border-radius: 3px; border: 1px solid #888;
+            white-space: nowrap; pointer-events: none;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.3); transform: translateX(-50%);
         }
 
-        /* Regional: light gray */
-        .apt-t3 {
-            font-size: 10px;
-            font-weight: 600;
-            color: #111;
-            background: rgba(220, 220, 220, 0.93);
-            padding: 1px 4px;
-            border-radius: 3px;
-            border: 1px solid #888;
-            white-space: nowrap;
-            pointer-events: none;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.3);
-            transform: translateX(-50%);
-        }
         /* ── Title bar ───────────────────────────────────────── */
         #titleBar {
-            position: fixed;
-            top: 0; left: 0; right: 0;
-            height: 44px;
+            position: fixed; top: 0; left: 0; right: 0; height: 44px;
             background: linear-gradient(135deg, #1a3a2a, #2c5f41);
-            color: white;
-            display: flex;
-            align-items: center;
-            padding: 0 16px;
-            z-index: 1100;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.5);
-            gap: 16px;
+            color: white; display: flex; align-items: center;
+            padding: 0 16px; z-index: 1100;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.5); gap: 16px;
         }
         #titleBar .tb-home {
-            color: white; text-decoration: none;
-            font-size: 18px; line-height: 1; flex-shrink: 0;
-            opacity: 0.85; transition: opacity 0.15s;
+            color: white; text-decoration: none; font-size: 18px;
+            line-height: 1; flex-shrink: 0; opacity: 0.85; transition: opacity 0.15s;
         }
         #titleBar .tb-home:hover { opacity: 1; }
         #titleBar .tb-title {
@@ -165,10 +127,69 @@
             font-size: 13px; font-family: 'Courier New', monospace;
             opacity: 0.85; flex-shrink: 0;
         }
-        /* Shift map and controls down; hide old home button */
         #map          { height: calc(100vh - 44px); margin-top: 44px; }
         .controls     { top: 54px; }
         .home-btn     { display: none; }
+
+        /* ── MRMS radar player bar ───────────────────────────── */
+        #mrmsPlayerBar {
+            display: none; position: fixed;
+            bottom: 0; left: 0; right: 0; height: 90px;
+            background: #1a1a2e; color: white; z-index: 1100;
+            flex-direction: column; padding: 6px 16px 8px;
+            box-shadow: 0 -2px 10px rgba(0,0,0,0.5);
+        }
+        #mrmsPlayerBar.active { display: flex; }
+        body.radar-open #map { bottom: 90px; }
+
+        #mrmsTimeline {
+            position: relative; height: 22px; margin-bottom: 4px; cursor: pointer;
+        }
+        #mrmsTrack {
+            position: absolute; top: 50%; left: 0; right: 0;
+            transform: translateY(-50%); height: 4px;
+            background: #444; border-radius: 2px;
+        }
+        #mrmsFill { height: 100%; background: #4a9c6f; border-radius: 2px; width: 0%; }
+        .mrms-tick {
+            position: absolute; top: 50%; width: 2px; height: 8px;
+            background: #4a9c6f; border-radius: 1px; transform: translate(-50%,-50%);
+        }
+        #mrmsThumb {
+            position: absolute; top: 50%; width: 12px; height: 12px;
+            background: white; border-radius: 50%;
+            transform: translate(-50%,-50%);
+            box-shadow: 0 0 4px rgba(0,0,0,0.6); pointer-events: none;
+        }
+        #mrmsControls { display: flex; align-items: center; gap: 8px; }
+        .mpb {
+            background: none; border: none; color: white; font-size: 18px;
+            cursor: pointer; padding: 1px 5px; border-radius: 3px; line-height: 1;
+        }
+        .mpb:hover { background: rgba(255,255,255,0.15); }
+        .mpb:disabled { opacity: 0.35; cursor: not-allowed; }
+        #mrmsFrameDisplay { font-family: monospace; font-size: 12px; color: #ccc; min-width: 60px; }
+        #mrmsTimeDisplay  { font-family: monospace; font-size: 12px; color: #8bc4a8; flex: 1; }
+        .mspeed-label { font-size: 11px; color: #aaa; white-space: nowrap; }
+        .msel {
+            background: #2a2a3e; color: white; border: 1px solid #555;
+            border-radius: 4px; padding: 2px 5px; font-size: 11px; cursor: pointer;
+        }
+
+        /* Colorbar */
+        #mrmsColorbar {
+            display: none; position: fixed; bottom: 100px; left: 10px; z-index: 1000;
+        }
+        #mrmsColorbar .cb-panel {
+            background: rgba(255,255,255,0.93); border-radius: 6px;
+            padding: 5px 8px; box-shadow: 0 1px 6px rgba(0,0,0,0.3);
+            font-size: 10px; font-family: monospace;
+        }
+        #mrmsColorbar .cb-title { font-weight: 700; font-size: 11px; margin-bottom: 3px; }
+        #mrmsColorbar canvas { display: block; border: 1px solid #aaa; border-radius: 2px; margin-bottom: 2px; }
+        #mrmsColorbar .cb-labels {
+            display: flex; justify-content: space-between; width: 160px; font-size: 9px; color: #444;
+        }
     </style>
 </head>
 <body>
@@ -185,7 +206,7 @@
         <h3>Map Layer</h3>
         <select id="layerSelector" class="layer-selector">
             <option value="street">Street Map</option>
-            <option value="sectional">VFR Sectional (zoom >5 mi)</option>
+            <option value="sectional">VFR Sectional (zoom &gt;5 mi)</option>
             <option value="satellite">Satellite</option>
             <option value="dark">Dark Mode</option>
             <option value="topo">Topographic</option>
@@ -197,6 +218,16 @@
         <label class="checkbox-label"><input type="checkbox" id="showHubs" checked> Major Hubs</label>
         <label class="checkbox-label"><input type="checkbox" id="showRegional" checked> Regional Airfields</label>
         <label class="checkbox-label"><input type="checkbox" id="labelToggle" checked> Show labels</label>
+
+        <div class="divider"></div>
+        <div style="font-size:12px;font-weight:700;color:#555;text-transform:uppercase;
+                    letter-spacing:0.04em;margin-bottom:4px;">Airport Search</div>
+        <div id="aptSearch">
+            <input type="text" id="aptSearchInput" maxlength="4" placeholder="ICAO (e.g. KLSF)">
+            <button id="aptSearchBtn">Go</button>
+            <button id="aptClearBtn" title="Clear highlight">✕</button>
+        </div>
+        <div id="aptSearchMsg"></div>
 
         <div class="divider"></div>
         <h3>Weather Hazards</h3>
@@ -221,6 +252,18 @@
 
         <div class="divider"></div>
         <label class="checkbox-label"><input type="checkbox" id="showNoMetar" checked> No-METAR Airfields</label>
+
+        <div class="divider"></div>
+        <h3>Radar</h3>
+        <label class="checkbox-label">
+            <input type="checkbox" id="radarToggle"> MRMS Composite Refl
+        </label>
+        <div id="radarSubControls" style="display:none; margin-top:6px;">
+            <div style="font-size:11px;color:#555;margin-bottom:3px;">Opacity</div>
+            <input type="range" id="mrmsOpacity" min="20" max="100" value="70"
+                style="width:100%;accent-color:#2c5f41;">
+            <div style="font-size:10px;color:#888;margin-top:3px;" id="mrmsStatus"></div>
+        </div>
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -232,11 +275,9 @@
         var noMetarMarkers = [];
         var labelsVisible = true;
         var currentLayerName = 'street';
+        var highlightLayer = null;   // airport highlight ring
 
-        // ### ZOOM THRESHOLDS — edit here to change when labels appear by tier
-        // Tier 1 = Military (always), Tier 2 = Major hub, Tier 3 = Regional/all others
-        var TIER_MIN_ZOOM = { 1: 0, 2: 5, 3: 6 }; // Military always, hub z5+, regional z6+
-        // ###
+        var TIER_MIN_ZOOM = { 1: 0, 2: 5, 3: 6 };
 
         var airportTiers = {
             'KATL': 2, 'KORD': 2, 'KLAX': 2, 'KDFW': 2, 'KDEN': 2, 'KJFK': 2,
@@ -247,50 +288,28 @@
         };
 
         function initMap() {
-            map = L.map('map', {
-                center: [39.0, -98.0],
-                zoom: 5,
-                zoomControl: true
-            });
+            map = L.map('map', { center: [39.0, -98.0], zoom: 5, zoomControl: true });
 
-            // Define base layers - start with street map
             baseLayers = {
-                'street': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                    attribution: '&copy; OpenStreetMap contributors',
-                    maxZoom: 18
-                }),
-                'sectional': L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Specialty/World_Navigation_Charts/MapServer/tile/{z}/{y}/{x}', {
-                    attribution: 'VFR Sectional Charts &copy; FAA, Esri',
-                    maxZoom: 12,
-                    minZoom: 7
-                }),
-                'satellite': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-                    attribution: 'Tiles &copy; Esri',
-                    maxZoom: 18
-                }),
-                'dark': L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-                    attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
-                    subdomains: 'abcd',
-                    maxZoom: 18
-                }),
-                'topo': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', {
-                    attribution: 'Tiles &copy; Esri',
-                    maxZoom: 18
-                })
+                'street':    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                                 { attribution: '&copy; OpenStreetMap contributors', maxZoom: 18 }),
+                'sectional': L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Specialty/World_Navigation_Charts/MapServer/tile/{z}/{y}/{x}',
+                                 { attribution: 'VFR Sectional Charts &copy; FAA, Esri', maxZoom: 12, minZoom: 7 }),
+                'satellite': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                                 { attribution: 'Tiles &copy; Esri', maxZoom: 18 }),
+                'dark':      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+                                 { attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+                                   subdomains: 'abcd', maxZoom: 18 }),
+                'topo':      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
+                                 { attribution: 'Tiles &copy; Esri', maxZoom: 18 })
             };
 
-            // Start with street map
             baseLayers[currentLayerName].addTo(map);
 
-            // Add scale control
-            L.control.scale({
-                position: 'bottomleft',
-                imperial: true,
-                metric: false,
-                maxWidth: 150
-            }).addTo(map);
+            L.control.scale({ position: 'bottomleft', imperial: true, metric: false, maxWidth: 150 }).addTo(map);
 
-            labelsLayer = L.layerGroup().addTo(map);
+            // Use featureGroup so bringToFront() is available
+            labelsLayer = L.featureGroup().addTo(map);
 
             setupControls();
             loadWeatherData();
@@ -299,16 +318,12 @@
         }
 
         function setupControls() {
-            // Layer selector
             document.getElementById('layerSelector').addEventListener('change', function(e) {
-                const newLayer = e.target.value;
+                var newLayer = e.target.value;
                 try {
-                    Object.values(baseLayers).forEach(layer => {
-                        if (map.hasLayer(layer)) {
-                            map.removeLayer(layer);
-                        }
+                    Object.values(baseLayers).forEach(function(layer) {
+                        if (map.hasLayer(layer)) map.removeLayer(layer);
                     });
-                    
                     if (newLayer === 'sectional' && map.getZoom() < 7) {
                         alert('VFR Sectional charts are only available at zoom levels showing areas less than 10 miles across.');
                         baseLayers['street'].addTo(map);
@@ -326,7 +341,6 @@
                 }
             });
 
-            // Display options
             ['Military', 'Hubs', 'Regional'].forEach(function(type) {
                 document.getElementById('show' + type).addEventListener('change', filterMarkers);
             });
@@ -340,42 +354,108 @@
 
             document.getElementById('labelToggle').addEventListener('change', function(e) {
                 labelsVisible = e.target.checked;
-                // Always clear first — prevents stale labels replaying on re-enable.
-                // labelsLayer stays on the map permanently; updateLabels() controls content.
                 labelsLayer.clearLayers();
-                if (labelsVisible) { updateLabels(); }
+                if (labelsVisible) updateLabels();
             });
 
-            // TFR toggle
             document.getElementById('tfrToggle').addEventListener('change', function(e) {
-                if (e.target.checked) {
-                    loadTFRs();
-                } else {
-                    if (tfrLayer) {
-                        map.removeLayer(tfrLayer);
-                    }
-                }
+                if (e.target.checked) { loadTFRs(); }
+                else { if (tfrLayer) map.removeLayer(tfrLayer); }
             });
+
+            // ── Airport search / highlight ─────────────────────────────────
+            document.getElementById('aptSearchInput').addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') searchAirport();
+            });
+            document.getElementById('aptSearchBtn').addEventListener('click', searchAirport);
+            document.getElementById('aptClearBtn').addEventListener('click', clearHighlight);
+        }
+
+        // ── Airport highlight ──────────────────────────────────────────────
+        //
+        // Searches all loaded airport data (METAR + no-METAR) for the ICAO.
+        // Centers map, draws a pulsing highlight ring, opens tooltip.
+        // The ring is a separate layer so it persists regardless of label toggle.
+        //
+        function searchAirport() {
+            var raw = document.getElementById('aptSearchInput').value.trim().toUpperCase();
+            if (!raw) return;
+            var msg = document.getElementById('aptSearchMsg');
+
+            // Search METAR airports
+            var found = null;
+            for (var i = 0; i < currentMetars.length; i++) {
+                if (currentMetars[i].station_id === raw) { found = currentMetars[i]; break; }
+            }
+            // Fall back to no-METAR list
+            if (!found) {
+                for (var j = 0; j < noMetarAirports.length; j++) {
+                    if (noMetarAirports[j].station_id === raw) { found = noMetarAirports[j]; break; }
+                }
+            }
+
+            if (!found) {
+                msg.style.color = '#c00';
+                msg.textContent = raw + ' not found in loaded data';
+                return;
+            }
+
+            var lat = found.latitude || found.lat;
+            var lon = found.longitude || found.lon;
+            msg.style.color = '#2c5f41';
+            msg.textContent = (found.airport_name || found.name || raw);
+
+            // Remove previous highlight
+            clearHighlight();
+
+            // Draw highlight ring: outer glow + inner ring
+            highlightLayer = L.featureGroup();
+
+            L.circle([lat, lon], {
+                radius: 5000,            // 5km ring
+                color: '#ff9800',
+                weight: 3,
+                opacity: 0.9,
+                fillColor: '#ff9800',
+                fillOpacity: 0.08,
+                dashArray: '6 4'
+            }).addTo(highlightLayer);
+
+            // Center dot
+            L.circleMarker([lat, lon], {
+                radius: 8,
+                color: '#ff9800',
+                weight: 3,
+                fillColor: '#fff',
+                fillOpacity: 0.9
+            }).bindTooltip(raw + (found.airport_name ? ' — ' + found.airport_name : ''),
+                { permanent: true, direction: 'top', offset: [0, -12],
+                  className: 'apt-search-tip' })
+              .addTo(highlightLayer);
+
+            highlightLayer.addTo(map);
+
+            // Pan and zoom to show the airport
+            map.setView([lat, lon], Math.max(map.getZoom(), 8));
+        }
+
+        function clearHighlight() {
+            if (highlightLayer) { map.removeLayer(highlightLayer); highlightLayer = null; }
+            document.getElementById('aptSearchMsg').textContent = '';
         }
 
         function filterMarkers() {
             var showMilitary = document.getElementById('showMilitary').checked;
-            var showHubs = document.getElementById('showHubs').checked;
+            var showHubs     = document.getElementById('showHubs').checked;
             var showRegional = document.getElementById('showRegional').checked;
 
             metatMarkers.forEach(function(marker) {
                 var tier = marker.options.airportTier;
-                
                 var tierShow = (tier === 1 && showMilitary) ||
-                              (tier === 2 && showHubs) ||
-                              (tier === 3 && showRegional) ||
-                              (!tier && showRegional);
-
-                if (tierShow) {
-                    marker.addTo(map);
-                } else {
-                    map.removeLayer(marker);
-                }
+                               (tier === 2 && showHubs) ||
+                               (tier === 3 && showRegional) ||
+                               (!tier && showRegional);
+                if (tierShow) { marker.addTo(map); } else { map.removeLayer(marker); }
             });
             updateLabels();
         }
@@ -384,11 +464,10 @@
             labelsLayer.clearLayers();
             if (!labelsVisible) return;
 
-            var zoom = map.getZoom();
+            var zoom   = map.getZoom();
             var bounds = map.getBounds();
 
-            // Labels for no-METAR airports
-            if (document.getElementById('showNoMetar') && document.getElementById('showNoMetar').checked) {
+            if (document.getElementById('showNoMetar').checked) {
                 noMetarAirports.forEach(function(apt) {
                     if (!bounds.contains([apt.latitude, apt.longitude])) return;
                     var sid  = apt.station_id;
@@ -399,7 +478,7 @@
                                 iconSize: null, iconAnchor: [0, 22] }),
                             interactive: false, zIndexOffset: 1000
                         }).addTo(labelsLayer);
-                    } else if (zoom >= 6) { // ### no-METAR non-military label zoom threshold ###
+                    } else if (zoom >= 6) {
                         L.marker([apt.latitude, apt.longitude], {
                             icon: L.divIcon({ className: 'apt-t3', html: sid,
                                 iconSize: null, iconAnchor: [0, 22] }),
@@ -411,69 +490,50 @@
 
             currentMetars.forEach(function(metar) {
                 if (!bounds.contains([metar.latitude, metar.longitude])) return;
-
-                var sid = metar.station_id;
-                // Tier 1 = military, 2 = major hub, 3 = regional (default for all others)
-                var tier = airportTiers[sid]
-                        || (metar.is_military === true || metar.military === true ? 1 : 3);
-
+                var sid  = metar.station_id;
+                var tier = airportTiers[sid] ||
+                           (metar.is_military === true || metar.military === true ? 1 : 3);
                 if (zoom < TIER_MIN_ZOOM[tier]) return;
-
-                var label = L.marker([metar.latitude, metar.longitude], {
+                L.marker([metar.latitude, metar.longitude], {
                     icon: L.divIcon({
                         className: 'apt-t' + Math.min(tier, 3),
-                        html: sid,
-                        iconSize: null,
-                        iconAnchor: [0, 22]
+                        html: sid, iconSize: null, iconAnchor: [0, 22]
                     }),
                     interactive: false,
                     zIndexOffset: Math.max(0, (3 - tier)) * 100
-                });
-                label.addTo(labelsLayer);
+                }).addTo(labelsLayer);
             });
         }
 
         function addNoMetarMarker(airport) {
-            var lat = airport.latitude;
-            var lon = airport.longitude;
+            var lat = airport.latitude, lon = airport.longitude;
             if (!lat || !lon) return;
-
             var icon = L.divIcon({
                 className: '',
-                html: '<div style="width:12px;height:12px;background:white;'
-                    + 'border:2px solid #555;border-radius:50%;'
-                    + 'box-shadow:0 0 3px rgba(0,0,0,0.4);"></div>',
-                iconSize: [12, 12],
-                iconAnchor: [6, 6]
+                html: '<div style="width:12px;height:12px;background:white;' +
+                      'border:2px solid #555;border-radius:50%;' +
+                      'box-shadow:0 0 3px rgba(0,0,0,0.4);"></div>',
+                iconSize: [12, 12], iconAnchor: [6, 6]
             });
-
-            var tier = airport.is_military ? 1 : null;
-            var rnwy = airport.longest_runway_ft
+            var tier   = airport.is_military ? 1 : null;
+            var rnwy   = airport.longest_runway_ft
                 ? (Math.round(airport.longest_runway_ft / 100) * 100 + ' ft') : 'unknown';
-
             var marker = L.marker([lat, lon], { icon: icon, airportTier: tier });
-
-            marker.bindTooltip(
-                airport.station_id + ' — No METAR',
-                { permanent: false, direction: 'top', offset: [0, -8] }
-            );
-
+            marker.bindTooltip(airport.station_id + ' — No METAR',
+                { permanent: false, direction: 'top', offset: [0, -8] });
             marker.on('click', function() {
                 var badge = airport.is_military
-                    ? ' <span style="background:rgba(200,30,30,0.9);color:white;'
-                      + 'padding:1px 5px;border-radius:2px;font-size:10px;font-weight:700;">MIL</span>'
-                    : '';
-                var content =
-                    '<div style="font-family:monospace;min-width:260px;">'
-                    + '<h3>' + airport.station_id + badge + '</h3>'
-                    + '<p style="font-weight:bold;">' + (airport.airport_name || airport.station_id) + '</p>'
-                    + '<hr style="margin:0.4rem 0;">'
-                    + '<p style="color:#888;">No METAR in past 2 hours — weather data unavailable</p>'
-                    + '<p>Longest runway: ' + rnwy + '</p>'
-                    + '</div>';
-                L.popup().setLatLng([lat, lon]).setContent(content).openOn(map);
+                    ? ' <span style="background:rgba(200,30,30,0.9);color:white;' +
+                      'padding:1px 5px;border-radius:2px;font-size:10px;font-weight:700;">MIL</span>' : '';
+                L.popup().setLatLng([lat, lon]).setContent(
+                    '<div style="font-family:monospace;min-width:260px;">' +
+                    '<h3>' + airport.station_id + badge + '</h3>' +
+                    '<p style="font-weight:bold;">' + (airport.airport_name || airport.station_id) + '</p>' +
+                    '<hr style="margin:0.4rem 0;">' +
+                    '<p style="color:#888;">No METAR in past 2 hours</p>' +
+                    '<p>Longest runway: ' + rnwy + '</p></div>'
+                ).openOn(map);
             });
-
             marker.addTo(map);
             noMetarMarkers.push(marker);
         }
@@ -485,39 +545,29 @@
                 html: '<div style="width:12px;height:12px;background:' + color +
                       ';border:2px solid #000;border-radius:50%;' +
                       'box-shadow:0 0 4px rgba(0,0,0,0.5);"></div>',
-                iconSize: [12, 12],
-                iconAnchor: [6, 6]
+                iconSize: [12, 12], iconAnchor: [6, 6]
             });
-
-            var tier = airportTiers[metar.station_id] || (metar.is_military === true || metar.military === true ? 1 : null);
-            var marker = L.marker([metar.latitude, metar.longitude], { 
-                icon: icon,
-                flightCategory: metar.flight_category,
-                airportTier: tier
+            var tier   = airportTiers[metar.station_id] ||
+                         (metar.is_military === true || metar.military === true ? 1 : null);
+            var marker = L.marker([metar.latitude, metar.longitude], {
+                icon: icon, flightCategory: metar.flight_category, airportTier: tier
             });
-
-            marker.bindTooltip(metar.station_id + ' — ' + metar.flight_category, {
-                permanent: false,
-                direction: 'top',
-                offset: [0, -8]
-            });
-
+            marker.bindTooltip(metar.station_id + ' — ' + metar.flight_category,
+                { permanent: false, direction: 'top', offset: [0, -8] });
             marker.on('click', function() { showStationPopup(metar); });
             marker.addTo(map);
             metatMarkers.push(marker);
         }
 
         function getCategoryColor(cat) {
-            if (cat === 'VFR')  return '#28a745';  // Green
-            if (cat === 'MVFR') return '#ffc107';  // Yellow
-            if (cat === 'IFR')  return '#fd7e14';  // Orange
-            if (cat === 'LIFR') return '#dc3545';  // Red
+            if (cat === 'VFR')  return '#28a745';
+            if (cat === 'MVFR') return '#ffc107';
+            if (cat === 'IFR')  return '#fd7e14';
+            if (cat === 'LIFR') return '#dc3545';
             return '#808080';
         }
 
-        function celsiusToFahrenheit(c) {
-            return Math.round((c * 9/5) + 32);
-        }
+        function celsiusToFahrenheit(c) { return Math.round((c * 9/5) + 32); }
 
         function showStationPopup(metar) {
             fetch('/CAP_WxCOP/api/weather/station/' + metar.station_id)
@@ -527,108 +577,68 @@
                 })
                 .then(function(md) {
                     var obs = (md.metars && md.metars[0]) ? md.metars[0] : metar;
-                    // TAF and airport name are in the station detail response
                     var taf = md.taf || null;
                     var airportName = (md.station && md.station.airport_name)
                                    || metar.airport_name || metar.station_id;
-
-                var wind = (obs.wind_dir || '---') + '° @ ' + (obs.wind_speed_kts || 0) + ' kt';
-                if (obs.wind_gust_kts) wind += ' gusting ' + obs.wind_gust_kts + ' kt';
-
-                var tier = airportTiers[metar.station_id] || (metar.is_military === true || metar.military === true ? 1 : null);
-                var badge = '';
-                if (tier === 1) {
-                    badge = ' <span style="background:rgba(200,30,30,0.9);color:white;' +
-                            'padding:1px 5px;border-radius:2px;font-size:10px;font-weight:700;">MIL</span>';
-                } else if (tier === 2) {
-                    badge = ' <span style="background:rgba(25,80,200,0.9);color:white;' +
-                            'padding:1px 5px;border-radius:2px;font-size:10px;font-weight:700;">HUB</span>';
-                } else if (tier === 3) {
-                    badge = ' <span style="background:rgba(180,180,180,0.9);color:#111;' +
-                            'padding:1px 5px;border-radius:2px;font-size:10px;font-weight:600;">RGNL</span>';
-                }
-
-                var tempText = '';
-                if (obs.temp_c !== null && obs.temp_c !== undefined) {
-                    tempText = obs.temp_c + '°C (' + celsiusToFahrenheit(obs.temp_c) + '°F)';
-                } else {
-                    tempText = 'N/A';
-                }
-
-                var dewpointText = '';
-                if (obs.dewpoint_c !== null && obs.dewpoint_c !== undefined) {
-                    dewpointText = obs.dewpoint_c + '°C (' + celsiusToFahrenheit(obs.dewpoint_c) + '°F)';
-                } else {
-                    dewpointText = 'N/A';
-                }
-
-                var skyText = '';
-                if (obs.sky_conditions && obs.sky_conditions.length > 0) {
-                    skyText = obs.sky_conditions.map(function(s) {
-                        return s.cover + (s.height_ft ? ' ' + s.height_ft + 'ft' : '');
-                    }).join(', ');
-                } else {
-                    skyText = 'Clear';
-                }
-
-                var tafText = '';
-                if (taf && taf.raw_text) {
-                    tafText = '<hr><h4>TAF</h4>' +
-                             '<div style="background:#f5f5f5;padding:8px;border-radius:4px;font-size:12px;font-family:monospace;">' +
-                             taf.raw_text + '</div>';
-                }
-
-                var content = '<div style="font-family:monospace;min-width:300px;">' +
-                             '<h3>' + metar.station_id + badge + '</h3>' +
-                             '<p style="font-weight:bold;">' + airportName + '</p><hr>' +
-                             '<p><strong>Flight Category:</strong> <span style="color:' + getCategoryColor(obs.flight_category) + 
-                             ';font-weight:bold;">' + obs.flight_category + '</span></p>' +
-                             '<p><strong>Wind:</strong> ' + wind + '</p>' +
-                             '<p><strong>Visibility:</strong> ' + (obs.visibility_sm || '---') + ' SM</p>' +
-                             '<p><strong>Sky:</strong> ' + skyText + '</p>' +
-                             '<p><strong>Temperature:</strong> ' + tempText + '</p>' +
-                             '<p><strong>Dewpoint:</strong> ' + dewpointText + '</p>' +
-                             '<p><strong>Altimeter:</strong> ' + (obs.altimeter_hg || '---') + ' inHg</p>' +
-                             '<p style="margin-top:8px;font-size:10px;color:#666;">' + 
-                             '<strong>Observed:</strong> ' + new Date(obs.observation_time).toLocaleString() + '</p>' +
-                             tafText + '</div>';
-
-                L.popup()
-                    .setLatLng([metar.latitude, metar.longitude])
-                    .setContent(content)
-                    .openOn(map);
-                    
-                })
-                .catch(function(error) {
-                    console.error('Error loading station data for ' + metar.station_id + ':', error);
-                    // Fallback popup with basic info from the dot marker data
-                    var tier = airportTiers[metar.station_id] || (metar.is_military === true || metar.military === true ? 1 : null);
-                    var badge = tier === 1 ? ' (MIL)' : '';
-                    var content = '<div style="font-family:monospace;min-width:250px;">' +
-                                 '<h3>' + metar.station_id + badge + '</h3>' +
-                                 '<p style="font-weight:bold;">' + (metar.airport_name || 'Unknown Airport') + '</p><hr>' +
-                                 '<p><strong>Flight Category:</strong> <span style="color:' + getCategoryColor(metar.flight_category) +
-                                 ';font-weight:bold;">' + metar.flight_category + '</span></p>' +
-                                 '<p style="margin-top:8px;font-size:10px;color:#666;">Detail unavailable: ' + error.message + '</p>' +
-                                 '</div>';
+                    var wind = (obs.wind_dir || '---') + '° @ ' + (obs.wind_speed_kts || 0) + ' kt';
+                    if (obs.wind_gust_kts) wind += ' gusting ' + obs.wind_gust_kts + ' kt';
+                    var tier = airportTiers[metar.station_id] ||
+                               (metar.is_military === true || metar.military === true ? 1 : null);
+                    var badge = '';
+                    if (tier === 1) badge = ' <span style="background:rgba(200,30,30,0.9);color:white;padding:1px 5px;border-radius:2px;font-size:10px;font-weight:700;">MIL</span>';
+                    else if (tier === 2) badge = ' <span style="background:rgba(25,80,200,0.9);color:white;padding:1px 5px;border-radius:2px;font-size:10px;font-weight:700;">HUB</span>';
+                    else if (tier === 3) badge = ' <span style="background:rgba(180,180,180,0.9);color:#111;padding:1px 5px;border-radius:2px;font-size:10px;font-weight:600;">RGNL</span>';
+                    var tempText = (obs.temp_c !== null && obs.temp_c !== undefined)
+                        ? obs.temp_c + '°C (' + celsiusToFahrenheit(obs.temp_c) + '°F)' : 'N/A';
+                    var dewText  = (obs.dewpoint_c !== null && obs.dewpoint_c !== undefined)
+                        ? obs.dewpoint_c + '°C (' + celsiusToFahrenheit(obs.dewpoint_c) + '°F)' : 'N/A';
+                    var skyText  = (obs.sky_conditions && obs.sky_conditions.length > 0)
+                        ? obs.sky_conditions.map(function(s) {
+                              return s.cover + (s.height_ft ? ' ' + s.height_ft + 'ft' : '');
+                          }).join(', ')
+                        : 'Clear';
+                    var tafText  = (taf && taf.raw_text)
+                        ? '<hr><h4>TAF</h4><div style="background:#f5f5f5;padding:8px;border-radius:4px;font-size:12px;font-family:monospace;">' + taf.raw_text + '</div>'
+                        : '';
                     L.popup()
                         .setLatLng([metar.latitude, metar.longitude])
-                        .setContent(content)
-                        .openOn(map);
+                        .setContent(
+                            '<div style="font-family:monospace;min-width:300px;">' +
+                            '<h3>' + metar.station_id + badge + '</h3>' +
+                            '<p style="font-weight:bold;">' + airportName + '</p><hr>' +
+                            '<p><strong>Flight Category:</strong> <span style="color:' + getCategoryColor(obs.flight_category) + ';font-weight:bold;">' + obs.flight_category + '</span></p>' +
+                            '<p><strong>Wind:</strong> ' + wind + '</p>' +
+                            '<p><strong>Visibility:</strong> ' + (obs.visibility_sm || '---') + ' SM</p>' +
+                            '<p><strong>Sky:</strong> ' + skyText + '</p>' +
+                            '<p><strong>Temperature:</strong> ' + tempText + '</p>' +
+                            '<p><strong>Dewpoint:</strong> ' + dewText + '</p>' +
+                            '<p><strong>Altimeter:</strong> ' + (obs.altimeter_hg || '---') + ' inHg</p>' +
+                            '<p style="margin-top:8px;font-size:10px;color:#666;"><strong>Observed:</strong> ' +
+                            new Date(obs.observation_time).toLocaleString() + '</p>' + tafText + '</div>'
+                        ).openOn(map);
+                })
+                .catch(function(error) {
+                    var tier  = airportTiers[metar.station_id] ||
+                                (metar.is_military === true || metar.military === true ? 1 : null);
+                    var badge = tier === 1 ? ' (MIL)' : '';
+                    L.popup()
+                        .setLatLng([metar.latitude, metar.longitude])
+                        .setContent(
+                            '<div style="font-family:monospace;min-width:250px;">' +
+                            '<h3>' + metar.station_id + badge + '</h3>' +
+                            '<p style="font-weight:bold;">' + (metar.airport_name || 'Unknown Airport') + '</p><hr>' +
+                            '<p><strong>Flight Category:</strong> <span style="color:' + getCategoryColor(metar.flight_category) + ';font-weight:bold;">' + metar.flight_category + '</span></p>' +
+                            '<p style="margin-top:8px;font-size:10px;color:#666;">Detail unavailable: ' + error.message + '</p></div>'
+                        ).openOn(map);
                 });
         }
 
         async function loadTFRs() {
             try {
-                console.log('Loading TFRs...');
-                const response = await fetch('/CAP_WxCOP/api/tfr/active');
-                console.log('TFR response status:', response.status);
+                var response = await fetch('/CAP_WxCOP/api/tfr/active');
                 if (response.ok) {
-                    const data = await response.json();
-                    console.log('TFR data:', data);
+                    var data = await response.json();
                     displayTFRs(data.tfrs || data);
-                } else {
-                    console.log('TFR data not available, status:', response.status);
                 }
             } catch (error) {
                 console.log('Error loading TFRs:', error);
@@ -638,94 +648,56 @@
         function displayTFRs(tfrs) {
             if (tfrLayer) map.removeLayer(tfrLayer);
             tfrLayer = L.layerGroup();
-            
             if (tfrs && tfrs.length > 0) {
-                tfrs.forEach(tfr => {
+                tfrs.forEach(function(tfr) {
                     if (tfr.geometry || tfr.geojson) {
-                        const geometry = tfr.geometry || tfr.geojson;
-                        const tfrArea = L.geoJSON(geometry, {
+                        L.geoJSON(tfr.geometry || tfr.geojson, {
                             style: { color: '#ff0000', weight: 2, opacity: 0.8, fillOpacity: 0.3 }
-                        }).bindPopup(`
-                            <div style="font-family: monospace;">
-                                <h3>TFR</h3>
-                                <p><strong>Type:</strong> ${tfr.type || tfr.category || 'Temporary Flight Restriction'}</p>
-                                <p><strong>Valid:</strong> ${tfr.valid_from || tfr.start_time} - ${tfr.valid_to || tfr.end_time}</p>
-                                ${tfr.text || tfr.description ? `<p><strong>Details:</strong> ${tfr.text || tfr.description}</p>` : ''}
-                            </div>
-                        `);
-                        tfrLayer.addLayer(tfrArea);
+                        }).bindPopup(
+                            '<div style="font-family:monospace;"><h3>TFR</h3>' +
+                            '<p><strong>Type:</strong> ' + (tfr.type || tfr.category || 'Temporary Flight Restriction') + '</p>' +
+                            '<p><strong>Valid:</strong> ' + (tfr.valid_from || tfr.start_time) + ' - ' + (tfr.valid_to || tfr.end_time) + '</p>' +
+                            (tfr.text || tfr.description ? '<p><strong>Details:</strong> ' + (tfr.text || tfr.description) + '</p>' : '') +
+                            '</div>'
+                        ).addTo(tfrLayer);
                     }
                 });
-                console.log(`Added ${tfrs.length} TFR areas`);
                 tfrLayer.addTo(map);
-            } else {
-                console.log('No TFR areas to display');
             }
         }
 
         function loadNoMetarAirports() {
-            var b = map.getBounds();
-            var bounds = [
-                b.getWest().toFixed(4), b.getSouth().toFixed(4),
-                b.getEast().toFixed(4), b.getNorth().toFixed(4)
-            ].join(',');
+            var b      = map.getBounds();
+            var bounds = [b.getWest().toFixed(4), b.getSouth().toFixed(4),
+                          b.getEast().toFixed(4), b.getNorth().toFixed(4)].join(',');
             fetch('/CAP_WxCOP/api/weather/no-metar-airports?bounds=' + bounds + '&limit=5000')
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
-                    // Remove old markers
-                    noMetarMarkers.forEach(function(m) {
-                        if (m._map) map.removeLayer(m);
-                    });
-                    noMetarMarkers = [];
-                    noMetarAirports = [];
-
+                    noMetarMarkers.forEach(function(m) { if (m._map) map.removeLayer(m); });
+                    noMetarMarkers = []; noMetarAirports = [];
                     if (data.airports && data.airports.length > 0) {
-                        // Deduplicate against stations that already have METAR markers
                         var metatIds = new Set(currentMetars.map(function(m) { return m.station_id; }));
-                        var fresh = data.airports.filter(function(a) {
-                            return !metatIds.has(a.station_id);
-                        });
+                        var fresh    = data.airports.filter(function(a) { return !metatIds.has(a.station_id); });
                         noMetarAirports = fresh;
                         if (document.getElementById('showNoMetar').checked) {
                             fresh.forEach(addNoMetarMarker);
                         }
                         updateLabels();
-                        console.log('Loaded ' + fresh.length + ' no-METAR airports');
                     }
                 })
-                .catch(function(err) {
-                    console.warn('No-METAR airports load failed:', err);
-                });
+                .catch(function(err) { console.warn('No-METAR airports load failed:', err); });
         }
 
         function loadWeatherData() {
-            console.log('Loading weather data...');
             fetch('/CAP_WxCOP/api/weather/metar/recent?bounds=-125,24,-66,50&limit=2500')
-                .then(function(response) { 
-                    console.log('Weather API response status:', response.status);
-                    return response.json(); 
-                })
+                .then(function(response) { return response.json(); })
                 .then(function(data) {
                     document.getElementById('loading').style.display = 'none';
-                    console.log('Weather data loaded:', data);
-                    
                     if (data.metars && data.metars.length > 0) {
                         currentMetars = data.metars;
                         data.metars.forEach(addMarker);
                         updateLabels();
-                        console.log(`Loaded ${data.metars.length} METAR stations`);
                         loadNoMetarAirports();
-                        
-                        // Log sample of military flags
-                        const militaryCount = data.metars.filter(m => m.is_military === true || m.military === true).length;
-                        console.log(`Found ${militaryCount} military weather stations out of ${data.metars.length} total`);
-                        
-                        // Show sample military stations
-                        data.metars.filter(m => m.is_military === true || m.military === true).slice(0, 5).forEach(m => {
-                            console.log(`Military weather station: ${m.station_id}, is_military=${m.is_military}, military=${m.military}`);
-                        });
-                    } else {
-                        console.log('No METAR data available');
                     }
                 })
                 .catch(function(error) {
@@ -734,10 +706,8 @@
                 });
         }
 
-        // Initialize
         document.addEventListener('DOMContentLoaded', initMap);
 
-        // UTC clock
         (function utcClock() {
             function pad(n) { return String(n).padStart(2,'0'); }
             function tick() {
@@ -750,7 +720,309 @@
             }
             tick(); setInterval(tick, 1000);
         })();
+
+        // ── MRMS radar overlay ─────────────────────────────────────────────
+        (function() {
+            var CMAP_STOPS = [
+                [-30,[0,0,0,0]],[5,[4,233,231,200]],[10,[1,159,244,220]],
+                [15,[3,0,244,220]],[20,[3,0,244,220]],[25,[2,253,2,220]],
+                [30,[0,200,0,220]],[35,[0,144,0,220]],[40,[255,255,0,220]],
+                [45,[231,192,0,220]],[50,[255,144,0,220]],[55,[255,0,0,220]],
+                [60,[214,0,0,220]],[65,[192,0,0,220]],[70,[255,0,255,230]],
+                [75,[192,0,192,230]],[80,[255,255,255,240]]
+            ];
+            var VMIN=-30, VMAX=80;
+
+            function interpColor(t) {
+                var v=VMIN+t*(VMAX-VMIN), s=CMAP_STOPS;
+                if (v<=s[0][0]) return s[0][1];
+                if (v>=s[s.length-1][0]) return s[s.length-1][1];
+                for (var i=0;i<s.length-1;i++) {
+                    if (v>=s[i][0]&&v<=s[i+1][0]) {
+                        var f=(s[i+1][0]>s[i][0])?(v-s[i][0])/(s[i+1][0]-s[i][0]):0;
+                        var c0=s[i][1],c1=s[i+1][1];
+                        return [c0[0]+f*(c1[0]-c0[0]),c0[1]+f*(c1[1]-c0[1]),
+                                c0[2]+f*(c1[2]-c0[2]),c0[3]+f*(c1[3]-c0[3])];
+                    }
+                }
+                return [0,0,0,0];
+            }
+
+            function drawColorbar() {
+                var canvas=document.getElementById('mrmsCbCanvas');
+                if (!canvas) return;
+                var ctx=canvas.getContext('2d');
+                for (var x=0;x<160;x++) {
+                    var c=interpColor(x/160);
+                    ctx.fillStyle='rgba('+Math.round(c[0])+','+Math.round(c[1])+','+
+                        Math.round(c[2])+','+(c[3]/255).toFixed(2)+')';
+                    ctx.fillRect(x,0,1,canvas.height);
+                }
+                var labels=document.getElementById('mrmsCbLabels');
+                if (labels) labels.innerHTML=['-30','0','20','40','60','80']
+                    .map(function(l){return '<span>'+l+'</span>';}).join('');
+            }
+
+            var mrmsFrames=[], mrmsIdx=-1, mrmsPlaying=false, mrmsRockDir=1;
+            var mrmsTimer=null, mrmsPollTimer=null;
+            var mrmsLayer=null, mrmsLayers={};
+            var mrmsIndexData=null;
+
+            function fetchMrmsIndex() {
+                fetch('/CAP_WxCOP/static/mrms_tiles/composite/CONUS/index.json?_='+Date.now())
+                    .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+                    .then(function(data) {
+                        mrmsIndexData = data;
+                        var n=(data.frames||[]).length;
+                        document.getElementById('mrmsStatus').textContent =
+                            n ? n+' frames available' : 'Waiting for data (renders every 2 min)';
+                        if (n) rebuildMrmsFrames();
+                    })
+                    .catch(function(e){
+                        document.getElementById('mrmsStatus').textContent =
+                            'Radar unavailable — check LDM pipeline ('+e.message+')';
+                    });
+            }
+
+            function rebuildMrmsFrames() {
+                if (!mrmsIndexData) return;
+                var mins=parseInt(document.getElementById('mrmsRange').value,10);
+                var cutoff=new Date(Date.now()-mins*60000).toISOString();
+                mrmsFrames=mrmsIndexData.frames.filter(function(f){
+                    return f.valid_time>=cutoff;
+                }).sort(function(a,b){return a.timestamp<b.timestamp?-1:1;});
+                buildMrmsTimeline();
+                mrmsGoTo(mrmsFrames.length-1);
+            }
+
+            function buildMrmsTimeline() {
+                var track=document.getElementById('mrmsTrack');
+                Array.from(track.querySelectorAll('.mrms-tick')).forEach(function(t){t.remove();});
+                if (!mrmsFrames.length) return;
+                mrmsFrames.forEach(function(f,i){
+                    var tk=document.createElement('div');
+                    tk.className='mrms-tick';
+                    tk.style.left=(i/Math.max(mrmsFrames.length-1,1)*100)+'%';
+                    track.appendChild(tk);
+                });
+            }
+
+            // ── Crossfade frame swap with pre-loading ──────────────────────
+            function ensureMrmsLayer(f) {
+                if (!mrmsLayers[f.tile_url]) {
+                    mrmsLayers[f.tile_url] = L.tileLayer(f.tile_url, {
+                        opacity: 0,
+                        maxZoom: mrmsIndexData.zoom_max,
+                        minZoom: mrmsIndexData.zoom_min,
+                        zIndex: 400,
+                        errorTileUrl: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
+                    });
+                }
+                return mrmsLayers[f.tile_url];
+            }
+
+            function mrmsPreloadAdjacent(idx) {
+                [-1, 1, 2].forEach(function(offset) {
+                    var ni = idx + offset;
+                    if (ni < 0 || ni >= mrmsFrames.length) return;
+                    var layer = ensureMrmsLayer(mrmsFrames[ni]);
+                    if (!map.hasLayer(layer)) {
+                        layer.setOpacity(0);
+                        layer.addTo(map);
+                        if (mrmsLayer) mrmsLayer.bringToFront();
+                    }
+                });
+            }
+
+            function mrmsGoTo(idx) {
+                if (!mrmsFrames.length) return;
+                idx=Math.max(0,Math.min(mrmsFrames.length-1,idx));
+                mrmsIdx=idx;
+                var f         = mrmsFrames[idx];
+                var opacity   = document.getElementById('mrmsOpacity').value/100;
+                var prevLayer = mrmsLayer;
+                var nextLayer = ensureMrmsLayer(f);
+
+                nextLayer.setOpacity(opacity);
+                if (!map.hasLayer(nextLayer)) nextLayer.addTo(map);
+
+                function onLoad() {
+                    nextLayer.off('load', onLoad);
+                    if (prevLayer && prevLayer !== nextLayer && map.hasLayer(prevLayer)) {
+                        map.removeLayer(prevLayer);
+                    }
+                }
+                nextLayer.on('load', onLoad);
+                setTimeout(function() {
+                    nextLayer.off('load', onLoad);
+                    if (prevLayer && prevLayer !== nextLayer && map.hasLayer(prevLayer)) {
+                        map.removeLayer(prevLayer);
+                    }
+                }, 600);
+
+                mrmsLayer = nextLayer;
+                if (typeof labelsLayer !== 'undefined') labelsLayer.bringToFront();
+
+                mrmsPreloadAdjacent(idx);
+                updateMrmsPlayer();
+            }
+
+            function updateMrmsPlayer() {
+                var pct=mrmsFrames.length>1?(mrmsIdx/(mrmsFrames.length-1)*100):0;
+                document.getElementById('mrmsFill').style.width=pct+'%';
+                document.getElementById('mrmsThumb').style.left=pct+'%';
+                document.getElementById('mrmsFrameDisplay').textContent=
+                    mrmsFrames.length?(mrmsIdx+1)+'/'+mrmsFrames.length:'—/—';
+                document.getElementById('mrmsTimeDisplay').textContent=
+                    mrmsFrames.length?fmtMrmsTime(mrmsFrames[mrmsIdx].valid_time):'No data';
+                document.getElementById('mBtnFirst').disabled=mrmsIdx===0;
+                document.getElementById('mBtnPrev').disabled=mrmsIdx===0;
+                document.getElementById('mBtnNext').disabled=mrmsIdx===mrmsFrames.length-1;
+                document.getElementById('mBtnLast').disabled=mrmsIdx===mrmsFrames.length-1;
+            }
+
+            function fmtMrmsTime(iso) {
+                if (!iso) return '?';
+                try {
+                    var d=new Date(iso);
+                    return String(d.getUTCDate()).padStart(2,'0')+
+                           String(d.getUTCHours()).padStart(2,'0')+
+                           String(d.getUTCMinutes()).padStart(2,'0')+'Z';
+                } catch(e){return iso;}
+            }
+
+            function mrmsTogglePlay() { if(mrmsPlaying) mrmsStop(); else mrmsStart(); }
+            function mrmsStart() {
+                if(!mrmsFrames.length) return;
+                mrmsPlaying=true; mrmsRockDir=1;
+                document.getElementById('mBtnPlay').textContent='⏸';
+                mrmsSchedule();
+            }
+            function mrmsStop() {
+                mrmsPlaying=false;
+                document.getElementById('mBtnPlay').textContent='▶';
+                if(mrmsTimer){clearTimeout(mrmsTimer);mrmsTimer=null;}
+            }
+            function mrmsSchedule() {
+                if(!mrmsPlaying) return;
+                var ms=parseInt(document.getElementById('mrmsSpeed').value,10);
+                var edge=(mrmsRockDir>0&&mrmsIdx===mrmsFrames.length-1)||
+                         (mrmsRockDir<0&&mrmsIdx===0);
+                mrmsTimer=setTimeout(mrmsAdvance, edge?ms*2:ms);
+            }
+            function mrmsAdvance() {
+                if(!mrmsPlaying||!mrmsFrames.length) return;
+                var mode=document.getElementById('mrmsLoop').value;
+                if(mode==='rock'){
+                    var next=mrmsIdx+mrmsRockDir;
+                    if(next>=mrmsFrames.length){mrmsRockDir=-1;next=mrmsFrames.length-2;}
+                    else if(next<0){mrmsRockDir=1;next=1;}
+                    mrmsGoTo(Math.max(0,Math.min(mrmsFrames.length-1,next)));
+                } else {
+                    mrmsGoTo((mrmsIdx+1)%mrmsFrames.length);
+                }
+                mrmsSchedule();
+            }
+
+            function mrmsScrub(e) {
+                var tl=document.getElementById('mrmsTimeline');
+                var rect=tl.getBoundingClientRect();
+                var pct=Math.max(0,Math.min(1,(e.clientX-rect.left)/rect.width));
+                mrmsGoTo(Math.round(pct*(mrmsFrames.length-1)));
+            }
+
+            document.addEventListener('DOMContentLoaded', function() {
+                drawColorbar();
+
+                document.getElementById('radarToggle').addEventListener('change', function(e) {
+                    var sub=document.getElementById('radarSubControls');
+                    var bar=document.getElementById('mrmsPlayerBar');
+                    var cb=document.getElementById('mrmsColorbar');
+                    if(e.target.checked){
+                        sub.style.display='block';
+                        bar.classList.add('active');
+                        document.body.classList.add('radar-open');
+                        cb.style.display='block';
+                        fetchMrmsIndex();
+                        mrmsPollTimer=setInterval(fetchMrmsIndex,30000);
+                    } else {
+                        sub.style.display='none';
+                        bar.classList.remove('active');
+                        document.body.classList.remove('radar-open');
+                        cb.style.display='none';
+                        if(mrmsLayer&&map.hasLayer(mrmsLayer)) map.removeLayer(mrmsLayer);
+                        mrmsStop();
+                        if(mrmsPollTimer){clearInterval(mrmsPollTimer);mrmsPollTimer=null;}
+                    }
+                });
+
+                document.getElementById('mrmsOpacity').addEventListener('input', function(){
+                    if(mrmsLayer) mrmsLayer.setOpacity(this.value/100);
+                });
+
+                document.getElementById('mBtnPlay').addEventListener('click',mrmsTogglePlay);
+                document.getElementById('mBtnFirst').addEventListener('click',function(){mrmsGoTo(0);});
+                document.getElementById('mBtnLast').addEventListener('click',function(){mrmsGoTo(mrmsFrames.length-1);});
+                document.getElementById('mBtnPrev').addEventListener('click',function(){mrmsStop();mrmsGoTo(Math.max(0,mrmsIdx-1));});
+                document.getElementById('mBtnNext').addEventListener('click',function(){mrmsStop();mrmsGoTo(Math.min(mrmsFrames.length-1,mrmsIdx+1));});
+                document.getElementById('mrmsRange').addEventListener('change',rebuildMrmsFrames);
+                document.getElementById('mrmsSpeed').addEventListener('change',function(){if(mrmsPlaying){mrmsStop();mrmsStart();}});
+
+                var mTl=document.getElementById('mrmsTimeline'),mDrag=false;
+                mTl.addEventListener('mousedown',function(e){mDrag=true;mrmsStop();mrmsScrub(e);});
+                document.addEventListener('mousemove',function(e){if(mDrag)mrmsScrub(e);});
+                document.addEventListener('mouseup',function(){mDrag=false;});
+                mTl.addEventListener('touchstart',function(e){mDrag=true;mrmsStop();mrmsScrub(e.touches[0]);},{passive:true});
+                document.addEventListener('touchmove',function(e){if(mDrag)mrmsScrub(e.touches[0]);},{passive:true});
+                document.addEventListener('touchend',function(){mDrag=false;});
+            });
+        })();
     </script>
+
+    <!-- MRMS colorbar -->
+    <div id="mrmsColorbar">
+        <div class="cb-panel">
+            <div class="cb-title">Composite Reflectivity (dBZ)</div>
+            <canvas id="mrmsCbCanvas" width="160" height="12"></canvas>
+            <div class="cb-labels" id="mrmsCbLabels"></div>
+        </div>
+    </div>
+
+    <!-- MRMS player bar -->
+    <div id="mrmsPlayerBar">
+        <div id="mrmsTimeline">
+            <div id="mrmsTrack"><div id="mrmsFill"></div></div>
+            <div id="mrmsThumb"></div>
+        </div>
+        <div id="mrmsControls">
+            <button class="mpb" id="mBtnFirst" title="First">&#9198;</button>
+            <button class="mpb" id="mBtnPrev"  title="Prev">&#9664;</button>
+            <button class="mpb" id="mBtnPlay"  title="Play">&#9654;</button>
+            <button class="mpb" id="mBtnNext"  title="Next">&#9654;&#x7C;</button>
+            <button class="mpb" id="mBtnLast"  title="Latest">&#9197;</button>
+            <div id="mrmsFrameDisplay">— / —</div>
+            <div id="mrmsTimeDisplay">No data</div>
+            <span class="mspeed-label">Speed:</span>
+            <select class="msel" id="mrmsSpeed">
+                <option value="800">Slow</option>
+                <option value="500" selected>Normal</option>
+                <option value="250">Fast</option>
+                <option value="100">Fastest</option>
+            </select>
+            <span class="mspeed-label">Range:</span>
+            <select class="msel" id="mrmsRange">
+                <option value="30">30 min</option>
+                <option value="60" selected>1 hr</option>
+                <option value="120">2 hr</option>
+            </select>
+            <span class="mspeed-label">Loop:</span>
+            <select class="msel" id="mrmsLoop">
+                <option value="loop">Loop</option>
+                <option value="rock">Rock</option>
+            </select>
+        </div>
+    </div>
+
 </body>
 </html>
 
