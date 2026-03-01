@@ -76,7 +76,7 @@ def sync_all_active_stations_to_airports(cur):
     except Exception as e:
         print(f"Warning: Failed to sync all stations: {e}")
 
-@kq_admin.route('/')
+@kq_admin.route('/', strict_slashes=False)
 def list_stations():
     """List all KQ stations"""
     try:
@@ -344,4 +344,5 @@ def sync_all_stations():
         flash(f'Error syncing stations: {e}', 'error')
     
     return redirect(url_for('kq_admin.list_stations'))
+
 

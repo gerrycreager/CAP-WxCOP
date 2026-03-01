@@ -310,26 +310,35 @@
                 var sid  = metar.station_id;
                 var tier = airportTiers[sid];
 
-                // Tier 4 and unknown: no label, tooltip only
-                if (!tier || tier > 3) return;
+                // Military (Tier 1) always visible at ALL zoom levels
+                if (tier === 1) {
+                    var label = L.marker([metar.latitude, metar.longitude], {
+                        icon: L.divIcon({
+                            className: 'apt-t1',
+                            html: sid,
+                            iconSize: null,
+                            iconAnchor: [0, 22]
+                        }),
+                        interactive: false,
+                        zIndexOffset: 1000 // Always on top
+                    });
+                    label.addTo(labelsLayer);
+                    return; // Skip other tier checks for military
+                }
 
-                // Enforce minimum zoom per tier
-                if (zoom < TIER_MIN_ZOOM[tier]) return;
+                // Other tiers follow zoom restrictions
+                if (!tier || tier > 3) return; // Tier 4 and unknown: no label
+                if (zoom < TIER_MIN_ZOOM[tier]) return; // Enforce minimum zoom
 
                 var label = L.marker([metar.latitude, metar.longitude], {
                     icon: L.divIcon({
                         className: 'apt-t' + tier,
                         html: sid,
                         iconSize: null,
-                        // iconAnchor [0, 22]: the anchor point is horizontally
-                        // centered (CSS handles this via translateX(-50%)) and
-                        // 22px below the top of the label, placing the label
-                        // above the dot.
                         iconAnchor: [0, 22]
                     }),
                     interactive: false,
-                    // Military always rendered on top
-                    zIndexOffset: tier === 1 ? 1000 : (3 - tier) * 100
+                    zIndexOffset: (3 - tier) * 100
                 });
                 label.addTo(labelsLayer);
             });
@@ -490,3 +499,4 @@
     </script>
 </body>
 </html>
+
