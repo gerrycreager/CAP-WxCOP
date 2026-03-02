@@ -658,7 +658,14 @@
                             '<p><strong>Dewpoint:</strong> ' + dewText + '</p>' +
                             '<p><strong>Altimeter:</strong> ' + (obs.altimeter_hg || '---') + ' inHg</p>' +
                             '<p style="margin-top:8px;font-size:10px;color:#666;"><strong>Observed:</strong> ' +
-                            new Date(obs.observation_time).toLocaleString() + '</p>' + tafText + '</div>'
+                            (function(d){
+                                var dt = new Date(d);
+                                var dd = String(dt.getUTCDate()).padStart(2,'0');
+                                var mo = dt.toLocaleString('en-US',{month:'short',timeZone:'UTC'});
+                                var hh = String(dt.getUTCHours()).padStart(2,'0');
+                                var mm = String(dt.getUTCMinutes()).padStart(2,'0');
+                                return dd+' '+mo+' '+hh+mm+'Z';
+                            })(obs.observation_time) + '</p>' + tafText + '</div>'
                         ).openOn(map);
                 })
                 .catch(function(error) {
