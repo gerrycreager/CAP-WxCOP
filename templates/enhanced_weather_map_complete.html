@@ -232,6 +232,8 @@
         <div class="divider"></div>
         <h3>Weather Hazards</h3>
         <label class="checkbox-label"><input type="checkbox" id="tfrToggle"> TFRs</label>
+        <label class="checkbox-label"><input type="checkbox" id="airmetToggle"> AIRMETs/SIGMETs</label>
+        <label class="checkbox-label"><input type="checkbox" id="fzlvlToggle"> FZLVL Contours</label>
 
         <div class="divider"></div>
         <h3>Flight Categories</h3>
@@ -269,6 +271,8 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
         var map, labelsLayer, baseLayers = {}, tfrLayer;
+        var airmetLayer = null;
+        var fzlvlLines = [], fzlvlLabels = [];
         var currentMetars = [];
         var metatMarkers = [];
         var noMetarAirports = [];
@@ -385,6 +389,20 @@
             document.getElementById('tfrToggle').addEventListener('change', function(e) {
                 if (e.target.checked) { loadTFRs(); }
                 else { if (tfrLayer) map.removeLayer(tfrLayer); }
+            });
+
+            document.getElementById('airmetToggle').addEventListener('change', function(e) {
+                if (e.target.checked) { loadAirmets(); }
+                else { if (airmetLayer) map.removeLayer(airmetLayer); }
+            });
+
+            document.getElementById('fzlvlToggle').addEventListener('change', function(e) {
+                if (e.target.checked) { loadFzlvl(); }
+                else {
+                    fzlvlLines.forEach(function(l) { if (l._map) map.removeLayer(l); });
+                    fzlvlLabels.forEach(function(l) { if (l._map) map.removeLayer(l); });
+                    fzlvlLines = []; fzlvlLabels = [];
+                }
             });
 
             // ── Airport search / highlight ─────────────────────────────────
@@ -693,6 +711,119 @@
                 }
             } catch (error) {
                 console.log('Error loading TFRs:', error);
+            }
+        }
+
+        async function loadAirmets() {
+            try {
+                var response = await fetch('/CAP_WxCOP/api/airmet-sigmet/weather-hazards');
+                if (!response.ok) return;
+                var geojson = await response.json();
+                if (airmetLayer) map.removeLayer(airmetLayer);
+                airmetLayer = L.layerGroup();
+
+                // Phenomenon colors — consistent with fetcher COLORS dict
+                var phenomColors = {
+                    'TURB': '#FFA500', 'ICE': '#87CEEB', 'IFR': '#808080',
+                    'CONVECTIVE': '#FF0000', 'MTN_OBSC': '#696969',
+                    'NONCONVECTIVE': '#FF4500', 'SFC_WND': '#FFD700'
+                };
+
+                (geojson.features || []).forEach(function(f) {
+                    if (!f.geometry || f.geometry.type !== 'Polygon') return;
+                    var p = f.properties;
+                    var color = phenomColors[p.phenomenon] || '#808080';
+                    var layer = L.geoJSON(f, {
+                        style: {
+                            color: color, weight: 2, opacity: 0.85,
+                            fillColor: color, fillOpacity: 0.15
+                        }
+                    });
+
+                    // Popup with flight level prominently displayed
+                    var validFrom = p.valid_from ? new Date(p.valid_from) : null;
+                    var validUntil = p.valid_until ? new Date(p.valid_until) : null;
+                    function fmtZ(d) {
+                        if (!d) return '?';
+                        return String(d.getUTCDate()).padStart(2,'0') + ' ' +
+                               d.toLocaleString('en-US',{month:'short',timeZone:'UTC'}) + ' ' +
+                               String(d.getUTCHours()).padStart(2,'0') +
+                               String(d.getUTCMinutes()).padStart(2,'0') + 'Z';
+                    }
+                    var flStr = (p.flight_levels && p.flight_levels !== 'Not specified')
+                        ? '<p style="font-size:1.1em;font-weight:bold;color:#333;">Altitudes: ' + p.flight_levels + '</p>'
+                        : '';
+                    layer.bindPopup(
+                        '<div style="font-family:monospace;min-width:220px;">' +
+                        '<h3>' + (p.type || 'AIRMET') + ' — ' + (p.phenomenon || '') + '</h3>' +
+                        (p.due_to ? '<p>' + p.due_to + '</p>' : '') +
+                        flStr +
+                        '<p style="font-size:11px;color:#666;">Valid: ' + fmtZ(validFrom) + ' – ' + fmtZ(validUntil) + '</p>' +
+                        '<p style="font-size:10px;color:#999;">' + (p.source || '') + '</p>' +
+                        '</div>'
+                    );
+                    layer.addTo(airmetLayer);
+                });
+
+                airmetLayer.addTo(map);
+            } catch (err) {
+                console.warn('Error loading AIRMETs:', err);
+            }
+        }
+
+        async function loadFzlvl() {
+            // FZLVL contours served from dedicated endpoint as LineString GeoJSON
+            try {
+                var response = await fetch('/CAP_WxCOP/api/airmet-sigmet/fzlvl');
+                if (!response.ok) return;
+                var geojson = await response.json();
+
+                // Clear existing
+                fzlvlLines.forEach(function(l) { if (l._map) map.removeLayer(l); });
+                fzlvlLabels.forEach(function(l) { if (l._map) map.removeLayer(l); });
+                fzlvlLines = []; fzlvlLabels = [];
+
+                var FZLVL_COLOR = '#2255AA';  // steel blue, distinct from icing light blue
+
+                (geojson.features || []).forEach(function(f) {
+                    if (!f.geometry) return;
+                    var p = f.properties;
+                    if (p.type !== 'FZLVL_CONTOUR') return;
+
+                    var coords = f.geometry.coordinates;  // [[lon,lat], ...]
+                    if (!coords || coords.length < 2) return;
+
+                    // Leaflet uses [lat,lon]
+                    var latLngs = coords.map(function(c) { return [c[1], c[0]]; });
+
+                    // Draw the line
+                    var line = L.polyline(latLngs, {
+                        color: FZLVL_COLOR, weight: 2, opacity: 0.8,
+                        dashArray: '6 4'   // dashed to distinguish from solid hazard borders
+                    });
+                    line.bindTooltip(p.label || p.flight_levels || 'FZLVL',
+                        { permanent: false, direction: 'top' });
+                    line.addTo(map);
+                    fzlvlLines.push(line);
+
+                    // Label at midpoint — no background, just text
+                    var mid = latLngs[Math.floor(latLngs.length / 2)];
+                    var label = L.marker(mid, {
+                        icon: L.divIcon({
+                            className: '',
+                            html: '<div style="color:' + FZLVL_COLOR + ';font-size:11px;' +
+                                  'font-family:monospace;font-weight:600;white-space:nowrap;' +
+                                  'text-shadow:1px 1px 2px rgba(255,255,255,0.9),-1px -1px 2px rgba(255,255,255,0.9);">' +
+                                  (p.label || p.flight_levels || 'FZLVL') + '</div>',
+                            iconSize: null, iconAnchor: [0, 0]
+                        }),
+                        interactive: false
+                    });
+                    label.addTo(map);
+                    fzlvlLabels.push(label);
+                });
+            } catch (err) {
+                console.warn('Error loading FZLVL contours:', err);
             }
         }
 
