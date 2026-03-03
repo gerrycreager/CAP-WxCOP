@@ -190,6 +190,46 @@
         #mrmsColorbar .cb-labels {
             display: flex; justify-content: space-between; width: 160px; font-size: 9px; color: #444;
         }
+        /* ── Hazard sidebar (AIRMET/SIGMET click) ──────────────────── */
+        #hazardSidebar {
+            position: fixed;
+            top: 44px; left: 0; bottom: 0;
+            width: 300px;
+            background: white;
+            box-shadow: 2px 0 12px rgba(0,0,0,0.25);
+            z-index: 1050;
+            display: flex;
+            flex-direction: column;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+        }
+        #hazardSidebar.sb-hidden { display: none !important; }
+        #hazardSidebar .sb-header {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 10px 12px 8px;
+            background: #2c3e50; color: white;
+            font-size: 13px; font-weight: 700; flex-shrink: 0;
+        }
+        #hazardSidebar .sb-coords { font-size: 10px; font-weight: 400; opacity: 0.75; margin-top: 1px; }
+        #hazardSidebar .sb-close { cursor: pointer; font-size: 18px; line-height: 1; opacity: 0.7; padding: 0 2px; }
+        #hazardSidebar .sb-close:hover { opacity: 1; }
+        #hazardSidebar .sb-body { flex: 1; overflow-y: auto; padding: 0; }
+        #hazardSidebar .sb-none { padding: 16px 12px; color: #666; font-style: italic; }
+        #hazardSidebar .sb-item { padding: 8px 12px; border-bottom: 1px solid #eee; }
+        #hazardSidebar .sb-item:last-child { border-bottom: none; }
+        #hazardSidebar .sb-badge {
+            display: inline-block; padding: 2px 7px; border-radius: 3px;
+            color: white; font-size: 11px; font-weight: 700;
+            margin-bottom: 5px; letter-spacing: 0.03em;
+        }
+        #hazardSidebar .sb-phenom { font-size: 13px; font-weight: 700; color: #1a1a1a; margin-bottom: 3px; }
+        #hazardSidebar .sb-row { display: flex; gap: 6px; margin-top: 2px; font-size: 11px; }
+        #hazardSidebar .sb-key { color: #888; white-space: nowrap; min-width: 48px; flex-shrink: 0; }
+        #hazardSidebar .sb-val { color: #222; }
+        #hazardSidebar .sb-desc {
+            margin-top: 5px; font-size: 11px; line-height: 1.45;
+            color: #333; background: #f8f8f8; padding: 4px 6px; border-radius: 3px;
+        }
     </style>
 </head>
 <body>
@@ -200,6 +240,18 @@
     </div>
     <a href="/" class="home-btn">&#127968; Home</a>
     <div id="map"></div>
+
+    <div id="hazardSidebar" class="sb-hidden">
+        <div class="sb-header">
+            <div>
+                <div id="sbTitle">Hazards at clicked point</div>
+                <div class="sb-coords" id="sbCoords"></div>
+            </div>
+            <span class="sb-close" onclick="closeSidebar()">&times;</span>
+        </div>
+        <div class="sb-body" id="sbBody"></div>
+    </div>
+
     <div id="loading">Loading weather data...</div>
 
     <div class="controls">
@@ -273,6 +325,91 @@
         var map, labelsLayer, baseLayers = {}, tfrLayer;
         var airmetLayer = null;
         var fzlvlLines = [], fzlvlLabels = [];
+        var _airmetFeatures = [];
+
+        var PHENOMENON_LABELS = {
+            'TURB':          'Turbulence',
+            'ICE':           'Icing',
+            'IFR':           'IFR Conditions',
+            'MTN_OBSC':      'Mountain Obscuration',
+            'LLWS':          'Low-Level Wind Shear',
+            'STG_SFC_WINDS': 'Strong Surface Winds',
+            'CONVECTIVE':    'Convective',
+            'ASH':           'Volcanic Ash',
+            'TSGR':          'Thunderstorms / Hail',
+        };
+
+        function fmtHazardTime(iso) {
+            if (!iso) return '?';
+            try {
+                var d = new Date(iso);
+                return String(d.getUTCDate()).padStart(2,'0') +
+                       String(d.getUTCHours()).padStart(2,'0') +
+                       String(d.getUTCMinutes()).padStart(2,'0') + 'Z';
+            } catch(e) { return iso; }
+        }
+
+        function pointInRingH(pt, ring) {
+            var x=pt[0],y=pt[1],inside=false;
+            for(var i=0,j=ring.length-1;i<ring.length;j=i++){
+                var xi=ring[i][0],yi=ring[i][1],xj=ring[j][0],yj=ring[j][1];
+                if(((yi>y)!==(yj>y))&&(x<(xj-xi)*(y-yi)/(yj-yi)+xi)) inside=!inside;
+            }
+            return inside;
+        }
+        function pointInHazardPolygon(latlng, geom) {
+            if(!geom||!geom.coordinates) return false;
+            var pt=[latlng.lng, latlng.lat];
+            if(!pointInRingH(pt, geom.coordinates[0])) return false;
+            for(var h=1;h<geom.coordinates.length;h++)
+                if(pointInRingH(pt, geom.coordinates[h])) return false;
+            return true;
+        }
+
+        function showHazardSidebar(latlng) {
+            if (!document.getElementById('airmetToggle').checked) return;
+            var hits = [];
+            _airmetFeatures.forEach(function(f) {
+                if (pointInHazardPolygon(latlng, f.geometry))
+                    hits.push(f.properties);
+            });
+            var sidebar  = document.getElementById('hazardSidebar');
+            var sbBody   = document.getElementById('sbBody');
+            var sbTitle  = document.getElementById('sbTitle');
+            var sbCoords = document.getElementById('sbCoords');
+            sbCoords.textContent = latlng.lat.toFixed(3) + '°N  ' +
+                                   Math.abs(latlng.lng).toFixed(3) + '°W';
+            if (hits.length === 0) {
+                sbTitle.textContent = 'No active hazards';
+                sbBody.innerHTML = '<div class="sb-none">No AIRMETs or SIGMETs active at this location.</div>';
+            } else {
+                sbTitle.textContent = hits.length + ' hazard' + (hits.length > 1 ? 's' : '') + ' active';
+                sbBody.innerHTML = hits.map(function(p) {
+                    var label = PHENOMENON_LABELS[p.phenomenon] || p.phenomenon || 'Hazard';
+                    var sev   = (p.severity && p.severity !== 'UNSPECIFIED' && p.severity !== 'MOD')
+                                ? ' — ' + p.severity : '';
+                    var alt   = (p.flight_levels && p.flight_levels !== 'Not specified') ? p.flight_levels : '';
+                    var bg    = p.type === 'SIGMET' ? '#c0186e' : '#e8601a';
+                    var kind  = p.type || 'AIRMET';
+                    return '<div class="sb-item">'
+                        + '<div class="sb-badge" style="background:' + bg + '">' + kind + '</div>'
+                        + '<div class="sb-phenom">' + label + sev + '</div>'
+                        + (alt  ? '<div class="sb-row"><span class="sb-key">Altitude</span>'
+                               + '<span class="sb-val">' + alt + '</span></div>' : '')
+                        + (p.due_to ? '<div class="sb-row"><span class="sb-key">Due to</span>'
+                               + '<span class="sb-val">' + p.due_to + '</span></div>' : '')
+                        + '<div class="sb-row"><span class="sb-key">Valid</span>'
+                        + '<span class="sb-val">' + fmtHazardTime(p.valid_from)
+                        + ' &ndash; ' + fmtHazardTime(p.valid_until) + '</span></div>'
+                        + '</div>';
+                }).join('');
+            }
+            sidebar.classList.remove('sb-hidden');
+        }
+
+        function closeSidebar() {
+            document.getElementById('hazardSidebar').classList.add('sb-hidden');
+        }
         var currentMetars = [];
         var metatMarkers = [];
         var noMetarAirports = [];
@@ -716,61 +853,49 @@
 
         async function loadAirmets() {
             try {
-                var response = await fetch('/CAP_WxCOP/api/airmet-sigmet/weather-hazards');
+                if (airmetLayer) { map.removeLayer(airmetLayer); airmetLayer = null; }
+                _airmetFeatures = [];
+
+                const response = await fetch('/CAP_WxCOP/api/airmet-sigmet/weather-hazards');
                 if (!response.ok) return;
-                var geojson = await response.json();
-                if (airmetLayer) map.removeLayer(airmetLayer);
+                const geojson = await response.json();
+                const features = geojson.features || [];
+
+                _airmetFeatures = features.filter(f =>
+                    f.geometry && f.geometry.type === 'Polygon'
+                );
+
+                if (_airmetFeatures.length === 0) return;
+
                 airmetLayer = L.layerGroup();
 
-                // Phenomenon colors — consistent with fetcher COLORS dict
-                var phenomColors = {
+                const phenomColors = {
                     'TURB': '#FFA500', 'ICE': '#87CEEB', 'IFR': '#808080',
-                    'CONVECTIVE': '#FF0000', 'MTN_OBSC': '#696969',
-                    'NONCONVECTIVE': '#FF4500', 'SFC_WND': '#FFD700'
+                    'MTN_OBSC': '#A0A0A0', 'LLWS': '#FF69B4',
+                    'STG_SFC_WINDS': '#FF8C00', 'CONVECTIVE': '#FF0000',
+                    'ASH': '#8B4513', 'TSGR': '#FF4500',
                 };
 
-                (geojson.features || []).forEach(function(f) {
-                    if (!f.geometry || f.geometry.type !== 'Polygon') return;
-                    var p = f.properties;
-                    var color = phenomColors[p.phenomenon] || '#808080';
-                    var layer = L.geoJSON(f, {
-                        style: {
-                            color: color, weight: 2, opacity: 0.85,
-                            fillColor: color, fillOpacity: 0.15
-                        }
-                    });
-
-                    // Popup with flight level prominently displayed
-                    var validFrom = p.valid_from ? new Date(p.valid_from) : null;
-                    var validUntil = p.valid_until ? new Date(p.valid_until) : null;
-                    function fmtZ(d) {
-                        if (!d) return '?';
-                        return String(d.getUTCDate()).padStart(2,'0') + ' ' +
-                               d.toLocaleString('en-US',{month:'short',timeZone:'UTC'}) + ' ' +
-                               String(d.getUTCHours()).padStart(2,'0') +
-                               String(d.getUTCMinutes()).padStart(2,'0') + 'Z';
-                    }
-                    var flStr = (p.flight_levels && p.flight_levels !== 'Not specified')
-                        ? '<p style="font-size:1.1em;font-weight:bold;color:#333;">Altitudes: ' + p.flight_levels + '</p>'
-                        : '';
-                    layer.bindPopup(
-                        '<div style="font-family:monospace;min-width:220px;">' +
-                        '<h3>' + (p.type || 'AIRMET') + ' — ' + (p.phenomenon || '') + '</h3>' +
-                        (p.due_to ? '<p>' + p.due_to + '</p>' : '') +
-                        flStr +
-                        '<p style="font-size:11px;color:#666;">Valid: ' + fmtZ(validFrom) + ' – ' + fmtZ(validUntil) + '</p>' +
-                        '<p style="font-size:10px;color:#999;">' + (p.source || '') + '</p>' +
-                        '</div>'
-                    );
-                    layer.addTo(airmetLayer);
+                _airmetFeatures.forEach(function(f) {
+                    var p = f.properties || {};
+                    var color = p.color || phenomColors[p.phenomenon] || '#808080';
+                    var weight = p.type === 'SIGMET' ? 3 : 2;
+                    L.geoJSON(f.geometry, {
+                        style: { color: color, weight: weight, opacity: 0.85,
+                                 fillColor: color, fillOpacity: 0.15 }
+                    }).on('click', function(e) {
+                        L.DomEvent.stopPropagation(e);
+                        showHazardSidebar(e.latlng);
+                    }).addTo(airmetLayer);
                 });
 
                 airmetLayer.addTo(map);
+                console.log('AIRMETs/SIGMETs loaded:', _airmetFeatures.length);
+
             } catch (err) {
                 console.warn('Error loading AIRMETs:', err);
             }
         }
-
         async function loadFzlvl() {
             // FZLVL contours served from dedicated endpoint as LineString GeoJSON
             try {
