@@ -84,6 +84,29 @@ MILITARY_PATTERNS = [
 # Compile patterns for efficiency
 MILITARY_REGEX = re.compile('|'.join(MILITARY_PATTERNS), re.IGNORECASE)
 
+# Stations definitively military but not caught by name patterns
+# (civilian names, joint-use airports, ANG bases named after cities, etc.)
+KNOWN_MILITARY_STATIONS = {
+    # Air National Guard / joint-use with civilian names
+    'KBGR',  # Bangor Intl — Maine ANG (101st ARW)
+    'KNUQ',  # Moffett Federal Airfield — NASA/ANG
+    'KOQU',  # Quonset State — Rhode Island ANG
+    'KVPS',  # Destin-Fort Walton Beach — Eglin AFB complex
+    'KTIW',  # Tacoma Narrows — Pierce County/WA ANG
+    'KSTJ',  # Rosecrans Memorial — Missouri ANG
+    'KTYS',  # McGhee Tyson — Tennessee ANG (134th ARW)
+    'KSBD',  # San Bernardino Intl — former Norton AFB, CA ANG
+    # Space Force / radar stations
+    'PACL',  # Clear Space Force Station AK
+    # Fields with generic/misleading names
+    'KPOB',  # Pope Field — Pope AAF (82nd Airborne)
+    'KSEM',  # Craig Field — former military, now ANG training
+    'KNEW',  # New Orleans Lakefront — LA ANG
+    'KPHF',  # Newport News — Langley-Eustis adjacent, VA ANG
+    'KHRL',  # Valley Intl — TX ANG (147th ARW)
+    'KFCM',  # Flying Cloud — MN ANG support
+}
+
 def is_military_airfield(name):
     """
     Determine if an airport is a military airfield based on its name
@@ -235,7 +258,7 @@ def process_airports(qualifying_airports):
                     longest_runway_ft = qualifying_airports[database_id]
                     
                     # Determine if military
-                    is_military = is_military_airfield(name)
+                    is_military = is_military_airfield(name) or (aviation_id in KNOWN_MILITARY_STATIONS)
                     if is_military:
                         military_count += 1
                     
@@ -293,6 +316,7 @@ def populate_database(airports_data):
         INSERT INTO observations.airports 
         (station_id, name, location, elevation_ft, has_paved_runway, longest_runway_ft, is_military)
         VALUES (%s, %s, ST_SetSRID(ST_MakePoint(%s, %s), 4326), %s, true, %s, %s)
+        ON CONFLICT (station_id) DO NOTHING
         """
         
         cur.executemany(insert_query, airports_data)

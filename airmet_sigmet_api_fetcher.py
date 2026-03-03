@@ -140,6 +140,12 @@ class AviationWeatherAPI:
         Returns:
             Parsed dictionary with standardized fields
         """
+        # FZLVL LINE records are freezing level contours — not hazard polygons.
+        # Return them as a distinct type so the map can render them as labeled polylines.
+        hazard_type = item.get('hazard', '')
+        geom_type   = item.get('geom', item.get('geometryType', ''))
+        is_fzlvl_line = (hazard_type == 'FZLVL' and geom_type == 'LINE')
+
         # Extract coordinates (different format than airsigmet)
         coords = []
         if 'coords' in item and item['coords']:
@@ -172,42 +178,185 @@ class AviationWeatherAPI:
         # Get color
         color = self.COLORS.get(hazard, '#808080')
         
-        # Format flight levels (different field names)
-        flight_levels = "Not specified"
-        base = item.get('base', '').strip()
-        top = item.get('top', '').strip()
-        
-        if base and top:
-            flight_levels = f"{base}-{top}"
-        elif top:
-            flight_levels = f"Below {top}"
-        elif base:
-            flight_levels = f"Above {base}"
-        
+        # Format flight levels — field names differ by product type:
+        #   ZULU (icing):        fzlbase / fzltop  (freezing level fields)
+        #   TANGO (turbulence):  base / top         (FL values)
+        #   SIERRA (IFR/MTN):    all fields empty   (surface phenomenon, no FL)
+        product = item.get('product', '')
+        flight_levels = self._format_gairmet_levels(item, product, hazard)
+
         # Build descriptive text
         text_parts = []
-        if item.get('product'):
-            text_parts.append(f"{item['product']} G-AIRMET")
+        if product:
+            text_parts.append(f"{product} G-AIRMET")
         if item.get('due_to'):
             text_parts.append(item['due_to'])
         if item.get('hazard'):
             text_parts.append(f"({item['hazard']})")
-        
+
         text = ' - '.join(text_parts) if text_parts else 'G-AIRMET'
         
+        # Build label for FZLVL contour lines
+        if is_fzlvl_line:
+            level = (item.get('level') or '').strip().upper()
+            if level == 'SFC':
+                fzlvl_label = 'FZLVL SFC'
+            elif level.isdigit():
+                fzlvl_label = f"FZLVL FL{int(level):03d}"
+            else:
+                fzlvl_label = 'FZLVL'
+        else:
+            fzlvl_label = None
+
         return {
-            'type': 'AIRMET',  # G-AIRMETs are AIRMETs
+            'type': 'FZLVL_CONTOUR' if is_fzlvl_line else 'AIRMET',
             'phenomenon': hazard,
-            'severity': item.get('severity', 'MOD'),  # G-AIRMETs are typically moderate
+            'severity': item.get('severity') or 'MOD',
             'coordinates': coords,
             'valid_from': valid_from.isoformat() if valid_from else None,
             'valid_until': valid_until.isoformat() if valid_until else None,
             'flight_levels': flight_levels,
+            'label': fzlvl_label,
+            'due_to': item.get('due_to', ''),
+            'product': product,
+            'geom': geom_type,
+            'forecast_hour': item.get('forecastHour', 0),
             'text': text,
             'color': color,
             'source': 'Aviation Weather API (G-AIRMET)'
         }
     
+    def _format_gairmet_levels(self, item: Dict, product: str, hazard: str) -> str:
+        """
+        Format altitude/flight level string for a G-AIRMET.
+
+        The AWC /gairmet API uses different altitude fields depending on product:
+
+        ZULU (icing):
+          fzlbase — freezing level base, e.g. "SFC", "FL020", or empty
+          fzltop  — freezing level top,  e.g. "FL080"
+          Icing exists between fzlbase and fzltop.
+          When fzlbase is empty/SFC, icing extends from the surface/freezing level up.
+          Example display: "SFC–FL080"  or  "FZLVL–FL080"
+
+        TANGO (turbulence):
+          base — FL value, e.g. "FL180"
+          top  — FL value, e.g. "FL380"
+          Example display: "FL180–FL380"
+
+        SIERRA (IFR / mountain obscuration):
+          All altitude fields are empty — this is a surface/visibility phenomenon
+          with no meaningful flight level bounds.
+          Display: "Surface (IFR/MTN OBSCN)" with the due_to reason.
+
+        The 'level' field is occasionally populated for turbulence in layers.
+        """
+        def clean(v):
+            return (v or '').strip().upper()
+
+        if product == 'ZULU':
+            hazard_type = clean(item.get('hazard'))
+            geom = clean(item.get('geom'))
+
+            if hazard_type == 'ICE' and geom == 'AREA':
+                # Icing hazard area — fzlbase/fzltop is the icing layer
+                # 'top' is cloud tops, not the icing layer ceiling — ignore it here
+                fzlbase = clean(item.get('fzlbase'))
+                fzltop  = clean(item.get('fzltop'))
+                # Normalize to FL notation
+                def to_fl(v):
+                    if not v:
+                        return ''
+                    if v.isdigit():
+                        return f"FL{int(v):03d}"
+                    return v
+                b = to_fl(fzlbase)
+                t = to_fl(fzltop)
+                if b and t:
+                    return f"{b}–{t}"
+                elif t:
+                    return f"FZLVL–{t}"
+                elif b:
+                    return f"{b} and above"
+                else:
+                    return "FZLVL (variable)"
+
+            elif hazard_type == 'FZLVL' and geom == 'LINE':
+                # Freezing level contour line — level field in hundreds of feet
+                level = clean(item.get('level'))
+                if level == 'SFC':
+                    return "FZLVL at Surface"
+                elif level.isdigit():
+                    fl = int(level)
+                    ft = fl * 100
+                    return f"FZLVL FL{fl:03d} ({ft:,} ft MSL)"
+                else:
+                    return "FZLVL contour"
+
+            elif hazard_type == 'M_FZLVL' and geom == 'AREA':
+                # Multiple/variable freezing levels area
+                top = clean(item.get('top'))
+                def to_fl(v):
+                    if not v:
+                        return ''
+                    if v.isdigit():
+                        return f"FL{int(v):03d}"
+                    return v
+                t = to_fl(top)
+                if t:
+                    return f"Multiple FZLVL, tops {t}"
+                else:
+                    return "Multiple FZLVL (variable)"
+
+            else:
+                # Unknown ZULU sub-type — best effort
+                fzlbase = clean(item.get('fzlbase'))
+                fzltop  = clean(item.get('fzltop'))
+                level   = clean(item.get('level'))
+                if fzlbase and fzltop:
+                    return f"{fzlbase}–{fzltop}"
+                elif level:
+                    return f"FZLVL FL{level}"
+                return "FZLVL (variable)"
+
+        elif product == 'TANGO':
+            # Turbulence — use base/top FL fields
+            base  = clean(item.get('base'))
+            top   = clean(item.get('top'))
+            level = clean(item.get('level'))
+
+            if base and top:
+                return f"{base}–{top}"
+            elif level:
+                return level
+            elif top:
+                return f"Below {top}"
+            elif base:
+                return f"Above {base}"
+            else:
+                return "Not specified"
+
+        elif product == 'SIERRA':
+            # IFR / Mountain Obscuration — surface phenomenon, no FL bounds
+            # Return a meaningful label rather than "Not specified"
+            due_to = clean(item.get('due_to', ''))
+            if 'MTN' in due_to or 'OBSC' in due_to:
+                return "Surface–Bases (MTN OBSCN)"
+            else:
+                return "Surface (IFR)"
+
+        else:
+            # Unknown product — try base/top, then give up gracefully
+            base = clean(item.get('base'))
+            top  = clean(item.get('top'))
+            if base and top:
+                return f"{base}–{top}"
+            elif top:
+                return f"Below {top}"
+            elif base:
+                return f"Above {base}"
+            return "Not specified"
+
     def _format_flight_levels(self, item: Dict) -> str:
         """Format flight level information from airsigmet API data.
 
@@ -307,10 +456,10 @@ class AviationWeatherAPI:
         
         all_items = self.fetch_all()
         
-        # Filter for AIRMETs only and currently valid
+        # Filter for AIRMETs and FZLVL contours (exclude SIGMETs)
         airmets = []
         for item in all_items:
-            if item['type'] != 'AIRMET':
+            if item['type'] not in ('AIRMET', 'FZLVL_CONTOUR'):
                 continue
             
             if item['valid_from'] and item['valid_until']:
@@ -359,44 +508,60 @@ class AviationWeatherAPI:
     
     def to_geojson(self, products: List[Dict]) -> Dict:
         """
-        Convert AIRMET/SIGMET list to GeoJSON FeatureCollection
-        
-        Args:
-            products: List of parsed products
-        
-        Returns:
-            GeoJSON FeatureCollection dictionary
+        Convert AIRMET/SIGMET/FZLVL_CONTOUR list to GeoJSON FeatureCollection.
+
+        FZLVL_CONTOUR records are emitted as LineString features.
+        AIRMET/SIGMET records are emitted as Polygon features.
         """
         features = []
-        
+
         for product in products:
-            if not product['coordinates'] or len(product['coordinates']) < 3:
+            coords = product.get('coordinates', [])
+            if not coords:
                 continue
-            
+
             # Convert coordinates to GeoJSON format [lon, lat]
-            coords_geojson = [[lon, lat] for lat, lon in product['coordinates']]
-            
-            feature = {
-                'type': 'Feature',
-                'geometry': {
+            coords_geojson = [[lon, lat] for lat, lon in coords]
+
+            is_contour = product.get('type') == 'FZLVL_CONTOUR'
+
+            if is_contour:
+                # LineString — needs at least 2 points
+                if len(coords_geojson) < 2:
+                    continue
+                geometry = {
+                    'type': 'LineString',
+                    'coordinates': coords_geojson
+                }
+            else:
+                # Polygon — needs at least 3 points
+                if len(coords_geojson) < 3:
+                    continue
+                geometry = {
                     'type': 'Polygon',
                     'coordinates': [coords_geojson]
-                },
+                }
+
+            feature = {
+                'type': 'Feature',
+                'geometry': geometry,
                 'properties': {
                     'type': product['type'],
-                    'phenomenon': product['phenomenon'],
-                    'severity': product['severity'],
-                    'flight_levels': product['flight_levels'],
-                    'valid_from': product['valid_from'],
-                    'valid_until': product['valid_until'],
-                    'text': product['text'],
-                    'color': product['color'],
-                    'source': product['source']
+                    'phenomenon': product.get('phenomenon', ''),
+                    'severity': product.get('severity', ''),
+                    'flight_levels': product.get('flight_levels', ''),
+                    'label': product.get('label', ''),
+                    'due_to': product.get('due_to', ''),
+                    'valid_from': product.get('valid_from'),
+                    'valid_until': product.get('valid_until'),
+                    'text': product.get('text', ''),
+                    'color': product.get('color', '#808080'),
+                    'source': product.get('source', '')
                 }
             }
-            
+
             features.append(feature)
-        
+
         return {
             'type': 'FeatureCollection',
             'features': features
