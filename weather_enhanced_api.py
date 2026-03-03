@@ -66,8 +66,8 @@ def get_recent_metar_enhanced():
             WITH prioritized_stations AS (
                 SELECT DISTINCT ON (m.station_id)
                     m.station_id,
-                    m.latitude,
-                    m.longitude,
+                    ST_Y(m.location::geometry) AS latitude,
+                    ST_X(m.location::geometry) AS longitude,
                     m.observation_time,
                     m.temp_c,
                     m.dewpoint_c,
@@ -82,25 +82,31 @@ def get_recent_metar_enhanced():
                     m.raw_text,
                     m.is_speci,
                     -- Military prioritization logic
-                    CASE 
-                        WHEN a.is_military = true THEN 1
-                        WHEN a.airport_type = 'large_airport' THEN 2  
-                        WHEN a.airport_type = 'medium_airport' THEN 3
-                        WHEN a.airport_type = 'small_airport' THEN 4
+                    CASE
+                        WHEN a.is_military = true        THEN 1
+                        WHEN a.is_major_hub = true       THEN 2
+                        WHEN a.longest_runway_ft >= 5000 THEN 3
+                        WHEN a.longest_runway_ft >= 2500 THEN 4
                         ELSE 5
                     END as priority,
                     a.name as airport_name,
-                    a.municipality,
+                    a.iso_region,
                     a.is_military,
-                    a.airport_type
-                FROM metar_observations m
-                LEFT JOIN airports a ON m.station_id = a.ident
-                WHERE m.latitude BETWEEN %s AND %s
-                  AND m.longitude BETWEEN %s AND %s
+                    a.longest_runway_ft,
+                    CASE
+                        WHEN a.is_major_hub = true       THEN 'large_airport'
+                        WHEN a.longest_runway_ft >= 8000 THEN 'medium_airport'
+                        ELSE                                  'small_airport'
+                    END as airport_type
+                FROM observations.metar m
+                LEFT JOIN observations.airports a ON m.station_id = a.station_id
+                WHERE ST_Y(m.location::geometry) BETWEEN %s AND %s
+                  AND ST_X(m.location::geometry) BETWEEN %s AND %s
                   AND m.observation_time >= NOW() - INTERVAL '2 hours'
+                  AND m.location IS NOT NULL
                 ORDER BY m.station_id, m.observation_time DESC
             )
-            SELECT 
+            SELECT
                 station_id,
                 latitude,
                 longitude,
@@ -118,17 +124,17 @@ def get_recent_metar_enhanced():
                 raw_text,
                 is_speci,
                 airport_name,
-                municipality,
+                iso_region,
                 is_military,
+                longest_runway_ft,
                 airport_type,
                 priority
             FROM prioritized_stations
-            ORDER BY 
-                priority ASC,                    -- Military first
-                is_military DESC NULLS LAST,     -- Military stations first
-                airport_type = 'large_airport' DESC,  -- Then large airports
-                airport_type = 'medium_airport' DESC, -- Then medium airports  
-                observation_time DESC           -- Most recent observations
+            ORDER BY
+                priority ASC,
+                is_military DESC NULLS LAST,
+                longest_runway_ft DESC NULLS LAST,
+                observation_time DESC
             LIMIT %s
         """
         
@@ -137,15 +143,8 @@ def get_recent_metar_enhanced():
         
         metars = []
         for row in rows:
-            # Parse present weather JSON if it exists
-            present_weather = []
-            if row[11]:  # present_weather column
-                try:
-                    present_weather = json.loads(row[11]) if isinstance(row[11], str) else row[11]
-                    if not isinstance(present_weather, list):
-                        present_weather = []
-                except (json.JSONDecodeError, TypeError):
-                    present_weather = []
+            # present_weather is text[] — psycopg2 returns it as a Python list directly
+            present_weather = row[11] if isinstance(row[11], list) else []
             
             # Parse sky conditions JSON if it exists  
             sky_conditions = []
@@ -177,14 +176,15 @@ def get_recent_metar_enhanced():
                 'is_speci': row[15] if row[15] is not None else False,
                 
                 # Enhanced labeling information
-                'airport_name': row[16],
-                'municipality': row[17],
-                'is_military': row[18] if row[18] is not None else False,
-                'airport_type': row[19],
-                'priority': row[20],
-                
+                'airport_name':      row[16],
+                'municipality':      row[17],
+                'is_military':       bool(row[18]) if row[18] is not None else False,
+                'longest_runway_ft': int(row[19]) if row[19] is not None else None,
+                'airport_type':      row[20],
+                'priority':          row[21],
+
                 # Display label for map
-                'display_label': row[0] + (' (MIL)' if row[18] else ''),
+                'display_label':  row[0] + (' (MIL)' if row[18] else ''),
                 'label_priority': 'military' if row[18] else 'civilian'
             }
             
@@ -232,26 +232,24 @@ def get_station_priorities():
         
         # Get comprehensive station priority data
         query = """
-            SELECT 
-                a.ident,
+            SELECT
+                a.station_id,
                 a.name,
-                a.municipality,
-                a.latitude_deg,
-                a.longitude_deg,
+                a.iso_region,
+                ST_Y(a.location::geometry) AS latitude,
+                ST_X(a.location::geometry) AS longitude,
                 a.is_military,
-                a.airport_type,
-                CASE 
-                    WHEN a.is_military = true THEN 1
-                    WHEN a.airport_type = 'large_airport' THEN 2  
-                    WHEN a.airport_type = 'medium_airport' THEN 3
-                    WHEN a.airport_type = 'small_airport' THEN 4
+                a.longest_runway_ft,
+                CASE
+                    WHEN a.is_military = true        THEN 1
+                    WHEN a.is_major_hub = true       THEN 2
+                    WHEN a.longest_runway_ft >= 5000 THEN 3
+                    WHEN a.longest_runway_ft >= 2500 THEN 4
                     ELSE 5
                 END as priority
-            FROM airports a
-            WHERE a.ident IS NOT NULL
-              AND a.latitude_deg IS NOT NULL
-              AND a.longitude_deg IS NOT NULL
-              AND LENGTH(a.ident) BETWEEN 3 AND 6
+            FROM observations.airports a
+            WHERE a.station_id IS NOT NULL
+              AND a.location IS NOT NULL
             ORDER BY priority ASC, a.is_military DESC NULLS LAST
         """
         
@@ -261,16 +259,16 @@ def get_station_priorities():
         stations = []
         for row in rows:
             stations.append({
-                'station_id': row[0],
-                'name': row[1],
-                'municipality': row[2],
-                'latitude': float(row[3]) if row[3] is not None else None,
-                'longitude': float(row[4]) if row[4] is not None else None,
-                'is_military': row[5] if row[5] is not None else False,
-                'airport_type': row[6],
-                'priority': row[7],
-                'display_label': row[0] + (' (MIL)' if row[5] else ''),
-                'label_class': 'military' if row[5] else 'civilian'
+                'station_id':        row[0],
+                'name':              row[1],
+                'municipality':      row[2],
+                'latitude':          float(row[3]) if row[3] is not None else None,
+                'longitude':         float(row[4]) if row[4] is not None else None,
+                'is_military':       bool(row[5]) if row[5] is not None else False,
+                'longest_runway_ft': int(row[6]) if row[6] is not None else None,
+                'priority':          row[7],
+                'display_label':     row[0] + (' (MIL)' if row[5] else ''),
+                'label_class':       'military' if row[5] else 'civilian'
             })
         
         cur.close()

@@ -105,6 +105,20 @@
             white-space: nowrap; pointer-events: none;
             box-shadow: 0 1px 2px rgba(0,0,0,0.3); transform: translateX(-50%);
         }
+        .apt-t4 {
+            font-size: 9px; font-weight: 500;
+            color: #111; background: rgba(150, 200, 150, 0.90);
+            padding: 1px 3px; border-radius: 3px; border: 1px solid #6a6;
+            white-space: nowrap; pointer-events: none;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.2); transform: translateX(-50%);
+        }
+        .apt-t5 {
+            font-size: 9px; font-weight: 400;
+            color: #333; background: rgba(200, 200, 255, 0.88);
+            padding: 1px 3px; border-radius: 3px; border: 1px solid #99a;
+            white-space: nowrap; pointer-events: none;
+            box-shadow: 0 1px 1px rgba(0,0,0,0.15); transform: translateX(-50%);
+        }
 
         /* ── Title bar ───────────────────────────────────────── */
         #titleBar {
@@ -268,7 +282,9 @@
         <h3>Display Options</h3>
         <label class="checkbox-label"><input type="checkbox" id="showMilitary" checked> Military Airfields</label>
         <label class="checkbox-label"><input type="checkbox" id="showHubs" checked> Major Hubs</label>
-        <label class="checkbox-label"><input type="checkbox" id="showRegional" checked> Regional Airfields</label>
+        <label class="checkbox-label"><input type="checkbox" id="showRegional" checked> Regional Airfields (&ge;7000 ft)</label>
+        <label class="checkbox-label"><input type="checkbox" id="showLocal"> Local Airfields (5000&ndash;6999 ft)</label>
+        <label class="checkbox-label"><input type="checkbox" id="showSmall"> Small Airfields (2500&ndash;4999 ft)</label>
         <label class="checkbox-label"><input type="checkbox" id="labelToggle" checked> Show labels</label>
 
         <div class="divider"></div>
@@ -297,7 +313,9 @@
         <div class="divider"></div>
         <div class="legend-item"><div class="legend-tag" style="background:rgba(200,30,30,0.9);color:white;">MIL</div>Military</div>
         <div class="legend-item"><div class="legend-tag" style="background:rgba(25,80,200,0.9);color:white;">HUB</div>Major Hub</div>
-        <div class="legend-item"><div class="legend-tag" style="background:rgba(180,180,180,0.9);color:#111;">RGNL</div>Regional</div>
+        <div class="legend-item"><div class="legend-tag" style="background:rgba(180,180,180,0.9);color:#111;">RGNL</div>Regional (&ge;7000 ft, z6+)</div>
+        <div class="legend-item"><div class="legend-tag" style="background:rgba(150,200,150,0.9);color:#111;">LOCL</div>Local (5000&ndash;6999 ft, z8+)</div>
+        <div class="legend-item"><div class="legend-tag" style="background:rgba(200,200,255,0.9);color:#333;">SML</div>Small (2500&ndash;4999 ft, z10+)</div>
         <div class="legend-item">
             <div style="width:12px;height:12px;border-radius:50%;border:2px solid #555;
                         background:white;flex-shrink:0;margin-right:8px;"></div>
@@ -419,14 +437,9 @@
         var highlightLayer = null;   // airport highlight ring
 
         // TAF formatting — insert newline before each change group keyword.
-        // Keywords per FAA METAR/TAF Key: FM, TEMPO, BECMG, WS (wind shear line).
-        // Also handles PROB30/PROB40 which precede TEMPO or stand alone.
         function formatTAF(raw) {
             if (!raw) return '';
-            // Escape HTML entities first
             var s = raw.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-            // Insert newline before each change group indicator.
-            // FM is followed by 6 digits (DDHHMM) to avoid false matches on e.g. "FM" in METAR.
             s = s.replace(/ (FM\d{6})/g, '\n$1');
             s = s.replace(/ (TEMPO\b)/g, '\nTEMPO');
             s = s.replace(/ (BECMG\b)/g, '\nBECMG');
@@ -435,12 +448,16 @@
             return s.trim();
         }
 
-        var TIER_MIN_ZOOM = { 1: 0, 2: 5, 3: 6 };
+        // Tier definitions:
+        //   1 = Military  — show at z0+ when toggled on
+        //   2 = Hub       — major commercial, z5+
+        //   3 = Regional  — paved >= 7000 ft, z6+  (checked by default)
+        //   4 = Local     — paved 5000-6999 ft, z8+ (unchecked by default)
+        //   5 = Small     — paved 2500-4999 ft, z10+(unchecked by default)
+        var TIER_MIN_ZOOM = { 1: 0, 2: 5, 3: 6, 4: 8, 5: 10 };
 
-        // No-METAR symbol zoom thresholds:
-        //   Military fields (tier 1): z5 — same as METAR hub threshold, these matter operationally
-        //   Civilian paved >2500ft:   z7 — local awareness only, don't clutter regional view
-        var NO_METAR_SYM_ZOOM = { mil: 5, civ: 7 };
+        // No-METAR symbol zoom thresholds
+        var NO_METAR_SYM_ZOOM = { mil: 3, civ: 12 };
 
         var airportTiers = {
             'KATL': 2, 'KORD': 2, 'KLAX': 2, 'KDFW': 2, 'KDEN': 2, 'KJFK': 2,
@@ -449,6 +466,16 @@
             'KLGA': 2, 'KDCA': 2, 'KMDW': 2, 'KBWI': 2, 'KSLC': 2, 'KSAN': 2,
             'KTPA': 2, 'KPDX': 2, 'KHON': 2
         };
+
+        // Resolve runway-based tier for a METAR/airport object.
+        // Returns tier 3/4/5 based on longest_runway_ft; defaults to 3 if unknown.
+        function runwayTier(obj) {
+            var rwy = obj.longest_runway_ft || obj.runway_length_ft || 0;
+            if (rwy >= 7000) return 3;
+            if (rwy >= 5000) return 4;
+            if (rwy >= 2500) return 5;
+            return 3;   // unknown runway → treat as regional so it shows by default
+        }
 
         function initMap() {
             map = L.map('map', { center: [39.0, -98.0], zoom: 5, zoomControl: true });
@@ -471,13 +498,14 @@
 
             L.control.scale({ position: 'bottomleft', imperial: true, metric: false, maxWidth: 150 }).addTo(map);
 
-            // Use featureGroup so bringToFront() is available
             labelsLayer = L.featureGroup().addTo(map);
 
             setupControls();
             loadWeatherData();
 
-            map.on('zoomend moveend', updateLabels);
+            // Both filterMarkers and updateLabels run on zoom/pan so markers
+            // disappear/appear correctly at tier zoom thresholds.
+            map.on('zoomend moveend', function() { filterMarkers(); updateLabels(); });
         }
 
         function setupControls() {
@@ -504,7 +532,8 @@
                 }
             });
 
-            ['Military', 'Hubs', 'Regional'].forEach(function(type) {
+            // All five airport-tier checkboxes drive filterMarkers
+            ['Military', 'Hubs', 'Regional', 'Local', 'Small'].forEach(function(type) {
                 document.getElementById('show' + type).addEventListener('change', filterMarkers);
             });
 
@@ -542,7 +571,6 @@
                 }
             });
 
-            // ── Airport search / highlight ─────────────────────────────────
             document.getElementById('aptSearchInput').addEventListener('keydown', function(e) {
                 if (e.key === 'Enter') searchAirport();
             });
@@ -550,23 +578,15 @@
             document.getElementById('aptClearBtn').addEventListener('click', clearHighlight);
         }
 
-        // ── Airport highlight ──────────────────────────────────────────────
-        //
-        // Searches all loaded airport data (METAR + no-METAR) for the ICAO.
-        // Centers map, draws a pulsing highlight ring, opens tooltip.
-        // The ring is a separate layer so it persists regardless of label toggle.
-        //
         function searchAirport() {
             var raw = document.getElementById('aptSearchInput').value.trim().toUpperCase();
             if (!raw) return;
             var msg = document.getElementById('aptSearchMsg');
 
-            // Search METAR airports
             var found = null;
             for (var i = 0; i < currentMetars.length; i++) {
                 if (currentMetars[i].station_id === raw) { found = currentMetars[i]; break; }
             }
-            // Fall back to no-METAR list
             if (!found) {
                 for (var j = 0; j < noMetarAirports.length; j++) {
                     if (noMetarAirports[j].station_id === raw) { found = noMetarAirports[j]; break; }
@@ -584,14 +604,12 @@
             msg.style.color = '#2c5f41';
             msg.textContent = (found.airport_name || found.name || raw);
 
-            // Remove previous highlight
             clearHighlight();
 
-            // Draw highlight ring: outer glow + inner ring
             highlightLayer = L.featureGroup();
 
             L.circle([lat, lon], {
-                radius: 5000,            // 5km ring
+                radius: 5000,
                 color: '#ff9800',
                 weight: 3,
                 opacity: 0.9,
@@ -600,7 +618,6 @@
                 dashArray: '6 4'
             }).addTo(highlightLayer);
 
-            // Center dot
             L.circleMarker([lat, lon], {
                 radius: 8,
                 color: '#ff9800',
@@ -613,8 +630,6 @@
               .addTo(highlightLayer);
 
             highlightLayer.addTo(map);
-
-            // Pan and zoom to show the airport
             map.setView([lat, lon], Math.max(map.getZoom(), 8));
         }
 
@@ -627,29 +642,51 @@
             var showMilitary = document.getElementById('showMilitary').checked;
             var showHubs     = document.getElementById('showHubs').checked;
             var showRegional = document.getElementById('showRegional').checked;
+            var showLocal    = document.getElementById('showLocal').checked;
+            var showSmall    = document.getElementById('showSmall').checked;
+            var zoom         = map.getZoom();
 
             metatMarkers.forEach(function(marker) {
                 var tier = marker.options.airportTier;
-                var tierShow = (tier === 1 && showMilitary) ||
-                               (tier === 2 && showHubs) ||
+                // Is the toggle for this tier enabled?
+                var toggleOn = (tier === 1 && showMilitary) ||
+                               (tier === 2 && showHubs)     ||
                                (tier === 3 && showRegional) ||
-                               (!tier && showRegional);
-                if (tierShow) { marker.addTo(map); } else { map.removeLayer(marker); }
+                               (tier === 4 && showLocal)    ||
+                               (tier === 5 && showSmall);
+                // Also enforce minimum zoom level per tier
+                var minZ  = (TIER_MIN_ZOOM[tier] !== undefined) ? TIER_MIN_ZOOM[tier] : 6;
+                if (toggleOn && zoom >= minZ) {
+                    marker.addTo(map);
+                } else {
+                    map.removeLayer(marker);
+                }
             });
             updateLabels();
         }
 
-        // Controls no-METAR dot visibility based on current zoom.
-        // Military no-METAR fields appear at z5+; civilian paved >2500ft at z7+.
+        // Controls no-METAR dot visibility based on current zoom, tier toggle, and showNoMetar.
         function updateNoMetarSymbols() {
-            if (!document.getElementById('showNoMetar').checked) return;
-            var zoom   = map.getZoom();
-            var bounds = map.getBounds();
+            var showNoMetar  = document.getElementById('showNoMetar').checked;
+            var showMilitary = document.getElementById('showMilitary').checked;
+            var showHubs     = document.getElementById('showHubs').checked;
+            var showRegional = document.getElementById('showRegional').checked;
+            var showLocal    = document.getElementById('showLocal').checked;
+            var showSmall    = document.getElementById('showSmall').checked;
+            var zoom         = map.getZoom();
+            var bounds       = map.getBounds();
             noMetarMarkers.forEach(function(m) {
+                if (!showNoMetar) { if (m._map) map.removeLayer(m); return; }
                 var pos      = m.getLatLng();
                 var inBounds = bounds.contains(pos);
+                var tier     = m.options.airportTier;
+                var toggleOn = (tier === 1 && showMilitary) ||
+                               (tier === 2 && showHubs)     ||
+                               (tier === 3 && showRegional) ||
+                               (tier === 4 && showLocal)    ||
+                               (tier === 5 && showSmall);
                 var minZ     = m._noMetarMilitary ? NO_METAR_SYM_ZOOM.mil : NO_METAR_SYM_ZOOM.civ;
-                if (inBounds && zoom >= minZ) {
+                if (inBounds && toggleOn && zoom >= minZ) {
                     if (!m._map) m.addTo(map);
                 } else {
                     if (m._map) map.removeLayer(m);
@@ -665,6 +702,7 @@
             var zoom   = map.getZoom();
             var bounds = map.getBounds();
 
+            // No-METAR airport labels
             if (document.getElementById('showNoMetar').checked) {
                 noMetarAirports.forEach(function(apt) {
                     if (!bounds.contains([apt.latitude, apt.longitude])) return;
@@ -676,7 +714,7 @@
                                 iconSize: null, iconAnchor: [0, 22] }),
                             interactive: false, zIndexOffset: 1000
                         }).addTo(labelsLayer);
-                    } else if (zoom >= 6) {
+                    } else if (zoom >= NO_METAR_SYM_ZOOM.civ) {
                         L.marker([apt.latitude, apt.longitude], {
                             icon: L.divIcon({ className: 'apt-t3', html: sid,
                                 iconSize: null, iconAnchor: [0, 22] }),
@@ -686,19 +724,39 @@
                 });
             }
 
+            // METAR airport labels — respect tier zoom and toggle state
+            var showMilitary = document.getElementById('showMilitary').checked;
+            var showHubs     = document.getElementById('showHubs').checked;
+            var showRegional = document.getElementById('showRegional').checked;
+            var showLocal    = document.getElementById('showLocal').checked;
+            var showSmall    = document.getElementById('showSmall').checked;
+
             currentMetars.forEach(function(metar) {
                 if (!bounds.contains([metar.latitude, metar.longitude])) return;
                 var sid  = metar.station_id;
                 var tier = airportTiers[sid] ||
-                           (metar.is_military === true || metar.military === true ? 1 : 3);
-                if (zoom < TIER_MIN_ZOOM[tier]) return;
+                           (metar.is_military === true || metar.military === true ? 1 : null);
+                if (!tier) tier = runwayTier(metar);
+
+                // Check toggle
+                var toggleOn = (tier === 1 && showMilitary) ||
+                               (tier === 2 && showHubs)     ||
+                               (tier === 3 && showRegional) ||
+                               (tier === 4 && showLocal)    ||
+                               (tier === 5 && showSmall);
+                if (!toggleOn) return;
+
+                // Check zoom
+                var minZ = (TIER_MIN_ZOOM[tier] !== undefined) ? TIER_MIN_ZOOM[tier] : 6;
+                if (zoom < minZ) return;
+
                 L.marker([metar.latitude, metar.longitude], {
                     icon: L.divIcon({
-                        className: 'apt-t' + Math.min(tier, 3),
+                        className: 'apt-t' + Math.min(tier, 5),
                         html: sid, iconSize: null, iconAnchor: [0, 22]
                     }),
                     interactive: false,
-                    zIndexOffset: Math.max(0, (3 - tier)) * 100
+                    zIndexOffset: Math.max(0, (5 - tier)) * 100
                 }).addTo(labelsLayer);
             });
         }
@@ -713,7 +771,7 @@
                       'box-shadow:0 0 3px rgba(0,0,0,0.4);"></div>',
                 iconSize: [12, 12], iconAnchor: [6, 6]
             });
-            var tier   = airport.is_military ? 1 : null;
+            var tier   = airport.is_military ? 1 : runwayTier(airport);
             var rnwy   = airport.longest_runway_ft
                 ? (Math.round(airport.longest_runway_ft / 100) * 100 + ' ft') : 'unknown';
             var marker = L.marker([lat, lon], { icon: icon, airportTier: tier });
@@ -732,7 +790,6 @@
                     '<p>Longest runway: ' + rnwy + '</p></div>'
                 ).openOn(map);
             });
-            // Do NOT add to map here — updateNoMetarSymbols() controls visibility by zoom
             marker._noMetarMilitary = !!airport.is_military;
             noMetarMarkers.push(marker);
         }
@@ -746,15 +803,22 @@
                       'box-shadow:0 0 4px rgba(0,0,0,0.5);"></div>',
                 iconSize: [12, 12], iconAnchor: [6, 6]
             });
-            var tier   = airportTiers[metar.station_id] ||
-                         (metar.is_military === true || metar.military === true ? 1 : null);
+            // Explicit tier from hub list or military flag; otherwise use runway length
+            var tier = airportTiers[metar.station_id] ||
+                       (metar.is_military === true || metar.military === true ? 1 : null);
+            if (!tier) tier = runwayTier(metar);
+
             var marker = L.marker([metar.latitude, metar.longitude], {
                 icon: icon, flightCategory: metar.flight_category, airportTier: tier
             });
             marker.bindTooltip(metar.station_id + ' — ' + metar.flight_category,
                 { permanent: false, direction: 'top', offset: [0, -8] });
             marker.on('click', function() { showStationPopup(metar); });
-            marker.addTo(map);
+
+            // Apply initial zoom gate before adding to map
+            var zoom = map.getZoom();
+            var minZ = (TIER_MIN_ZOOM[tier] !== undefined) ? TIER_MIN_ZOOM[tier] : 6;
+            if (zoom >= minZ) marker.addTo(map);
             metatMarkers.push(marker);
         }
 
@@ -783,10 +847,13 @@
                     if (obs.wind_gust_kts) wind += ' gusting ' + obs.wind_gust_kts + ' kt';
                     var tier = airportTiers[metar.station_id] ||
                                (metar.is_military === true || metar.military === true ? 1 : null);
+                    if (!tier) tier = runwayTier(metar);
                     var badge = '';
                     if (tier === 1) badge = ' <span style="background:rgba(200,30,30,0.9);color:white;padding:1px 5px;border-radius:2px;font-size:10px;font-weight:700;">MIL</span>';
                     else if (tier === 2) badge = ' <span style="background:rgba(25,80,200,0.9);color:white;padding:1px 5px;border-radius:2px;font-size:10px;font-weight:700;">HUB</span>';
                     else if (tier === 3) badge = ' <span style="background:rgba(180,180,180,0.9);color:#111;padding:1px 5px;border-radius:2px;font-size:10px;font-weight:600;">RGNL</span>';
+                    else if (tier === 4) badge = ' <span style="background:rgba(150,200,150,0.9);color:#111;padding:1px 5px;border-radius:2px;font-size:10px;font-weight:600;">LOCL</span>';
+                    else if (tier === 5) badge = ' <span style="background:rgba(200,200,255,0.9);color:#333;padding:1px 5px;border-radius:2px;font-size:10px;font-weight:600;">SML</span>';
                     var tempText = (obs.temp_c !== null && obs.temp_c !== undefined)
                         ? obs.temp_c + '°C (' + celsiusToFahrenheit(obs.temp_c) + '°F)' : 'N/A';
                     var dewText  = (obs.dewpoint_c !== null && obs.dewpoint_c !== undefined)
@@ -826,6 +893,7 @@
                 .catch(function(error) {
                     var tier  = airportTiers[metar.station_id] ||
                                 (metar.is_military === true || metar.military === true ? 1 : null);
+                    if (!tier) tier = runwayTier(metar);
                     var badge = tier === 1 ? ' (MIL)' : '';
                     L.popup()
                         .setLatLng([metar.latitude, metar.longitude])
@@ -896,42 +964,38 @@
                 console.warn('Error loading AIRMETs:', err);
             }
         }
+
         async function loadFzlvl() {
-            // FZLVL contours served from dedicated endpoint as LineString GeoJSON
             try {
                 var response = await fetch('/CAP_WxCOP/api/airmet-sigmet/fzlvl');
                 if (!response.ok) return;
                 var geojson = await response.json();
 
-                // Clear existing
                 fzlvlLines.forEach(function(l) { if (l._map) map.removeLayer(l); });
                 fzlvlLabels.forEach(function(l) { if (l._map) map.removeLayer(l); });
                 fzlvlLines = []; fzlvlLabels = [];
 
-                var FZLVL_COLOR = '#2255AA';  // steel blue, distinct from icing light blue
+                var FZLVL_COLOR = '#2255AA';
 
                 (geojson.features || []).forEach(function(f) {
                     if (!f.geometry) return;
                     var p = f.properties;
                     if (p.type !== 'FZLVL_CONTOUR') return;
 
-                    var coords = f.geometry.coordinates;  // [[lon,lat], ...]
+                    var coords = f.geometry.coordinates;
                     if (!coords || coords.length < 2) return;
 
-                    // Leaflet uses [lat,lon]
                     var latLngs = coords.map(function(c) { return [c[1], c[0]]; });
 
-                    // Draw the line
                     var line = L.polyline(latLngs, {
                         color: FZLVL_COLOR, weight: 2, opacity: 0.8,
-                        dashArray: '6 4'   // dashed to distinguish from solid hazard borders
+                        dashArray: '6 4'
                     });
                     line.bindTooltip(p.label || p.flight_levels || 'FZLVL',
                         { permanent: false, direction: 'top' });
                     line.addTo(map);
                     fzlvlLines.push(line);
 
-                    // Label at midpoint — no background, just text
                     var mid = latLngs[Math.floor(latLngs.length / 2)];
                     var label = L.marker(mid, {
                         icon: L.divIcon({
@@ -974,9 +1038,9 @@
         }
 
         function loadNoMetarAirports() {
-            var b      = map.getBounds();
-            var bounds = [b.getWest().toFixed(4), b.getSouth().toFixed(4),
-                          b.getEast().toFixed(4), b.getNorth().toFixed(4)].join(',');
+            // Use fixed CONUS bounds to match the METAR fetch — dynamic map bounds
+            // at initial zoom 5 may clip airports near the edges of the viewport.
+            var bounds = '-125,24,-66,50';
             fetch('/CAP_WxCOP/api/weather/no-metar-airports?bounds=' + bounds + '&limit=5000')
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
@@ -996,7 +1060,7 @@
         }
 
         function loadWeatherData() {
-            fetch('/CAP_WxCOP/api/weather/metar/recent?bounds=-125,24,-66,50&limit=2500')
+            fetch('/CAP_WxCOP/api/weather-enhanced/metar/recent?bounds=-125,24,-66,50&limit=2500')
                 .then(function(response) { return response.json(); })
                 .then(function(data) {
                     document.getElementById('loading').style.display = 'none';
@@ -1114,7 +1178,6 @@
                 });
             }
 
-            // ── Crossfade frame swap with pre-loading ──────────────────────
             function ensureMrmsLayer(f) {
                 if (!mrmsLayers[f.tile_url]) {
                     mrmsLayers[f.tile_url] = L.tileLayer(f.tile_url, {

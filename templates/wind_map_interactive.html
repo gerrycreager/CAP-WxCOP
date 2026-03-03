@@ -138,6 +138,27 @@
             box-shadow: 0 1px 2px rgba(0,0,0,0.3);
             transform: translateX(-50%);
         }
+        .apt-t3 {
+            font-size: 10px; font-weight: 600;
+            color: #111; background: rgba(220, 220, 220, 0.93);
+            padding: 1px 4px; border-radius: 3px; border: 1px solid #888;
+            white-space: nowrap; pointer-events: none;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.3); transform: translateX(-50%);
+        }
+        .apt-t4 {
+            font-size: 9px; font-weight: 500;
+            color: #111; background: rgba(150, 200, 150, 0.90);
+            padding: 1px 3px; border-radius: 3px; border: 1px solid #6a6;
+            white-space: nowrap; pointer-events: none;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.2); transform: translateX(-50%);
+        }
+        .apt-t5 {
+            font-size: 9px; font-weight: 400;
+            color: #333; background: rgba(200, 200, 220, 0.88);
+            padding: 1px 3px; border-radius: 3px; border: 1px solid #aab;
+            white-space: nowrap; pointer-events: none;
+            box-shadow: 0 1px 1px rgba(0,0,0,0.15); transform: translateX(-50%);
+        }
 
         .highlight-ring {
             background: transparent; border: none; box-shadow: none;
@@ -330,17 +351,18 @@
         <h3>Coverage Area</h3>
         <select id="regionSelector" class="layer-selector">
             <option value="conus">CONUS</option>
-            <option value="region/AK">Alaska</option>
-            <option value="region/HI">Hawaii</option>
-            <option value="region/CARIBBEAN">Caribbean / Bahamas</option>
-            <option value="region/NCR">North Central Region</option>
-            <option value="region/GLR">Great Lakes Region</option>
-            <option value="region/MAR">Mid-Atlantic Region</option>
-            <option value="region/NER">Northeast Region</option>
-            <option value="region/SER">Southeast Region</option>
-            <option value="region/SWR">Southwest Region</option>
-            <option value="region/RMR">Rocky Mountain Region</option>
-            <option value="region/PCR">Pacific Region (Western US)</option>
+            <option value="region/NCR">NCR &mdash; North Central</option>
+            <option value="region/GLR">GLR &mdash; Great Lakes</option>
+            <option value="region/MAR">MAR &mdash; Mid-Atlantic</option>
+            <option value="region/NER">NER &mdash; Northeast</option>
+            <option value="region/SER">SER &mdash; Southeast</option>
+            <option value="region/SWR">SWR &mdash; Southwest</option>
+            <option value="region/RMR">RMR &mdash; Rocky Mountain</option>
+            <option value="region/PCR">PCR &mdash; Pacific</option>
+            <option value="region/PCR-AK">PCR &mdash; Alaska</option>
+            <option value="region/PCR-HI">PCR &mdash; Hawaii</option>
+            <option value="region/SER-PR">SER &mdash; Puerto Rico / Caribbean</option>
+            <option value="region/PCR-GUAM">PCR &mdash; Guam</option>
         </select>
         <label class="checkbox-label"><input type="checkbox" id="airmetToggle"> G-AIRMET</label>
         <label class="checkbox-label"><input type="checkbox" id="sigmetToggle"> SIGMET</label>
@@ -371,6 +393,10 @@
 
         <div class="divider"></div>
         <div class="legend-item"><div class="legend-tag" style="background:rgba(200,30,30,0.9);color:white;">MIL</div>Military</div>
+        <div class="legend-item"><div class="legend-tag" style="background:rgba(25,80,200,0.9);color:white;">HUB</div>Major Hub</div>
+        <div class="legend-item"><div class="legend-tag" style="background:rgba(220,220,220,0.93);color:#111;">RGNL</div>Regional (&ge;7,000 ft)</div>
+        <div class="legend-item"><div class="legend-tag" style="background:rgba(150,200,150,0.9);color:#111;">LOCL</div>Local (5,000&ndash;6,999 ft)</div>
+        <div class="legend-item"><div class="legend-tag" style="background:rgba(200,200,220,0.9);color:#333;">SML</div>Small (2,500&ndash;4,999 ft)</div>
         <div class="legend-item">
             <div style="width:12px;height:12px;border-radius:50%;border:2px solid #555;
                         background:white;flex-shrink:0;margin-right:8px;"></div>
@@ -378,6 +404,13 @@
         </div>
 
         <div class="divider"></div>
+        <div class="divider"></div>
+        <h3>Display Options</h3>
+        <label class="checkbox-label"><input type="checkbox" id="showMilitary" checked> Military</label>
+        <label class="checkbox-label"><input type="checkbox" id="showMajor" checked> Major Hub</label>
+        <label class="checkbox-label"><input type="checkbox" id="showRegional" checked> Regional (&ge;7,000 ft)</label>
+        <label class="checkbox-label"><input type="checkbox" id="showLocal" checked> Local (5,000&ndash;6,999 ft)</label>
+        <label class="checkbox-label"><input type="checkbox" id="showSmall"> Small (2,500&ndash;4,999 ft)</label>
         <label class="checkbox-label">
             <input type="checkbox" id="labelToggle" checked> Show labels
         </label>
@@ -443,6 +476,10 @@
         var highlightStation = null;
         var currentLayerName = 'street';
 
+        // label_priority from API: 1=Military, 2=Major(>=10k/INTL), 3=Regional(5-9999ft), 4=Small(<5000ft)
+        // Zoom thresholds match weather map for consistency
+        var TIER_MIN_ZOOM = { 1: 0, 2: 6, 3: 8, 4: 10, 5: 12 };
+
         function initMap() {
             map = L.map('map', {
                 center: [39.0, -98.0],
@@ -492,7 +529,7 @@
             setupControls();
             loadWindForecastData();
 
-            map.on('zoomend moveend', updateLabels);
+            map.on('zoomend moveend', function() { filterMarkers(); updateLabels(); });
 
             map.on('click', function(e) {
                 showSidebar(e.latlng);
@@ -501,10 +538,16 @@
             document.getElementById('labelToggle').addEventListener('change', function(e) {
                 if (e.target.checked) {
                     labelsLayer.addTo(map);
+                    filterMarkers();
                     updateLabels();
                 } else {
                     map.removeLayer(labelsLayer);
                 }
+            });
+
+            ['Military', 'Major', 'Regional', 'Local', 'Small'].forEach(function(t) {
+                var el = document.getElementById('show' + t);
+                if (el) el.addEventListener('change', filterMarkers);
             });
 
             document.getElementById('highlightBtn').addEventListener('click', applyHighlight);
@@ -589,6 +632,32 @@
             });
         }
 
+        function tierVisible(priority) {
+            var els = {
+                1: document.getElementById('showMilitary'),
+                2: document.getElementById('showMajor'),
+                3: document.getElementById('showRegional'),
+                4: document.getElementById('showLocal'),
+                5: document.getElementById('showSmall')
+            };
+            var el = els[priority];
+            if (!el) return false;
+            return el.checked;
+        }
+
+        function filterMarkers() {
+            var zoom = map.getZoom();
+            windMarkers.forEach(function(marker) {
+                var p    = marker._windPriority || 3;
+                var minZ = TIER_MIN_ZOOM[p] !== undefined ? TIER_MIN_ZOOM[p] : 8;
+                if (tierVisible(p) && zoom >= minZ) {
+                    marker.addTo(map);
+                } else {
+                    map.removeLayer(marker);
+                }
+            });
+        }
+
         function updateLabels() {
             labelsLayer.clearLayers();
             var labelsOn = document.getElementById('labelToggle') ?
@@ -596,9 +665,18 @@
             var zoom   = map.getZoom();
             var bounds = map.getBounds();
 
+            // Build a set of station_ids whose markers are currently on the map
+            var visibleIds = new Set();
+            windMarkers.forEach(function(m) {
+                if (m._map && m._windStation) visibleIds.add(m._windStation);
+            });
+
             currentAirports.forEach(function(airport) {
                 if (!bounds.contains([airport.lat, airport.lon])) return;
-                var sid = airport.station_id;
+                var sid      = airport.station_id;
+                var priority = airport.label_priority || 3;
+                // Only label airports whose marker is actually visible
+                if (!visibleIds.has(sid)) return;
 
                 // Highlighted airport always shows regardless of toggle/zoom
                 if (sid === highlightStation) {
@@ -614,39 +692,27 @@
                 }
 
                 if (!labelsOn) return;
+                if (!tierVisible(priority)) return;
 
-                var priority = airport.label_priority || 3;
+                var minZ = TIER_MIN_ZOOM[priority] !== undefined ? TIER_MIN_ZOOM[priority] : 8;
+                if (zoom < minZ) return;
 
-                if (priority === 1) {
-                    L.marker([airport.lat, airport.lon], {
-                        icon: L.divIcon({
-                            className: 'apt-t1', html: sid,
-                            iconSize: null, iconAnchor: [0, 22]
-                        }),
-                        interactive: false, zIndexOffset: 1000
-                    }).addTo(labelsLayer);
-                    return;
-                }
-                if (priority === 2 && zoom >= 5) {
-                    L.marker([airport.lat, airport.lon], {
-                        icon: L.divIcon({
-                            className: 'apt-t2', html: sid,
-                            iconSize: null, iconAnchor: [0, 22]
-                        }),
-                        interactive: false, zIndexOffset: 500
-                    }).addTo(labelsLayer);
-                    return;
-                }
-                // Regional: zoom >= 6 (was 8 — too restrictive)
-                if (priority === 3 && zoom >= 6) {
-                    L.marker([airport.lat, airport.lon], {
-                        icon: L.divIcon({
-                            className: 'apt-t2', html: sid,
-                            iconSize: null, iconAnchor: [0, 22]
-                        }),
-                        interactive: false, zIndexOffset: 100
-                    }).addTo(labelsLayer);
-                }
+                var cssClass = priority === 1 ? 'apt-t1' :
+                               priority === 2 ? 'apt-t2' :
+                               priority === 3 ? 'apt-t3' :
+                               priority === 4 ? 'apt-t4' : 'apt-t5';
+                var zIdx     = priority === 1 ? 1000 :
+                               priority === 2 ? 500  :
+                               priority === 3 ? 100  :
+                               priority === 4 ? 50   : 10;
+
+                L.marker([airport.lat, airport.lon], {
+                    icon: L.divIcon({
+                        className: cssClass, html: sid,
+                        iconSize: null, iconAnchor: [0, 22]
+                    }),
+                    interactive: false, zIndexOffset: zIdx
+                }).addTo(labelsLayer);
             });
         }
 
@@ -668,6 +734,7 @@
                 }),
                 interactive: false, zIndexOffset: 1900
             }).addTo(map);
+            filterMarkers();
             updateLabels();
             map.panTo([airport.lat, airport.lon]);
         }
@@ -676,6 +743,7 @@
             if (highlightMarker) { map.removeLayer(highlightMarker); highlightMarker = null; }
             highlightStation = null;
             document.getElementById('highlightInput').value = '';
+            filterMarkers();
             updateLabels();
         }
 
@@ -942,6 +1010,7 @@
             var windDir = airport.wind_direction || 270;
             var maxWind = Math.max(windSpeed, windGust || 0);
             var model = airport.model || 'HRRR';
+            var _priority = airport.label_priority || 3;
 
             // No-METAR airports: white hollow dot, no wind constraint
             if (airport.no_metar) {
@@ -961,9 +1030,11 @@
                     + '<hr style="margin:0.4rem 0;border:none;border-top:1px solid #ddd;">'
                     + '<p style="color:#888;">No METAR — wind data unavailable</p>'
                     + '<p>Runway: ' + rnwy + '</p></div>';
-                L.marker([lat,lon],{icon:nmIcon}).bindPopup(nmPopup)
-                 .on('add', function() { windMarkers.push(this); });
-                windMarkers.push(L.marker([lat,lon],{icon:nmIcon}).bindPopup(nmPopup));
+                var nmMarker = L.marker([lat,lon], {icon:nmIcon}).bindPopup(nmPopup);
+                nmMarker._windPriority    = _priority;  // inherits military priority correctly
+                nmMarker._windStation     = airport.station_id;
+                nmMarker._noMetarMilitary = !!airport.is_military;
+                windMarkers.push(nmMarker);
                 return;
             }
 
@@ -1048,6 +1119,8 @@
             `;
 
             marker.bindPopup(popupContent);
+            marker._windPriority = _priority;
+            marker._windStation  = airport.station_id;
             windMarkers.push(marker);
         }
 
@@ -1076,6 +1149,7 @@
         function loadWindForecastData() {
             var region = document.getElementById('regionSelector').value;
             var url = '/CAP_WxCOP/api/wind-forecast/' + region;
+            var regionName = document.getElementById('regionSelector').selectedOptions[0].text;
 
             // Clear existing markers
             windMarkers.forEach(function(m) { if (m._map) map.removeLayer(m); });
@@ -1083,7 +1157,9 @@
             currentAirports = [];
             labelsLayer.clearLayers();
 
-            document.getElementById('loading').style.display = 'block';
+            var loadingEl = document.getElementById('loading');
+            loadingEl.textContent = 'Loading ' + regionName + '...';
+            loadingEl.style.display = 'block';
 
             fetch(url)
                 .then(function(response) {
@@ -1091,13 +1167,15 @@
                     return response.json();
                 })
                 .then(function(data) {
-                    document.getElementById('loading').style.display = 'none';
+                    var loadingEl = document.getElementById('loading');
+                    loadingEl.style.display = 'none';
+                    loadingEl.textContent = 'Loading wind constraint forecast data...';
 
                     if (data.airports && data.airports.length > 0) {
                         currentAirports = data.airports;
                         windMarkers = [];
                         data.airports.forEach(addWindMarker);
-                        L.layerGroup(windMarkers).addTo(map);
+                        filterMarkers();  // adds markers with zoom/tier gating
                         updateLabels();
 
                         // Fit map to region bounds if provided
@@ -1112,6 +1190,10 @@
                         console.log('Loaded ' + data.airports.length + ' airports (' + milCount + ' military)');
                     } else {
                         console.log('No wind data returned for region: ' + region);
+                    loadingEl.textContent = 'No data for ' + regionName + ' — check model pipeline';
+                    loadingEl.style.display = 'block';
+                    setTimeout(function() { loadingEl.style.display = 'none';
+                        loadingEl.textContent = 'Loading wind constraint forecast data...'; }, 4000);
                     }
                 })
                 .catch(function(error) {

@@ -356,6 +356,14 @@ def get_region_forecasts(region_code):
         airports, bounds = get_wind_forecasts_by_states(REGION_STATES[region_code])
         if not bounds:
             bounds = REGION_BOUNDS.get(region_code, {'west':-125,'south':24,'east':-66,'north':50})
+        # If state query returned nothing (iso_region mismatch in DB), fall back to bbox
+        if not airports:
+            log.warning(f"State query empty for {region_code}, falling back to bounding box")
+            bounds = REGION_BOUNDS.get(region_code, {'west':-125,'south':24,'east':-66,'north':50})
+            airports = get_wind_forecasts_in_bounds(
+                bounds['west'], bounds['south'],
+                bounds['east'], bounds['north']
+            )
     else:
         # OCONUS / CONUS overview — bounding box
         bounds = REGION_BOUNDS[region_code]
