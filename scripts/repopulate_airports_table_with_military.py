@@ -261,7 +261,11 @@ def process_airports(qualifying_airports):
                     is_military = is_military_airfield(name) or (aviation_id in KNOWN_MILITARY_STATIONS)
                     if is_military:
                         military_count += 1
-                    
+
+                    # iso_region and major hub flag
+                    iso_region = row.get('iso_region', '').strip() or None
+                    is_major_hub = (airport_type == 'large_airport')
+
                     # Prepare data tuple for insertion
                     airports_data.append((
                         aviation_id,
@@ -270,7 +274,9 @@ def process_airports(qualifying_airports):
                         lat,
                         elevation_ft,
                         longest_runway_ft,
-                        is_military
+                        is_military,
+                        iso_region,
+                        is_major_hub
                     ))
                     
                 except (ValueError, KeyError) as e:
@@ -313,10 +319,19 @@ def populate_database(airports_data):
         print(f"  Inserting {len(airports_data):,} airports...")
         
         insert_query = """
-        INSERT INTO observations.airports 
-        (station_id, name, location, elevation_ft, has_paved_runway, longest_runway_ft, is_military)
-        VALUES (%s, %s, ST_SetSRID(ST_MakePoint(%s, %s), 4326), %s, true, %s, %s)
-        ON CONFLICT (station_id) DO NOTHING
+        INSERT INTO observations.airports
+        (station_id, name, location, elevation_ft, has_paved_runway,
+         longest_runway_ft, is_military, iso_region, is_major_hub)
+        VALUES (%s, %s, ST_SetSRID(ST_MakePoint(%s, %s), 4326), %s, true, %s, %s, %s, %s)
+        ON CONFLICT (station_id) DO UPDATE SET
+            name              = EXCLUDED.name,
+            location          = EXCLUDED.location,
+            elevation_ft      = EXCLUDED.elevation_ft,
+            has_paved_runway  = EXCLUDED.has_paved_runway,
+            longest_runway_ft = EXCLUDED.longest_runway_ft,
+            is_military       = EXCLUDED.is_military,
+            iso_region        = EXCLUDED.iso_region,
+            is_major_hub      = EXCLUDED.is_major_hub
         """
         
         cur.executemany(insert_query, airports_data)
@@ -330,13 +345,21 @@ def populate_database(airports_data):
         
         cur.execute("SELECT COUNT(*) FROM observations.airports WHERE longest_runway_ft >= 5000")
         long_runway = cur.fetchone()[0]
-        
+
+        cur.execute("SELECT COUNT(*) FROM observations.airports WHERE is_major_hub = true")
+        hubs = cur.fetchone()[0]
+
+        cur.execute("SELECT COUNT(*) FROM observations.airports WHERE iso_region IS NOT NULL")
+        with_region = cur.fetchone()[0]
+
         conn.commit()
-        
+
         print(f"\n✓ Successfully populated observations.airports")
         print(f"  Total airports: {total:,}")
         print(f"  Military airfields: {military:,}")
+        print(f"  Major hubs: {hubs:,}")
         print(f"  Airports with 5000+ ft runways: {long_runway:,}")
+        print(f"  Airports with iso_region set: {with_region:,}")
         
         # Show some military examples
         print(f"\nSample military airfields:")
@@ -380,3 +403,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
