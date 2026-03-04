@@ -244,7 +244,8 @@
             margin-top: 5px; font-size: 11px; line-height: 1.45;
             color: #333; background: #f8f8f8; padding: 4px 6px; border-radius: 3px;
         }
-    </style>
+            .leaflet-top.leaflet-left { left: 10px; top: 60px; }
+        </style>
 </head>
 <body>
     <div id="titleBar">
@@ -285,7 +286,7 @@
         <label class="checkbox-label"><input type="checkbox" id="showRegional" checked> Regional Airfields (&ge;7000 ft)</label>
         <label class="checkbox-label"><input type="checkbox" id="showLocal"> Local Airfields (5000&ndash;6999 ft)</label>
         <label class="checkbox-label"><input type="checkbox" id="showSmall"> Small Airfields (2500&ndash;4999 ft)</label>
-        <label class="checkbox-label"><input type="checkbox" id="labelToggle" checked> Show labels</label>
+        <label class="checkbox-label"><input type="checkbox" id="labelToggle"> Show labels</label>
 
         <div class="divider"></div>
         <div style="font-size:12px;font-weight:700;color:#555;text-transform:uppercase;
@@ -305,10 +306,10 @@
 
         <div class="divider"></div>
         <h3>Flight Categories</h3>
-        <div class="legend-item"><div class="legend-dot" style="background:#28a745;"></div>VFR</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#ffc107;"></div>MVFR</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#fd7e14;"></div>IFR</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#dc3545;"></div>LIFR</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#00b300;"></div>VFR</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#0099ff;"></div>MVFR</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#cc0000;"></div>IFR</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#ff00ff;"></div>LIFR</div>
 
         <div class="divider"></div>
         <div class="legend-item"><div class="legend-tag" style="background:rgba(200,30,30,0.9);color:white;">MIL</div>Military</div>
@@ -432,7 +433,7 @@
         var metatMarkers = [];
         var noMetarAirports = [];
         var noMetarMarkers = [];
-        var labelsVisible = true;
+        var labelsVisible = false;
         var currentLayerName = 'street';
         var highlightLayer = null;   // airport highlight ring
 
@@ -454,7 +455,7 @@
         //   3 = Regional  — paved >= 7000 ft, z6+  (checked by default)
         //   4 = Local     — paved 5000-6999 ft, z8+ (unchecked by default)
         //   5 = Small     — paved 2500-4999 ft, z10+(unchecked by default)
-        var TIER_MIN_ZOOM = { 1: 0, 2: 5, 3: 6, 4: 8, 5: 10 };
+        var TIER_MIN_ZOOM = { 1: 0, 2: 3, 3: 3, 4: 10, 5: 12 };
 
         // No-METAR symbol zoom thresholds
         var NO_METAR_SYM_ZOOM = { mil: 3, civ: 12 };
@@ -823,10 +824,10 @@
         }
 
         function getCategoryColor(cat) {
-            if (cat === 'VFR')  return '#28a745';
-            if (cat === 'MVFR') return '#ffc107';
-            if (cat === 'IFR')  return '#fd7e14';
-            if (cat === 'LIFR') return '#dc3545';
+            if (cat === 'VFR')  return '#00b300';
+            if (cat === 'MVFR') return '#0099ff';
+            if (cat === 'IFR')  return '#cc0000';
+            if (cat === 'LIFR') return '#ff00ff';
             return '#808080';
         }
 
