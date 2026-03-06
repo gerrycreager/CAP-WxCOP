@@ -144,7 +144,7 @@ def load_airport_coordinates():
     Load airport coordinates from PostgreSQL database
     Uses airports that have:
     - has_paved_runway = true
-    - has_reporting = true (have actual METAR reports)
+    - longest_runway_ft >= 2500 (set during repopulation)
     - Valid 4-character station_id
     """
     global AIRPORT_COORDS
@@ -166,7 +166,6 @@ def load_airport_coordinates():
             ST_X(location) as longitude
         FROM observations.airports
         WHERE has_paved_runway = true
-          AND has_reporting = true
           AND LENGTH(station_id) = 4
           AND station_id NOT LIKE '%-%'
         """
