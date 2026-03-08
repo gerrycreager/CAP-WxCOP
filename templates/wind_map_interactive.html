@@ -406,10 +406,10 @@
         <div class="divider"></div>
         <div class="divider"></div>
         <h3>Display Options</h3>
-        <label class="checkbox-label"><input type="checkbox" id="showMilitary" checked> Military</label>
-        <label class="checkbox-label"><input type="checkbox" id="showMajor" checked> Major Hub</label>
-        <label class="checkbox-label"><input type="checkbox" id="showRegional" checked> Regional (&ge;7,000 ft)</label>
-        <label class="checkbox-label"><input type="checkbox" id="showLocal" checked> Local (5,000&ndash;6,999 ft)</label>
+        <label class="checkbox-label"><input type="checkbox" id="showMilitary"> Military</label>
+        <label class="checkbox-label"><input type="checkbox" id="showMajor"> Major Hub</label>
+        <label class="checkbox-label"><input type="checkbox" id="showRegional"> Regional (&ge;7,000 ft)</label>
+        <label class="checkbox-label"><input type="checkbox" id="showLocal"> Local (5,000&ndash;6,999 ft)</label>
         <label class="checkbox-label"><input type="checkbox" id="showSmall"> Small (2,500&ndash;4,999 ft)</label>
         <label class="checkbox-label">
             <input type="checkbox" id="labelToggle"> Show labels
@@ -476,9 +476,26 @@
         var highlightStation = null;
         var currentLayerName = 'street';
 
-        // label_priority from API: 1=Military, 2=Major(>=10k/INTL), 3=Regional(5-9999ft), 4=Small(<5000ft)
-        // Zoom thresholds match weather map for consistency
-        var TIER_MIN_ZOOM = { 1: 0, 2: 3, 3: 3, 4: 10, 5: 12 };
+        // ══════════════════════════════════════════════════════════════════
+        // TIER DISPLAY CONFIGURATION — all tier appearance settings here
+        // label_priority from API: 1=Military 2=Major Hub 3=Regional 4=Local 5=Small
+        //
+        // minZoom    : map zoom level at which this tier first appears
+        // initCheck  : true = checkbox checked (visible) on page load
+        // zIndex     : label stacking order (higher = on top)
+        // cssClass   : label CSS class defined in <style> section above
+        // ══════════════════════════════════════════════════════════════════
+        var TIER_CONFIG = {
+            1: { minZoom: 0,  initCheck: true,  zIndex: 1000, cssClass: 'apt-t1' },  // Military
+            2: { minZoom: 4,  initCheck: true,  zIndex: 500,  cssClass: 'apt-t2' },  // Major Hub
+            3: { minZoom: 6,  initCheck: true,  zIndex: 100,  cssClass: 'apt-t3' },  // Regional
+            4: { minZoom: 7,  initCheck: false, zIndex: 50,   cssClass: 'apt-t4' },  // Local
+            5: { minZoom: 9,  initCheck: false, zIndex: 10,   cssClass: 'apt-t5' },  // Small
+        };
+        // ── Convenience lookup (keeps rest of code readable) ─────────────
+        var TIER_MIN_ZOOM = Object.fromEntries(
+            Object.entries(TIER_CONFIG).map(([k,v]) => [k, v.minZoom])
+        );
 
         function initMap() {
             map = L.map('map', {
@@ -525,6 +542,13 @@
             }).addTo(map);
 
             labelsLayer = L.layerGroup().addTo(map);
+
+            // Apply TIER_CONFIG.initCheck to checkboxes — single source of truth
+            var _tierIds = { 1:'showMilitary', 2:'showMajor', 3:'showRegional', 4:'showLocal', 5:'showSmall' };
+            Object.entries(TIER_CONFIG).forEach(function(entry) {
+                var el = document.getElementById(_tierIds[entry[0]]);
+                if (el) el.checked = entry[1].initCheck;
+            });
 
             setupControls();
             loadWindForecastData();
@@ -697,14 +721,9 @@
                 var minZ = TIER_MIN_ZOOM[priority] !== undefined ? TIER_MIN_ZOOM[priority] : 8;
                 if (zoom < minZ) return;
 
-                var cssClass = priority === 1 ? 'apt-t1' :
-                               priority === 2 ? 'apt-t2' :
-                               priority === 3 ? 'apt-t3' :
-                               priority === 4 ? 'apt-t4' : 'apt-t5';
-                var zIdx     = priority === 1 ? 1000 :
-                               priority === 2 ? 500  :
-                               priority === 3 ? 100  :
-                               priority === 4 ? 50   : 10;
+                var _tc      = TIER_CONFIG[priority] || TIER_CONFIG[3];
+                var cssClass = _tc.cssClass;
+                var zIdx     = _tc.zIndex;
 
                 L.marker([airport.lat, airport.lon], {
                     icon: L.divIcon({

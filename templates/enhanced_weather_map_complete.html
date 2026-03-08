@@ -281,10 +281,10 @@
 
         <div class="divider"></div>
         <h3>Display Options</h3>
-        <label class="checkbox-label"><input type="checkbox" id="showMilitary" checked> Military Airfields</label>
-        <label class="checkbox-label"><input type="checkbox" id="showHubs" checked> Major Hubs</label>
-        <label class="checkbox-label"><input type="checkbox" id="showRegional" checked> Regional Airfields (&ge;7000 ft)</label>
-        <label class="checkbox-label"><input type="checkbox" id="showLocal" checked> Local Airfields (5000&ndash;6999 ft)</label>
+        <label class="checkbox-label"><input type="checkbox" id="showMilitary"> Military Airfields</label>
+        <label class="checkbox-label"><input type="checkbox" id="showHubs"> Major Hubs</label>
+        <label class="checkbox-label"><input type="checkbox" id="showRegional"> Regional Airfields (&ge;7000 ft)</label>
+        <label class="checkbox-label"><input type="checkbox" id="showLocal"> Local Airfields (5000&ndash;6999 ft)</label>
         <label class="checkbox-label"><input type="checkbox" id="showSmall"> Small Airfields (2500&ndash;4999 ft)</label>
         <label class="checkbox-label"><input type="checkbox" id="labelToggle"> Show labels</label>
 
@@ -449,17 +449,30 @@
             return s.trim();
         }
 
-        // Tier definitions:
-        //   1 = Military  — show at z0+ when toggled on
-        //   2 = Hub       — major commercial, z5+
-        //   3 = Regional  — paved >= 7000 ft, z6+  (checked by default)
-        //   4 = Local     — paved 5000-6999 ft, z8+ (unchecked by default)
-        //   5 = Small     — paved 2500-4999 ft, z10+(unchecked by default)
-        var TIER_MIN_ZOOM = { 1: 0, 2: 3, 3: 3, 4: 10, 5: 12 };
+        // ══════════════════════════════════════════════════════════════════
+        // TIER DISPLAY CONFIGURATION — all tier appearance settings here
+        // Tier numbers from API: 1=Military 2=Major Hub 3=Regional 4=Local 5=Small
+        //
+        // minZoom    : map zoom level at which this tier first appears
+        // initCheck  : true = checkbox checked (visible) on page load
+        // zIndex     : label stacking order (higher = on top)
+        // cssClass   : label CSS class defined in <style> section above
+        // noMetarZoom: minimum zoom to show no-METAR symbol for this tier
+        // ══════════════════════════════════════════════════════════════════
+        var TIER_CONFIG = {
+            1: { minZoom: 0,  initCheck: true,  zIndex: 1000, cssClass: 'apt-t1', noMetarZoom: 3  },  // Military
+            2: { minZoom: 4,  initCheck: true,  zIndex: 500,  cssClass: 'apt-t2', noMetarZoom: 4  },  // Major Hub
+            3: { minZoom: 7,  initCheck: true,  zIndex: 100,  cssClass: 'apt-t3', noMetarZoom: 6  },  // Regional
+            4: { minZoom: 7,  initCheck: false, zIndex: 50,   cssClass: 'apt-t4', noMetarZoom: 7  },  // Local
+            5: { minZoom: 9,  initCheck: false, zIndex: 10,   cssClass: 'apt-t5', noMetarZoom: 9  },  // Small
+        };
+        // ── Convenience lookups (keep rest of code readable) ─────────────
+        var TIER_MIN_ZOOM = Object.fromEntries(
+            Object.entries(TIER_CONFIG).map(function(e) { return [e[0], e[1].minZoom]; })
+        );
+        var NO_METAR_SYM_ZOOM = { mil: TIER_CONFIG[1].noMetarZoom, civ: TIER_CONFIG[3].noMetarZoom };
 
-        // No-METAR symbol zoom thresholds
-        var NO_METAR_SYM_ZOOM = { mil: 3, civ: 12 };
-
+        // Major hub override list — forces tier 2 regardless of runway data
         var airportTiers = {
             'KATL': 2, 'KORD': 2, 'KLAX': 2, 'KDFW': 2, 'KDEN': 2, 'KJFK': 2,
             'KSFO': 2, 'KLAS': 2, 'KPHX': 2, 'KIAH': 2, 'KCLT': 2, 'KMIA': 2,
@@ -476,6 +489,13 @@
             if (rwy >= 5000) return 4;
             if (rwy >= 2500) return 5;
             return 3;   // unknown runway → treat as regional so it shows by default
+        }
+
+        // ── Helper: is this tier's checkbox currently checked? ────────────
+        var _tierCheckIds = { 1:'showMilitary', 2:'showHubs', 3:'showRegional', 4:'showLocal', 5:'showSmall' };
+        function tierChecked(tier) {
+            var el = document.getElementById(_tierCheckIds[tier]);
+            return el ? el.checked : false;
         }
 
         function initMap() {
@@ -500,6 +520,12 @@
             L.control.scale({ position: 'bottomleft', imperial: true, metric: false, maxWidth: 150 }).addTo(map);
 
             labelsLayer = L.featureGroup().addTo(map);
+
+            // Apply TIER_CONFIG.initCheck to checkboxes — single source of truth
+            Object.entries(TIER_CONFIG).forEach(function(e) {
+                var el = document.getElementById(_tierCheckIds[e[0]]);
+                if (el) el.checked = e[1].initCheck;
+            });
 
             setupControls();
             loadWeatherData();
@@ -640,24 +666,11 @@
         }
 
         function filterMarkers() {
-            var showMilitary = document.getElementById('showMilitary').checked;
-            var showHubs     = document.getElementById('showHubs').checked;
-            var showRegional = document.getElementById('showRegional').checked;
-            var showLocal    = document.getElementById('showLocal').checked;
-            var showSmall    = document.getElementById('showSmall').checked;
-            var zoom         = map.getZoom();
-
+            var zoom = map.getZoom();
             metatMarkers.forEach(function(marker) {
                 var tier = marker.options.airportTier;
-                // Is the toggle for this tier enabled?
-                var toggleOn = (tier === 1 && showMilitary) ||
-                               (tier === 2 && showHubs)     ||
-                               (tier === 3 && showRegional) ||
-                               (tier === 4 && showLocal)    ||
-                               (tier === 5 && showSmall);
-                // Also enforce minimum zoom level per tier
-                var minZ  = (TIER_MIN_ZOOM[tier] !== undefined) ? TIER_MIN_ZOOM[tier] : 6;
-                if (toggleOn && zoom >= minZ) {
+                var minZ = (TIER_MIN_ZOOM[tier] !== undefined) ? TIER_MIN_ZOOM[tier] : 6;
+                if (tierChecked(tier) && zoom >= minZ) {
                     marker.addTo(map);
                 } else {
                     map.removeLayer(marker);
@@ -668,26 +681,15 @@
 
         // Controls no-METAR dot visibility based on current zoom, tier toggle, and showNoMetar.
         function updateNoMetarSymbols() {
-            var showNoMetar  = document.getElementById('showNoMetar').checked;
-            var showMilitary = document.getElementById('showMilitary').checked;
-            var showHubs     = document.getElementById('showHubs').checked;
-            var showRegional = document.getElementById('showRegional').checked;
-            var showLocal    = document.getElementById('showLocal').checked;
-            var showSmall    = document.getElementById('showSmall').checked;
-            var zoom         = map.getZoom();
-            var bounds       = map.getBounds();
+            var showNoMetar = document.getElementById('showNoMetar').checked;
+            var zoom        = map.getZoom();
+            var bounds      = map.getBounds();
             noMetarMarkers.forEach(function(m) {
                 if (!showNoMetar) { if (m._map) map.removeLayer(m); return; }
-                var pos      = m.getLatLng();
-                var inBounds = bounds.contains(pos);
                 var tier     = m.options.airportTier;
-                var toggleOn = (tier === 1 && showMilitary) ||
-                               (tier === 2 && showHubs)     ||
-                               (tier === 3 && showRegional) ||
-                               (tier === 4 && showLocal)    ||
-                               (tier === 5 && showSmall);
                 var minZ     = m._noMetarMilitary ? NO_METAR_SYM_ZOOM.mil : NO_METAR_SYM_ZOOM.civ;
-                if (inBounds && toggleOn && zoom >= minZ) {
+                var inBounds = bounds.contains(m.getLatLng());
+                if (inBounds && tierChecked(tier) && zoom >= minZ) {
                     if (!m._map) m.addTo(map);
                 } else {
                     if (m._map) map.removeLayer(m);
@@ -726,12 +728,6 @@
             }
 
             // METAR airport labels — respect tier zoom and toggle state
-            var showMilitary = document.getElementById('showMilitary').checked;
-            var showHubs     = document.getElementById('showHubs').checked;
-            var showRegional = document.getElementById('showRegional').checked;
-            var showLocal    = document.getElementById('showLocal').checked;
-            var showSmall    = document.getElementById('showSmall').checked;
-
             currentMetars.forEach(function(metar) {
                 if (!bounds.contains([metar.latitude, metar.longitude])) return;
                 var sid  = metar.station_id;
@@ -739,25 +735,18 @@
                            (metar.is_military === true || metar.military === true ? 1 : null);
                 if (!tier) tier = runwayTier(metar);
 
-                // Check toggle
-                var toggleOn = (tier === 1 && showMilitary) ||
-                               (tier === 2 && showHubs)     ||
-                               (tier === 3 && showRegional) ||
-                               (tier === 4 && showLocal)    ||
-                               (tier === 5 && showSmall);
-                if (!toggleOn) return;
-
-                // Check zoom
-                var minZ = (TIER_MIN_ZOOM[tier] !== undefined) ? TIER_MIN_ZOOM[tier] : 6;
+                if (!tierChecked(tier)) return;
+                var tc   = TIER_CONFIG[tier] || TIER_CONFIG[3];
+                var minZ = tc.minZoom;
                 if (zoom < minZ) return;
 
                 L.marker([metar.latitude, metar.longitude], {
                     icon: L.divIcon({
-                        className: 'apt-t' + Math.min(tier, 5),
+                        className: tc.cssClass,
                         html: sid, iconSize: null, iconAnchor: [0, 22]
                     }),
                     interactive: false,
-                    zIndexOffset: Math.max(0, (5 - tier)) * 100
+                    zIndexOffset: tc.zIndex
                 }).addTo(labelsLayer);
             });
         }

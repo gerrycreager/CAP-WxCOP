@@ -115,6 +115,11 @@ def interactive_wind_map():
     """Interactive wind forecast map"""
     return render_template('wind_map_interactive.html')
 
+@app.route('/static-maps')
+def static_wind_maps():
+    """Static pre-generated wind constraint maps by CONUS / region / wing"""
+    return render_template('static_wind_maps.html')
+
 @app.route('/mrms')
 def mrms_radar():
     """MRMS composite reflectivity / MESH / lightning / azshear animated radar"""
@@ -249,6 +254,65 @@ def health_check():
 # LEGACY WIND CONSTRAINTS GENERATOR - Separate route for old functionality
 # ============================================================================
 
+@app.route('/api/map-meta')
+def map_meta():
+    """Metadata for the most recent batch map run (model run time, airport count, generated time)"""
+    import glob
+    batch_dir = '/var/www/cap_winds_app/static/batch_maps'
+    try:
+        from db_config import get_connection
+        conn = get_connection()
+        cur  = conn.cursor()
+        cur.execute("""
+            SELECT model_run, COUNT(DISTINCT station_id) as cnt
+            FROM observations.model_wind_forecasts
+            GROUP BY model_run
+            ORDER BY model_run DESC
+            LIMIT 1
+        """)
+        row = cur.fetchone()
+        cur.close(); conn.close()
+        model_run     = row[0].strftime('%Y-%m-%d %H%MZ') if row else None
+        airport_count = int(row[1]) if row else None
+    except Exception:
+        model_run     = None
+        airport_count = None
+
+    # Newest PNG mtime as generated time
+    pngs = glob.glob(f'{batch_dir}/*.png')
+    if pngs:
+        newest  = max(pngs, key=os.path.getmtime)
+        gen_ts  = datetime.utcfromtimestamp(os.path.getmtime(newest)).strftime('%Y-%m-%d %H%MZ')
+    else:
+        gen_ts  = None
+
+    # Latest shapefile ZIP
+    zips = glob.glob(f'/var/www/html/cap_winds_shp/*.zip')
+    latest_zip = os.path.basename(max(zips, key=os.path.getmtime)) if zips else None
+
+    return jsonify({
+        'model_run':     model_run,
+        'airport_count': airport_count,
+        'generated':     gen_ts,
+        'latest_zip':    latest_zip,
+    })
+
+
+@app.route('/api/latest-shapefile')
+def latest_shapefile():
+    """Return URL to the most recent shapefile ZIP"""
+    import glob
+    zips = glob.glob('/var/www/html/cap_winds_shp/*.zip')
+    if not zips:
+        return jsonify({'url': None, 'filename': None})
+    newest   = max(zips, key=os.path.getmtime)
+    filename = os.path.basename(newest)
+    return jsonify({
+        'url':      f'/CAP_WxCOP/cap_winds_shp/{filename}',
+        'filename': filename,
+    })
+
+
 @app.route('/legacy-wind-generator', methods=['GET', 'POST'])
 def legacy_wind_generator():
     """Legacy wind constraints map generator - moved to separate route"""
@@ -294,3 +358,4 @@ if __name__ == '__main__':
     app.run(debug=False, host='0.0.0.0', port=5000)
 
 app.url_map.strict_slashes = False
+

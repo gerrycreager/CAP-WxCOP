@@ -4,8 +4,13 @@ Smart Model Wind Forecast Ingest - FILTERED VERSION
 Ingests HRRR and GFS wind forecasts into PostGIS database
 NOW WITH RUNWAY FILTERING: Only airports with paved runways >= 2500 ft
 
+GFS covers global domain including AK, HI, PR, Guam (MANDATORY for OCONUS).
+HRRR covers CONUS only.
+
 Usage:
   ./ingest_model_winds.py [--force-hrrr] [--force-gfs] [--reprocess]
+  ./ingest_model_winds.py --gfs-only      # force GFS only for testing
+  ./ingest_model_winds.py --hrrr-only     # force HRRR only
 
 Cron (run at :15 past hour, after GRIB download at :05):
   15 * * * * /var/www/cap_winds_app/scripts/ingest_model_winds.py >> /var/log/model_winds_ingest.log 2>&1
@@ -14,93 +19,124 @@ import sys
 import os
 import logging
 import argparse
-import csv
-import requests
 from datetime import datetime, timedelta
 
 sys.path.insert(0, '/var/www/cap_winds_app')
 from db_config import get_connection
 
-# External dependencies
 import pygrib
 import numpy as np
 from scipy.spatial import cKDTree
 
-# Configure logging
+# ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 log = logging.getLogger(__name__)
 
-# Configuration
+# ── Configuration ─────────────────────────────────────────────────────────────
 HRRR_BASE = "/LDM/models/hrrr"
-GFS_BASE = "/LDM/models/gfs"
-FORECAST_HOURS = 12  # F00-F12 for HRRR, F00-F12 for GFS
+GFS_BASE  = "/LDM/models/gfs/0p25"   # LDM writes: /LDM/models/gfs/0p25/YYYYMMDD/
 
-# Runway filtering criteria (must match repopulate_airports_table.py)
-PAVED_SURFACES = ['ASP', 'ASPH', 'CON', 'CONC', 'concrete', 'asphalt']
-MIN_RUNWAY_LENGTH = 2500  # feet
-AIRPORT_TYPES = ['large_airport', 'medium_airport', 'small_airport']
+FORECAST_HOURS    = 12   # F00-F12 for both models
+MIN_RUNWAY_LENGTH = 2500 # feet — must match repopulate_airports_table script
 
-# Global cache for airport coordinates
+# Global airport coordinate cache (loaded once per run)
 AIRPORT_COORDS = {}
 
 
+# ── Database helpers ──────────────────────────────────────────────────────────
+
 def check_existing_forecast(model_name, model_run):
     """
-    Check if forecasts for this model run are already in database
-    Returns True if complete set exists, False otherwise
+    Return True if a complete set of forecasts for this model run already
+    exists in the database (all FORECAST_HOURS+1 hours present).
     """
     try:
         conn = get_connection()
-        cur = conn.cursor()
-        
-        # Check if we have forecasts for this model run
+        cur  = conn.cursor()
         cur.execute("""
             SELECT COUNT(DISTINCT forecast_hour)
             FROM observations.model_wind_forecasts
             WHERE model_name = %s AND model_run = %s
         """, (model_name, model_run))
-        
-        count = cur.fetchone()[0]
+        result = cur.fetchone()
         cur.close()
         conn.close()
-        
-        # Should have FORECAST_HOURS + 1 hours (F00 through F12 = 13 hours)
-        return count >= (FORECAST_HOURS + 1)
-        
+        return bool(result and result[0] >= (FORECAST_HOURS + 1))
     except Exception as e:
         log.error(f"Error checking existing forecast: {e}")
         return False
 
 
+def load_airport_coordinates():
+    """
+    Load ALL airports with paved runways >= 2500 ft from the database.
+    No geographic filter — GFS is global, so OCONUS airports (AK/HI/PR/Guam)
+    are included here and will be matched against GFS grids.
+    """
+    global AIRPORT_COORDS
+    if AIRPORT_COORDS:
+        return AIRPORT_COORDS
+
+    try:
+        conn = get_connection()
+        cur  = conn.cursor()
+        cur.execute("""
+            SELECT station_id,
+                   ST_Y(location::geometry) AS lat,
+                   ST_X(location::geometry) AS lon
+            FROM observations.airports
+            WHERE location IS NOT NULL
+              AND longest_runway_ft >= %s
+        """, (MIN_RUNWAY_LENGTH,))
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        for station_id, lat, lon in rows:
+            AIRPORT_COORDS[station_id] = {
+                'lat': float(lat),
+                'lon': float(lon)
+            }
+
+        log.info(f"Loaded {len(AIRPORT_COORDS)} airport coordinates (global, runway >= {MIN_RUNWAY_LENGTH} ft)")
+        return AIRPORT_COORDS
+
+    except Exception as e:
+        log.error(f"Error loading airport coordinates: {e}")
+        return {}
+
+
+# ── Cycle finders ─────────────────────────────────────────────────────────────
+
 def find_latest_hrrr_cycle():
     """
-    Find the most recent HRRR cycle directory
-    Returns (cycle_datetime, cycle_path) or (None, None)
+    Find the most recent available HRRR cycle.
+    Path pattern: /LDM/models/hrrr/hrrr.YYYYMMDD/HHz/hrrr.tHHz.wrfsfcf000.grib2
+    Returns (cycle_datetime, cycle_dir) or (None, None).
     """
     try:
         now = datetime.utcnow()
-        
-        # Check last 6 hours for a complete cycle
-        for hours_back in range(0, 7):
-            check_time = now - timedelta(hours=hours_back)
-            date_str = check_time.strftime('%Y%m%d')
-            cycle_hour = check_time.hour
-            
-            cycle_dir = f"{HRRR_BASE}/hrrr.{date_str}/{cycle_hour:02d}z"
-            
-            if os.path.isdir(cycle_dir):
-                # Check if we have at least the analysis file
-                test_file = os.path.join(cycle_dir, f"hrrr.t{cycle_hour:02d}z.wrfsfcf000.grib2")
+        for days_back in range(0, 2):
+            check_date = now - timedelta(days=days_back)
+            date_str   = check_date.strftime('%Y%m%d')
+            for cycle_hour in range(23, -1, -1):
+                cycle_dir = f"{HRRR_BASE}/hrrr.{date_str}/{cycle_hour:02d}z"
+                if not os.path.isdir(cycle_dir):
+                    continue
+                test_file = os.path.join(
+                    cycle_dir,
+                    f"hrrr.t{cycle_hour:02d}z.wrfsfcf000.grib2"
+                )
                 if os.path.exists(test_file):
-                    cycle_time = datetime(check_time.year, check_time.month, 
-                                        check_time.day, cycle_hour, 0, 0)
-                    return cycle_time, cycle_dir
-        
+                    return (
+                        datetime(check_date.year, check_date.month,
+                                 check_date.day, cycle_hour),
+                        cycle_dir
+                    )
         return None, None
-        
     except Exception as e:
         log.error(f"Error finding HRRR cycle: {e}")
         return None, None
@@ -108,425 +144,347 @@ def find_latest_hrrr_cycle():
 
 def find_latest_gfs_cycle():
     """
-    Find the most recent GFS cycle directory
-    Returns (cycle_datetime, cycle_path) or (None, None)
+    Find the most recent available GFS cycle.
+
+    LDM writes GFS 0.25° files as:
+        /LDM/models/gfs/0p25/YYYYMMDD/gfs_0p25_YYYYMMDD_HHz_f000.grib2
+
+    GFS runs at 00, 06, 12, 18Z.
+    Returns (cycle_datetime, cycle_dir) or (None, None).
     """
     try:
-        now = datetime.utcnow()
-        
-        # GFS runs at 00, 06, 12, 18Z
+        now       = datetime.utcnow()
         gfs_hours = [0, 6, 12, 18]
-        
-        # Check last 24 hours
+
         for days_back in range(0, 2):
             check_date = now - timedelta(days=days_back)
-            date_str = check_date.strftime('%Y%m%d')
-            
+            date_str   = check_date.strftime('%Y%m%d')
+            cycle_dir  = f"{GFS_BASE}/{date_str}"
+
+            if not os.path.isdir(cycle_dir):
+                continue
+
             for cycle_hour in reversed(gfs_hours):
-                cycle_dir = f"{GFS_BASE}/gfs.{date_str}/{cycle_hour:02d}z"
-                
-                if os.path.isdir(cycle_dir):
-                    test_file = os.path.join(cycle_dir, f"gfs.t{cycle_hour:02d}z.pgrb2.0p25.f000")
-                    if os.path.exists(test_file):
-                        cycle_time = datetime(check_date.year, check_date.month,
-                                            check_date.day, cycle_hour, 0, 0)
-                        return cycle_time, cycle_dir
-        
+                test_file = os.path.join(
+                    cycle_dir,
+                    f"gfs_0p25_{date_str}_{cycle_hour:02d}z_f000.grib2"
+                )
+                if os.path.exists(test_file):
+                    log.info(
+                        f"Found GFS cycle: {check_date.strftime('%Y-%m-%d')} "
+                        f"{cycle_hour:02d}Z in {cycle_dir}"
+                    )
+                    return (
+                        datetime(check_date.year, check_date.month,
+                                 check_date.day, cycle_hour),
+                        cycle_dir
+                    )
+
+        log.warning("No GFS cycle found in last 48 hours — OCONUS will have no data")
         return None, None
-        
+
     except Exception as e:
         log.error(f"Error finding GFS cycle: {e}")
         return None, None
 
 
-def load_airport_coordinates():
-    """
-    Load airport coordinates from PostgreSQL database
-    Uses airports that have:
-    - has_paved_runway = true
-    - longest_runway_ft >= 2500 (set during repopulation)
-    - Valid 4-character station_id
-    """
-    global AIRPORT_COORDS
-    
-    try:
-        from db_config import get_connection
-        
-        log.info("Loading airport coordinates from database...")
-        
-        conn = get_connection()
-        cur = conn.cursor()
-        
-        # Query airports from database
-        # Only include airports with paved runways and reporting capability
-        query = """
-        SELECT 
-            station_id,
-            ST_Y(location) as latitude,
-            ST_X(location) as longitude
-        FROM observations.airports
-        WHERE has_paved_runway = true
-          AND LENGTH(station_id) = 4
-          AND station_id NOT LIKE '%-%'
-        """
-        
-        cur.execute(query)
-        rows = cur.fetchall()
-        
-        # Build AIRPORT_COORDS dictionary
-        AIRPORT_COORDS = {}
-        for row in rows:
-            station_id = row[0]
-            lat = row[1]
-            lon = row[2]
-            
-            # Basic validation
-            if station_id and lat is not None and lon is not None:
-                # Validate first character is alphanumeric
-                if station_id[0].isalpha() or station_id[0].isdigit():
-                    AIRPORT_COORDS[station_id] = (lat, lon)
-        
-        cur.close()
-        conn.close()
-        
-        log.info(f"✓ Loaded {len(AIRPORT_COORDS)} airport coordinates from database")
-        
-        # Log some sample airports for verification
-        sample_airports = list(AIRPORT_COORDS.keys())[:5]
-        log.info(f"  Sample airports: {', '.join(sample_airports)}")
-        
-        return True
-        
-    except Exception as e:
-        log.error(f"Failed to load airports from database: {e}")
-        import traceback
-        log.error(traceback.format_exc())
-        return False
+# ── Wind extraction ───────────────────────────────────────────────────────────
 
+def extract_wind_for_airports(grib_file, airports, model_name='HRRR'):
+    """
+    Extract 10-metre wind (U,V) components for each airport from a GRIB2 file.
 
-def extract_winds_from_grib(grib_file, airports):
+    HRRR: Lambert conformal 2D irregular grid → KDTree nearest neighbour
+    GFS:  Regular 0.25° lat/lon grid → direct index lookup
+
+    Returns: {station_id: {'u': m/s, 'v': m/s, 'speed_kts': kt}}
     """
-    Extract wind data for airports from GRIB file - WORKS WITH LAMBERT PROJECTION
-    Uses nearest neighbor interpolation on the irregular HRRR grid
-    Returns dict: {station_id: (wind_dir, wind_speed, wind_gust)}
-    """
-    import math
-    
-    winds = {}
-    
-    if not os.path.exists(grib_file):
-        log.warning(f"GRIB file not found: {grib_file}")
-        return winds
-    
+    if not airports:
+        return {}
+
+    results = {}
+
     try:
         grbs = pygrib.open(grib_file)
-        
-        # Get U and V wind components at 10m
+
+        # Fetch U and V at 10m
         try:
-            u_wind = grbs.select(name='10 metre U wind component')[0]
-            v_wind = grbs.select(name='10 metre V wind component')[0]
-        except:
-            log.warning(f"Could not find wind components in {grib_file}")
-            grbs.close()
-            return winds
-        
-        # Get wind gust if available
-        try:
-            gust = grbs.select(name='Wind speed (gust)')[0]
-        except:
-            gust = None
-        
-        # Extract ENTIRE grid once
-        u_data, lats_grid, lons_grid = u_wind.data()
-        v_data, _, _ = v_wind.data()
-        
-        if gust:
-            gust_data, _, _ = gust.data()
-        
-        grbs.close()
-        
-        # HRRR grid is 2D irregular - flatten it for KDTree
-        lats_flat = lats_grid.flatten()
-        lons_flat = lons_grid.flatten()
-        u_flat = u_data.flatten()
-        v_flat = v_data.flatten()
-        
-        if gust:
-            gust_flat = gust_data.flatten()
-        
-        # Remove NaN points
-        valid_mask = ~(np.isnan(lats_flat) | np.isnan(lons_flat) | np.isnan(u_flat) | np.isnan(v_flat))
-        lats_valid = lats_flat[valid_mask]
-        lons_valid = lons_flat[valid_mask]
-        u_valid = u_flat[valid_mask]
-        v_valid = v_flat[valid_mask]
-        
-        if gust:
-            gust_valid = gust_flat[valid_mask]
-        
-        # Build KDTree for nearest neighbor lookup
-        coords = np.column_stack((lats_valid, lons_valid))
-        tree = cKDTree(coords)
-        
-        # Query winds for each airport
-        for station_id, (lat, lon) in airports.items():
+            u_msgs = grbs.select(name='10 metre U wind component')
+            v_msgs = grbs.select(name='10 metre V wind component')
+        except Exception:
             try:
-                # Find nearest grid point
-                dist, idx = tree.query([lat, lon], k=1)
-                
-                # Skip if too far (>10 km)
-                if dist > 0.1:  # ~10 km
-                    continue
-                
-                # Get wind components
-                u = float(u_valid[idx])
-                v = float(v_valid[idx])
-                
-                # Calculate wind speed and direction
-                wind_speed_ms = math.sqrt(u*u + v*v)
-                wind_speed_kts = wind_speed_ms * 1.944  # m/s to knots
-                
-                # Wind direction (meteorological, FROM direction)
-                wind_dir = (270 - math.degrees(math.atan2(v, u))) % 360
-                
-                # Get gust if available
-                if gust:
-                    gust_ms = float(gust_valid[idx])
-                    gust_kts = gust_ms * 1.944
-                else:
-                    gust_kts = None
-                
-                winds[station_id] = (
-                    int(round(wind_dir)),
-                    int(round(wind_speed_kts)),
-                    int(round(gust_kts)) if gust_kts else None
-                )
-                
+                u_msgs = grbs.select(shortName='10u')
+                v_msgs = grbs.select(shortName='10v')
             except Exception as e:
-                continue
-        
-        log.info(f"  ✓ Extracted winds for {len(winds)} airports")
-        
+                log.error(f"Cannot find 10m wind components in {grib_file}: {e}")
+                grbs.close()
+                return {}
+
+        u_data, lats, lons = u_msgs[0].data()
+        v_data, _,    _    = v_msgs[0].data()
+        grbs.close()
+
+        # Normalise longitudes to -180..180
+        lons = np.where(lons > 180, lons - 360, lons)
+
+        if model_name == 'HRRR':
+            # ── Lambert conformal 2D grid — KDTree ──────────────────────────
+            flat_lats = lats.flatten()
+            flat_lons = lons.flatten()
+            flat_u    = u_data.flatten()
+            flat_v    = v_data.flatten()
+
+            tree = cKDTree(np.column_stack([flat_lats, flat_lons]))
+
+            ap_lats = np.array([a['lat'] for a in airports.values()])
+            ap_lons = np.array([a['lon'] for a in airports.values()])
+            ids     = list(airports.keys())
+
+            dists, idxs = tree.query(np.column_stack([ap_lats, ap_lons]), k=1)
+
+            for i, sid in enumerate(ids):
+                if dists[i] > 0.5:   # > ~55 km — outside HRRR domain
+                    continue
+                u = float(flat_u[idxs[i]])
+                v = float(flat_v[idxs[i]])
+                results[sid] = {
+                    'u': u, 'v': v,
+                    'speed_kts': float(np.sqrt(u*u + v*v)) * 1.94384
+                }
+
+        else:
+            # ── Regular 0.25° lat/lon grid (GFS) — direct index lookup ──────
+            # lats may be 2D (721×1440) or 1D (721,); same for lons
+            if lats.ndim == 2:
+                lat_1d = lats[:, 0]
+                lon_1d = lons[0, :]
+            else:
+                lat_1d = lats
+                lon_1d = lons
+
+            ap_lats = np.array([a['lat'] for a in airports.values()])
+            ap_lons = np.array([a['lon'] for a in airports.values()])
+            ids     = list(airports.keys())
+
+            # Vectorised nearest-neighbour
+            lat_idx = np.abs(lat_1d[:, None] - ap_lats[None, :]).argmin(axis=0)
+            lon_idx = np.abs(lon_1d[:, None] - ap_lons[None, :]).argmin(axis=0)
+
+            for i, sid in enumerate(ids):
+                li = lat_idx[i]
+                lo = lon_idx[i]
+
+                # Distance sanity check — 0.4° ≈ 44 km at equator
+                dlat = abs(float(lat_1d[li]) - ap_lats[i])
+                dlon = abs(float(lon_1d[lo]) - ap_lons[i])
+                dlon = min(dlon, 360.0 - dlon)  # dateline wrap
+                if dlat > 0.4 or dlon > 0.4:
+                    continue
+
+                u = float(u_data[li, lo])
+                v = float(v_data[li, lo])
+                results[sid] = {
+                    'u': u, 'v': v,
+                    'speed_kts': float(np.sqrt(u*u + v*v)) * 1.94384
+                }
+
     except Exception as e:
-        log.error(f"Failed to process GRIB file {grib_file}: {e}")
-    
-    return winds
+        log.error(f"Error extracting wind from {grib_file}: {e}", exc_info=True)
+
+    return results
 
 
-def calculate_wind_category(wind_speed, gust):
-    """Calculate wind category per CAPR 70-1: <16 Normal, 16-29 Caution, 30+ No-Go"""
-    max_wind = gust if gust else wind_speed
-    
-    if max_wind >= 30:
-        return 'NO-GO'
-    elif max_wind >= 16:
+# ── Wind category ─────────────────────────────────────────────────────────────
+
+def get_wind_category(speed_kts):
+    """CAPR 70-1 wind categories."""
+    if speed_kts >= 30:
+        return 'RESTRICTED'
+    elif speed_kts >= 20:
         return 'CAUTION'
-    else:
-        return 'NORMAL'
+    return 'NORMAL'
 
 
-def ingest_model_forecasts(model_name, cycle_dir, model_run, force_reprocess=False):
-    """Ingest model wind forecasts into database"""
-    
-    # Check if already processed (unless forced)
+# ── Main ingest ───────────────────────────────────────────────────────────────
+
+def ingest_model_forecasts(model_name, cycle_dir, model_run,
+                           force_reprocess=False):
+    """Ingest all forecast hours for one model run into the database."""
+
     if not force_reprocess and check_existing_forecast(model_name, model_run):
-        log.info(f"✓ {model_name} {model_run.strftime('%Y-%m-%d %H:00Z')} already complete, skipping")
-        return True
-    
-    log.info(f"=" * 70)
-    log.info(f"Processing {model_name} run: {model_run.strftime('%Y-%m-%d %H:00 UTC')}")
-    log.info(f"Cycle directory: {cycle_dir}")
-    log.info(f"=" * 70)
-    
-    # Load airports WITH FILTERING
-    if not load_airport_coordinates():
-        return False
-    
-    # Get database connection
+        log.info(
+            f"✓ {model_name} {model_run.strftime('%Y-%m-%d %H:00Z')} "
+            f"already complete — skipping"
+        )
+        return
+
+    log.info(
+        f"Processing {model_name} {model_run.strftime('%Y-%m-%d %H:00 UTC')}"
+    )
+
+    airports = load_airport_coordinates()
+    if not airports:
+        log.error("No airports loaded — aborting")
+        return
+
     conn = get_connection()
-    cur = conn.cursor()
-    
-    # Delete old forecasts for this model run if reprocessing
+    cur  = conn.cursor()
+
     if force_reprocess:
         cur.execute("""
             DELETE FROM observations.model_wind_forecasts
             WHERE model_name = %s AND model_run = %s
         """, (model_name, model_run))
-        log.info("Cleared existing forecasts for reprocessing")
-    
-    total_inserted = 0
-    hours_processed = 0
-    
-    # Process each forecast hour
-    for fhr in range(0, FORECAST_HOURS + 1):
-        # Construct GRIB filename (3-digit format for HRRR!)
-        if model_name == 'HRRR':
-            grib_file = os.path.join(cycle_dir, f"hrrr.t{model_run.hour:02d}z.wrfsfcf{fhr:03d}.grib2")
-        else:  # GFS
-            grib_file = os.path.join(cycle_dir, f"gfs.t{model_run.hour:02d}z.pgrb2.0p25.f{fhr:03d}")
-        
-        if not os.path.exists(grib_file):
-            log.debug(f"  [{fhr:02d}] GRIB file not found: {os.path.basename(grib_file)}")
-            continue
-        
-        log.info(f"  [{fhr:02d}] Processing {os.path.basename(grib_file)}")
-        
-        # Extract winds for all airports
-        winds = extract_winds_from_grib(grib_file, AIRPORT_COORDS)
-        
-        if not winds:
-            log.warning(f"  [{fhr:02d}] No winds extracted")
-            continue
-        
-        # Valid time for this forecast
-        valid_time = model_run + timedelta(hours=fhr)
-        
-        # Insert into database
-        inserted_this_hour = 0
-        for station_id, (wind_dir, wind_speed, gust) in winds.items():
-            lat, lon = AIRPORT_COORDS[station_id]
-            category = calculate_wind_category(wind_speed, gust)
-            
-            try:
-                cur.execute("""
-                    INSERT INTO observations.model_wind_forecasts (
-                        station_id, location, model_name, model_run,
-                        valid_time, forecast_hour,
-                        wind_dir, wind_speed_kts, wind_gust_kts,
-                        wind_category
-                    ) VALUES (
-                        %s, ST_SetSRID(ST_MakePoint(%s, %s), 4326),
-                        %s, %s, %s, %s, %s, %s, %s, %s
-                    )
-                    ON CONFLICT (station_id, model_run, valid_time) DO UPDATE SET
-                        wind_dir = EXCLUDED.wind_dir,
-                        wind_speed_kts = EXCLUDED.wind_speed_kts,
-                        wind_gust_kts = EXCLUDED.wind_gust_kts,
-                        wind_category = EXCLUDED.wind_category
-                """, (station_id, lon, lat, model_name, model_run,
-                      valid_time, fhr, wind_dir, wind_speed, gust, category))
-                
-                inserted_this_hour += 1
-                
-            except Exception as e:
-                log.error(f"  Failed to insert {station_id}: {e}")
-                continue
-        
         conn.commit()
-        total_inserted += inserted_this_hour
-        hours_processed += 1
-        log.info(f"  [{fhr:02d}] ✓ Inserted {inserted_this_hour} forecasts")
-    
-    # Calculate maximum winds for each airport in this forecast period
-    log.info("Calculating maximum winds for forecast period...")
+
+    date_str       = model_run.strftime('%Y%m%d')
+    total_inserted = 0
+
+    for fhr in range(0, FORECAST_HOURS + 1):
+
+        # ── Build GRIB filename ───────────────────────────────────────────────
+        if model_name == 'HRRR':
+            # /LDM/models/hrrr/hrrr.YYYYMMDD/HHz/hrrr.tHHz.wrfsfcfNNN.grib2
+            grib_file = os.path.join(
+                cycle_dir,
+                f"hrrr.t{model_run.hour:02d}z.wrfsfcf{fhr:03d}.grib2"
+            )
+        else:
+            # /LDM/models/gfs/0p25/YYYYMMDD/gfs_0p25_YYYYMMDD_HHz_fNNN.grib2
+            grib_file = os.path.join(
+                cycle_dir,
+                f"gfs_0p25_{date_str}_{model_run.hour:02d}z_f{fhr:03d}.grib2"
+            )
+
+        if not os.path.exists(grib_file):
+            log.warning(f"  F{fhr:03d} not found: {grib_file}")
+            continue
+
+        valid_time = model_run + timedelta(hours=fhr)
+        wind_data  = extract_wind_for_airports(grib_file, airports, model_name)
+
+        if not wind_data:
+            log.warning(f"  F{fhr:03d} — no wind data extracted")
+            continue
+
+        batch = []
+        for sid, w in wind_data.items():
+            coords = airports[sid]
+            batch.append((
+                sid,
+                coords['lon'], coords['lat'],
+                model_name,
+                model_run,
+                valid_time,
+                fhr,
+                round(w['speed_kts'], 1),
+                None,                        # gust — not available from 10m wind
+                get_wind_category(w['speed_kts']),
+            ))
+
+        if batch:
+            cur.executemany("""
+                INSERT INTO observations.model_wind_forecasts (
+                    station_id, location, model_name, model_run,
+                    valid_time, forecast_hour,
+                    wind_speed_kts, wind_gust_kts, wind_category
+                )
+                VALUES (
+                    %s,
+                    ST_SetSRID(ST_MakePoint(%s, %s), 4326),
+                    %s, %s, %s, %s, %s, %s, %s
+                )
+                ON CONFLICT (station_id, model_run, valid_time) DO UPDATE SET
+                    wind_speed_kts = EXCLUDED.wind_speed_kts,
+                    wind_gust_kts  = EXCLUDED.wind_gust_kts,
+                    wind_category  = EXCLUDED.wind_category
+            """, batch)
+            conn.commit()
+            total_inserted += len(batch)
+            log.info(f"  F{fhr:03d} — {len(batch)} forecasts inserted/updated")
+
+    # ── Back-fill worst-case wind_category per station for this run ───────────
     cur.execute("""
         UPDATE observations.model_wind_forecasts mwf
-        SET 
-            max_wind_kts = subq.max_wind,
-            max_gust_kts = subq.max_gust,
-            max_wind_time = subq.max_time
+        SET wind_category = subq.worst
         FROM (
-            SELECT 
-                station_id,
-                model_run,
-                MAX(wind_speed_kts) as max_wind,
-                MAX(wind_gust_kts) as max_gust,
-                (SELECT valid_time FROM observations.model_wind_forecasts t2
-                 WHERE t2.station_id = t1.station_id 
-                   AND t2.model_run = t1.model_run
-                 ORDER BY wind_speed_kts DESC LIMIT 1) as max_time
-            FROM observations.model_wind_forecasts t1
-            WHERE model_run = %s
+            SELECT station_id, model_run,
+                   CASE
+                       WHEN MAX(wind_speed_kts) >= 30 THEN 'RESTRICTED'
+                       WHEN MAX(wind_speed_kts) >= 20 THEN 'CAUTION'
+                       ELSE 'NORMAL'
+                   END AS worst
+            FROM observations.model_wind_forecasts
+            WHERE model_run  = %s
+              AND model_name = %s
             GROUP BY station_id, model_run
         ) subq
         WHERE mwf.station_id = subq.station_id
-          AND mwf.model_run = subq.model_run
-    """, (model_run,))
-    
+          AND mwf.model_run  = subq.model_run
+          AND mwf.model_name = %s
+    """, (model_run, model_name, model_name))
     conn.commit()
+
     cur.close()
     conn.close()
-    
-    log.info(f"=" * 70)
-    log.info(f"✓ Successfully ingested {total_inserted} wind forecasts from {model_name}")
-    log.info(f"  Processed {hours_processed}/{FORECAST_HOURS+1} forecast hours")
-    log.info(f"=" * 70)
-    
-    return True
+    log.info(
+        f"✓ {model_name} {model_run.strftime('%Y-%m-%d %H:00Z')} — "
+        f"{total_inserted} total forecasts ingested"
+    )
 
+
+# ── Entrypoint ────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Smart model wind forecast ingest - auto-detects what to process'
+        description='CAP WxCOP model wind ingest — HRRR (CONUS) + GFS (global/OCONUS)'
     )
-    parser.add_argument('--force-hrrr', action='store_true',
-                       help='Force HRRR processing even if already in database')
-    parser.add_argument('--force-gfs', action='store_true',
-                       help='Force GFS processing even if already in database')
-    parser.add_argument('--reprocess', action='store_true',
-                       help='Reprocess even if forecasts exist')
-    
+    parser.add_argument('--force-hrrr',  action='store_true',
+                        help='Force re-ingest of latest HRRR run')
+    parser.add_argument('--force-gfs',   action='store_true',
+                        help='Force re-ingest of latest GFS run')
+    parser.add_argument('--reprocess',   action='store_true',
+                        help='Force re-ingest of both models')
+    parser.add_argument('--gfs-only',    action='store_true',
+                        help='Process GFS only (skip HRRR)')
+    parser.add_argument('--hrrr-only',   action='store_true',
+                        help='Process HRRR only (skip GFS)')
     args = parser.parse_args()
-    
-    log.info("=" * 70)
-    log.info(f"Smart Model Wind Ingest - {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}")
-    log.info("=" * 70)
-    
-    # Process HRRR
-    log.info("Checking for new HRRR data...")
-    hrrr_run, hrrr_dir = find_latest_hrrr_cycle()
-    
-    if hrrr_run:
-        # Check if already in database
-        exists = check_existing_forecast('HRRR', hrrr_run)
-        
-        if args.force_hrrr or not exists:
-            if exists:
-                log.info(f"○ HRRR {hrrr_run.strftime('%Y-%m-%d %H:00Z')} exists but forcing reprocess")
-            else:
-                log.info(f"○ HRRR {hrrr_run.strftime('%Y-%m-%d %H:00Z')} not in database")
-            
-            log.info(f"✓ Found HRRR data to process: {hrrr_run.strftime('%Y-%m-%d %H:00Z')}")
-            
-            # Verify again before processing
-            exists = check_existing_forecast('HRRR', hrrr_run)
-            if exists and not args.force_hrrr:
-                log.info(f"○ HRRR {hrrr_run.strftime('%Y-%m-%d %H:00Z')} already complete, skipping")
-            else:
-                ingest_model_forecasts('HRRR', hrrr_dir, hrrr_run, args.reprocess or args.force_hrrr)
+
+    # ── HRRR — CONUS ─────────────────────────────────────────────────────────
+    if not args.gfs_only:
+        hrrr_time, hrrr_dir = find_latest_hrrr_cycle()
+        if hrrr_time and hrrr_dir:
+            log.info(
+                f"HRRR: {hrrr_time.strftime('%Y-%m-%d %H:00Z')} → {hrrr_dir}"
+            )
+            ingest_model_forecasts(
+                'HRRR', hrrr_dir, hrrr_time,
+                force_reprocess=(args.force_hrrr or args.reprocess)
+            )
         else:
-            log.info(f"○ HRRR {hrrr_run.strftime('%Y-%m-%d %H:00Z')} already complete")
-    else:
-        log.info("○ No new HRRR data to process")
-    
-    # Process GFS
-    log.info("=" * 70)
-    log.info("Checking for new GFS data...")
-    gfs_run, gfs_dir = find_latest_gfs_cycle()
-    
-    if gfs_run:
-        exists = check_existing_forecast('GFS', gfs_run)
-        
-        if args.force_gfs or not exists:
-            if exists:
-                log.info(f"○ GFS {gfs_run.strftime('%Y-%m-%d %H:00Z')} exists but forcing reprocess")
-            else:
-                log.info(f"○ GFS {gfs_run.strftime('%Y-%m-%d %H:00Z')} not in database")
-            
-            log.info(f"✓ Found GFS data to process: {gfs_run.strftime('%Y-%m-%d %H:00Z')}")
-            ingest_model_forecasts('GFS', gfs_dir, gfs_run, args.reprocess or args.force_gfs)
+            log.warning("No HRRR cycle found — skipping HRRR")
+
+    # ── GFS — global / MANDATORY for OCONUS (AK, HI, PR, Guam) ─────────────
+    if not args.hrrr_only:
+        gfs_time, gfs_dir = find_latest_gfs_cycle()
+        if gfs_time and gfs_dir:
+            log.info(
+                f"GFS:  {gfs_time.strftime('%Y-%m-%d %H:00Z')} → {gfs_dir}"
+            )
+            ingest_model_forecasts(
+                'GFS', gfs_dir, gfs_time,
+                force_reprocess=(args.force_gfs or args.reprocess)
+            )
         else:
-            log.info(f"○ GFS {gfs_run.strftime('%Y-%m-%d %H:00Z')} already complete")
-    else:
-        log.info("○ No new GFS data to process")
-    
-    log.info("=" * 70)
-    log.info("✓ Model wind ingest complete")
-    log.info("=" * 70)
-    
-    return 0
+            log.error(
+                "No GFS cycle found — OCONUS airports (AK/HI/PR/Guam) will "
+                "have NO wind forecast data. Check /LDM/models/gfs/0p25/"
+            )
+
+    log.info("Ingest run complete.")
 
 
 if __name__ == '__main__':
-    sys.exit(main())
+    main()
 

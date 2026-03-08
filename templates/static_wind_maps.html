@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <link rel="icon" href="data:,">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CAP Wind Constraints — Static Maps</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; background: #f0f2f5; min-height: 100vh; }
+
+        /* ── Title bar — identical to wind_map_interactive ── */
+        #titleBar {
+            position: fixed; top: 0; left: 0; right: 0; height: 44px;
+            background: linear-gradient(135deg, #1a3a2a, #2c5f41);
+            color: white; display: flex; align-items: center;
+            padding: 0 16px; z-index: 1100;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.5); gap: 16px;
+        }
+        #titleBar .tb-home {
+            color: white; text-decoration: none;
+            font-size: 18px; line-height: 1; flex-shrink: 0;
+            opacity: 0.85; transition: opacity 0.15s;
+        }
+        #titleBar .tb-home:hover { opacity: 1; }
+        #titleBar .tb-title {
+            font-size: 16px; font-weight: 700;
+            letter-spacing: 0.03em; white-space: nowrap; flex: 1;
+        }
+        #titleBar .tb-utc {
+            font-size: 13px; font-family: 'Courier New', monospace;
+            opacity: 0.85; flex-shrink: 0;
+        }
+
+        /* ── Page layout ── */
+        .page { margin-top: 44px; display: flex; height: calc(100vh - 44px); }
+
+        /* ── Left controls panel — matches wind map .controls ── */
+        .controls {
+            width: 285px; flex-shrink: 0;
+            background: white; border-right: 1px solid #ddd;
+            overflow-y: auto; padding: 15px;
+            display: flex; flex-direction: column; gap: 0;
+        }
+        .controls h3 { margin-bottom: 10px; font-size: 16px; color: #2c3e50; }
+        .controls h3.section-label {
+            font-size: 11px; font-weight: 700; color: #555;
+            text-transform: uppercase; letter-spacing: 0.06em;
+            margin: 0 0 6px 0;
+        }
+        .controls select {
+            width: 100%; padding: 8px; margin-bottom: 10px;
+            border: 1px solid #ddd; border-radius: 4px;
+            background: white; font-size: 14px; cursor: pointer;
+        }
+        .controls select:focus { outline: none; border-color: #2c5f41; }
+        .divider { margin: 10px 0; border-top: 1px solid #ddd; }
+
+        /* Scope tabs */
+        .scope-tabs {
+            display: flex; gap: 0; border: 1px solid #ddd;
+            border-radius: 4px; overflow: hidden; margin-bottom: 10px;
+        }
+        .scope-tab {
+            flex: 1; padding: 7px 4px; text-align: center;
+            font-size: 12px; font-weight: 600; cursor: pointer;
+            background: #f5f5f5; border: none; color: #555;
+            transition: background 0.15s, color 0.15s;
+        }
+        .scope-tab:not(:last-child) { border-right: 1px solid #ddd; }
+        .scope-tab.active { background: #2c3e50; color: white; }
+        .scope-tab:hover:not(.active) { background: #e8eff0; }
+
+        .sub-selector { display: none; }
+        .sub-selector.visible { display: block; }
+
+        /* Buttons */
+        .load-btn {
+            width: 100%; padding: 8px 12px;
+            background: #2c3e50; color: white;
+            border: none; border-radius: 4px;
+            font-size: 13px; font-weight: 600; cursor: pointer;
+        }
+        .load-btn:hover { background: #1a252f; }
+
+        .dl-btn {
+            width: 100%; padding: 7px 12px;
+            background: #f5f5f5; color: #2c3e50;
+            border: 1px solid #ccc; border-radius: 4px;
+            font-size: 12px; font-weight: 600; cursor: pointer;
+            text-align: left;
+        }
+        .dl-btn:hover:not(:disabled) { background: #e4eaeb; }
+        .dl-btn:disabled { color: #aaa; cursor: not-allowed; }
+
+        /* Legend — matches wind map */
+        .legend-item { display: flex; align-items: center; margin: 4px 0; font-size: 12px; }
+        .legend-dot {
+            width: 14px; height: 14px; border-radius: 50%;
+            margin-right: 8px; border: 2px solid #000; flex-shrink: 0;
+        }
+
+        /* Metadata */
+        .meta-box {
+            background: #f8f8f8; border: 1px solid #e0e0e0;
+            border-radius: 4px; padding: 8px 10px;
+            font-size: 11.5px; color: #444; line-height: 1.7;
+        }
+        .meta-box strong { color: #2c3e50; }
+
+        /* OCONUS note */
+        .oconus-note { font-size: 11px; color: #888; font-style: italic; margin-top: 4px; display: none; }
+        .oconus-note.visible { display: block; }
+
+        /* ── Map display area ── */
+        .map-area { flex: 1; display: flex; flex-direction: column; background: #e8eaec; overflow: hidden; }
+        .map-toolbar {
+            background: white; border-bottom: 1px solid #ddd;
+            padding: 8px 16px; display: flex; align-items: center; gap: 10px; flex-shrink: 0;
+        }
+        .map-toolbar .map-title { font-size: 14px; font-weight: 700; color: #2c3e50; flex: 1; }
+        .map-toolbar .tb-dl-btn {
+            padding: 5px 12px; background: #2c3e50; color: white;
+            border: none; border-radius: 4px; font-size: 12px; font-weight: 600;
+            cursor: pointer; display: none;
+        }
+        .map-toolbar .tb-dl-btn:hover { background: #1a252f; }
+
+        .map-container {
+            flex: 1; display: flex; align-items: center;
+            justify-content: center; overflow: auto; padding: 16px;
+        }
+        #mapImage {
+            max-width: 100%; max-height: 100%; object-fit: contain;
+            border-radius: 4px; box-shadow: 0 4px 20px rgba(0,0,0,0.25); display: none;
+        }
+        #mapPlaceholder { text-align: center; color: #888; }
+        #mapPlaceholder .icon { font-size: 52px; margin-bottom: 14px; }
+        #mapPlaceholder p { margin-top: 6px; font-size: 13px; line-height: 1.6; }
+
+        #loadingOverlay { display: none; text-align: center; color: #555; }
+        #loadingOverlay .spinner {
+            width: 40px; height: 40px; margin: 0 auto 12px;
+            border: 4px solid #ddd; border-top-color: #2c5f41;
+            border-radius: 50%; animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        #errorMsg { display: none; text-align: center; color: #c0392b; }
+        #errorMsg .icon { font-size: 40px; margin-bottom: 10px; }
+        #errorMsg .sub { margin-top: 8px; font-size: 12px; color: #888; line-height: 1.6; }
+    </style>
+</head>
+<body>
+
+<div id="titleBar">
+    <a href="/CAP_WxCOP/" class="tb-home" title="Home">&#127968;</a>
+    <span class="tb-title">Wind Constraints — Static Maps</span>
+    <span class="tb-utc" id="tbUtc"></span>
+</div>
+
+<div class="page">
+
+    <!-- ══════════ Left Controls ══════════ -->
+    <div class="controls">
+
+        <h3>Wind Constraint Maps</h3>
+
+        <div class="scope-tabs">
+            <button class="scope-tab active" data-scope="conus">CONUS</button>
+            <button class="scope-tab"        data-scope="region">Region</button>
+            <button class="scope-tab"        data-scope="wing">Wing</button>
+        </div>
+
+        <!-- Region selector -->
+        <div id="regionSelector" class="sub-selector">
+            <h3 class="section-label">CAP Region</h3>
+            <select id="regionSelect">
+                <optgroup label="CONUS Regions">
+                    <option value="ncr_wind_constraints">NCR — North Central</option>
+                    <option value="glr_wind_constraints">GLR — Great Lakes</option>
+                    <option value="mar_wind_constraints">MAR — Mid-Atlantic</option>
+                    <option value="ner_wind_constraints">NER — Northeast</option>
+                    <option value="ser-conus_wind_constraints">SER — Southeast (CONUS)</option>
+                    <option value="swr_wind_constraints">SWR — Southwest</option>
+                    <option value="rmr_wind_constraints">RMR — Rocky Mountain</option>
+                    <option value="pcr-conus_wind_constraints">PCR — Pacific (CONUS)</option>
+                </optgroup>
+                <optgroup label="OCONUS">
+                    <option value="pcr-ak_wind_constraints" data-oconus="1">PCR-AK — Alaska</option>
+                    <option value="pcr-hi_wind_constraints" data-oconus="1">PCR-HI — Hawaii</option>
+                    <option value="pcr-gu_wind_constraints" data-oconus="1">PCR-GU — Guam</option>
+                    <option value="ser-pr_wind_constraints" data-oconus="1">SER-PR — Puerto Rico / Caribbean</option>
+                </optgroup>
+            </select>
+            <div class="oconus-note" id="regionOconus">
+                ⚠️ OCONUS maps generate when GFS forecast data is available.
+            </div>
+        </div>
+
+        <!-- Wing selector -->
+        <div id="wingSelector" class="sub-selector">
+            <h3 class="section-label">Wing</h3>
+            <select id="wingSelect">
+                <optgroup label="NCR — North Central">
+                    <option value="ia_wind_constraints">Iowa</option>
+                    <option value="il_wind_constraints">Illinois</option>
+                    <option value="ks_wind_constraints">Kansas</option>
+                    <option value="mn_wind_constraints">Minnesota</option>
+                    <option value="mo_wind_constraints">Missouri</option>
+                    <option value="nd_wind_constraints">North Dakota</option>
+                    <option value="ne_wind_constraints">Nebraska</option>
+                    <option value="sd_wind_constraints">South Dakota</option>
+                    <option value="wi_wind_constraints">Wisconsin</option>
+                </optgroup>
+                <optgroup label="GLR — Great Lakes">
+                    <option value="in_wind_constraints">Indiana</option>
+                    <option value="ky_wind_constraints">Kentucky</option>
+                    <option value="mi_wind_constraints">Michigan</option>
+                    <option value="oh_wind_constraints">Ohio</option>
+                    <option value="wv_wind_constraints">West Virginia</option>
+                </optgroup>
+                <optgroup label="MAR — Mid-Atlantic">
+                    <option value="de_wind_constraints">Delaware</option>
+                    <option value="md_wind_constraints">Maryland / DC</option>
+                    <option value="nj_wind_constraints">New Jersey</option>
+                    <option value="ny_wind_constraints">New York</option>
+                    <option value="pa_wind_constraints">Pennsylvania</option>
+                    <option value="va_wind_constraints">Virginia</option>
+                </optgroup>
+                <optgroup label="NER — Northeast">
+                    <option value="ct_wind_constraints">Connecticut</option>
+                    <option value="ma_wind_constraints">Massachusetts</option>
+                    <option value="me_wind_constraints">Maine</option>
+                    <option value="nh_wind_constraints">New Hampshire</option>
+                    <option value="ri_wind_constraints">Rhode Island</option>
+                    <option value="vt_wind_constraints">Vermont</option>
+                </optgroup>
+                <optgroup label="SER — Southeast">
+                    <option value="al_wind_constraints">Alabama</option>
+                    <option value="fl_wind_constraints">Florida</option>
+                    <option value="ga_wind_constraints">Georgia</option>
+                    <option value="ms_wind_constraints">Mississippi</option>
+                    <option value="nc_wind_constraints">North Carolina</option>
+                    <option value="sc_wind_constraints">South Carolina</option>
+                    <option value="tn_wind_constraints">Tennessee</option>
+                </optgroup>
+                <optgroup label="SWR — Southwest">
+                    <option value="ar_wind_constraints">Arkansas</option>
+                    <option value="az_wind_constraints">Arizona</option>
+                    <option value="la_wind_constraints">Louisiana</option>
+                    <option value="nm_wind_constraints">New Mexico</option>
+                    <option value="ok_wind_constraints">Oklahoma</option>
+                    <option value="tx_wind_constraints">Texas</option>
+                </optgroup>
+                <optgroup label="RMR — Rocky Mountain">
+                    <option value="co_wind_constraints">Colorado</option>
+                    <option value="id_wind_constraints">Idaho</option>
+                    <option value="mt_wind_constraints">Montana</option>
+                    <option value="ut_wind_constraints">Utah</option>
+                    <option value="wy_wind_constraints">Wyoming</option>
+                </optgroup>
+                <optgroup label="PCR — Pacific (CONUS)">
+                    <option value="ca_wind_constraints">California</option>
+                    <option value="nv_wind_constraints">Nevada</option>
+                    <option value="or_wind_constraints">Oregon</option>
+                    <option value="wa_wind_constraints">Washington</option>
+                </optgroup>
+                <optgroup label="PCR — OCONUS">
+                    <option value="ak_wind_constraints" data-oconus="1">Alaska (PCR-AK)</option>
+                    <option value="hi_wind_constraints" data-oconus="1">Hawaii (PCR-HI)</option>
+                    <option value="gu_wind_constraints" data-oconus="1">Guam (PCR-GU)</option>
+                </optgroup>
+                <optgroup label="SER — OCONUS">
+                    <option value="pr_wind_constraints" data-oconus="1">Puerto Rico (SER-PR)</option>
+                </optgroup>
+            </select>
+            <div class="oconus-note" id="wingOconus">
+                ⚠️ OCONUS maps generate when GFS forecast data is available.
+            </div>
+        </div>
+
+        <button class="load-btn" id="loadBtn">&#9654; Load Map</button>
+
+        <div class="divider"></div>
+
+        <h3 class="section-label">Export</h3>
+        <div style="display:flex; flex-direction:column; gap:6px; margin-bottom:10px;">
+            <button class="dl-btn" id="downloadPngBtn" disabled>
+                &#128247; Download PNG
+            </button>
+            <button class="dl-btn" id="downloadShpBtn">
+                &#128230; Shapefile ZIP (all airports)
+            </button>
+        </div>
+        <div style="font-size:11px; color:#888; line-height:1.5; margin-bottom:10px;">
+            Shapefile contains all US airports with current wind forecast data.
+            Suitable for GIS / mission planning tools.
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="meta-box" id="metaBox">
+            <strong>Model run:</strong> —<br>
+            <strong>Airports:</strong> —<br>
+            <strong>Generated:</strong> —
+        </div>
+
+        <div class="divider"></div>
+
+        <h3 class="section-label">CAPR 70-1 Criteria</h3>
+        <div style="margin-top:4px;">
+            <div class="legend-item">
+                <div class="legend-dot" style="background:#28a745;"></div>
+                Normal — &lt;20 kt, X-wind &lt;10 kt
+            </div>
+            <div class="legend-item">
+                <div class="legend-dot" style="background:#ffc107;"></div>
+                Caution — 20–29 kt or X-wind 10–14 kt
+            </div>
+            <div class="legend-item">
+                <div class="legend-dot" style="background:#dc3545;"></div>
+                No-Go — ≥30 kt or X-wind ≥15 kt
+            </div>
+            <div class="legend-item">
+                <div class="legend-dot" style="background:#6c757d; border-color:#555;"></div>
+                No forecast data
+            </div>
+        </div>
+
+        <div class="divider"></div>
+        <div style="font-size:11px; color:#888; line-height:1.6;">
+            Maps regenerate hourly via cron.<br>
+            For real-time interactive data:<br>
+            <a href="/CAP_WxCOP/wind-map" style="color:#2c5f41; font-weight:600;">
+                &#10137; Interactive Wind Map
+            </a>
+        </div>
+
+    </div><!-- /controls -->
+
+    <!-- ══════════ Map Display ══════════ -->
+    <div class="map-area">
+        <div class="map-toolbar">
+            <span class="map-title" id="mapTitle">Select a scope and click Load Map</span>
+            <button class="tb-dl-btn" id="tbDownloadPng">&#128247; Save PNG</button>
+        </div>
+        <div class="map-container">
+
+            <div id="mapPlaceholder">
+                <div class="icon">🗺️</div>
+                <strong style="font-size:15px;">CAP Wind Constraints</strong>
+                <p>
+                    Select <strong>CONUS</strong>, a <strong>CAP Region</strong>, or a <strong>Wing</strong><br>
+                    from the panel on the left, then click <em>Load Map</em>.
+                </p>
+                <p style="margin-top:14px; font-size:12px;">
+                    Maps are generated hourly and reflect the most recent HRRR / GFS model run.
+                </p>
+            </div>
+
+            <div id="loadingOverlay">
+                <div class="spinner"></div>
+                Loading map…
+            </div>
+
+            <div id="errorMsg">
+                <div class="icon">⚠️</div>
+                <strong id="errorText">Map not available</strong>
+                <div class="sub" id="errorSub">
+                    This map may not have been generated yet, or no airports with<br>
+                    forecast data exist in this area. Try a broader scope.
+                </div>
+            </div>
+
+            <img id="mapImage" alt="Wind Constraints Map">
+
+        </div>
+    </div>
+
+</div><!-- /page -->
+
+<script>
+(function() {
+    function pad(n){ return String(n).padStart(2,'0'); }
+    function tick(){
+        var d = new Date(), el = document.getElementById('tbUtc');
+        if (el) el.textContent =
+            d.getUTCFullYear()+'-'+pad(d.getUTCMonth()+1)+'-'+pad(d.getUTCDate())+' '+
+            pad(d.getUTCHours())+':'+pad(d.getUTCMinutes())+':'+pad(d.getUTCSeconds())+'Z';
+    }
+    tick(); setInterval(tick, 1000);
+})();
+
+var currentPngUrl = null, currentMapLabel = '', currentScope = 'conus';
+
+document.querySelectorAll('.scope-tab').forEach(function(tab) {
+    tab.addEventListener('click', function() {
+        document.querySelectorAll('.scope-tab').forEach(function(t){ t.classList.remove('active'); });
+        this.classList.add('active');
+        currentScope = this.dataset.scope;
+        document.getElementById('regionSelector').classList.remove('visible');
+        document.getElementById('wingSelector').classList.remove('visible');
+        if (currentScope === 'region') document.getElementById('regionSelector').classList.add('visible');
+        if (currentScope === 'wing')   document.getElementById('wingSelector').classList.add('visible');
+    });
+});
+
+function updateOconusNote(selectId, noteId) {
+    var opt = document.getElementById(selectId).options[document.getElementById(selectId).selectedIndex];
+    document.getElementById(noteId).classList.toggle('visible', !!(opt && opt.dataset.oconus));
+}
+document.getElementById('regionSelect').addEventListener('change', function(){ updateOconusNote('regionSelect','regionOconus'); loadMap(); });
+document.getElementById('wingSelect').addEventListener('change',   function(){ updateOconusNote('wingSelect',  'wingOconus');   loadMap(); });
+
+function getPngInfo() {
+    if (currentScope === 'conus')
+        return { filename: 'conus_wind_constraints.png', label: 'CONUS — Wind Constraints' };
+    if (currentScope === 'region') {
+        var s = document.getElementById('regionSelect');
+        return { filename: s.value+'.png', label: s.options[s.selectedIndex].text+' — Wind Constraints' };
+    }
+    var s = document.getElementById('wingSelect');
+    return { filename: s.value+'.png', label: s.options[s.selectedIndex].text+' Wing — Wind Constraints' };
+}
+
+document.getElementById('loadBtn').addEventListener('click', loadMap);
+
+function loadMap() {
+    var info = getPngInfo();
+    var url  = '/CAP_WxCOP/cap_winds/' + info.filename;
+    document.getElementById('mapPlaceholder').style.display  = 'none';
+    document.getElementById('errorMsg').style.display        = 'none';
+    document.getElementById('mapImage').style.display        = 'none';
+    document.getElementById('loadingOverlay').style.display  = 'block';
+    document.getElementById('mapTitle').textContent          = info.label;
+    document.getElementById('downloadPngBtn').disabled       = true;
+    document.getElementById('tbDownloadPng').style.display   = 'none';
+    var img = new Image();
+    img.onload = function() {
+        document.getElementById('loadingOverlay').style.display = 'none';
+        var el = document.getElementById('mapImage');
+        el.src = url; el.style.display = 'block';
+        currentPngUrl = url; currentMapLabel = info.label;
+        document.getElementById('downloadPngBtn').disabled     = false;
+        document.getElementById('tbDownloadPng').style.display = '';
+        fetchMeta();
+    };
+    img.onerror = function() {
+        document.getElementById('loadingOverlay').style.display = 'none';
+        document.getElementById('errorText').textContent = 'Map unavailable: ' + info.filename;
+        document.getElementById('errorMsg').style.display = 'block';
+        currentPngUrl = null;
+    };
+    img.src = url + '?_=' + Date.now();
+}
+
+function doDownloadPng() {
+    if (!currentPngUrl) return;
+    var a = document.createElement('a');
+    a.href = currentPngUrl;
+    a.download = currentMapLabel.replace(/[^A-Za-z0-9_\-]/g,'_') + '.png';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}
+document.getElementById('downloadPngBtn').addEventListener('click', doDownloadPng);
+document.getElementById('tbDownloadPng').addEventListener('click', doDownloadPng);
+
+document.getElementById('downloadShpBtn').addEventListener('click', function() {
+    fetch('/CAP_WxCOP/api/latest-shapefile')
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+            if (d.url) {
+                var a = document.createElement('a');
+                a.href = d.url; a.download = d.filename || 'cap_winds_shapefile.zip';
+                document.body.appendChild(a); a.click(); document.body.removeChild(a);
+            } else { alert('No shapefile found. Run the batch generator first.'); }
+        })
+        .catch(function(){ alert('Could not retrieve shapefile listing.'); });
+});
+
+function fetchMeta() {
+    fetch('/CAP_WxCOP/api/map-meta')
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+            document.getElementById('metaBox').innerHTML =
+                '<strong>Model run:</strong> ' + (d.model_run || '—') + '<br>' +
+                '<strong>Airports:</strong> '  + (d.airport_count !== null ? d.airport_count.toLocaleString() : '—') + '<br>' +
+                '<strong>Generated:</strong> ' + (d.generated || '—');
+        })
+        .catch(function(){});
+}
+fetchMeta();
+</script>
+</body>
+</html>
+
