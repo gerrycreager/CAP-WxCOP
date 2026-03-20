@@ -2,347 +2,328 @@
 KQ Station Management Web Interface
 Simple admin interface for managing temporary weather stations
 Automatically syncs KQ stations to the main airports table for TAF/METAR integration
+
+Authentication: view (list) is public; add/edit/delete/toggle/sync require login.
 """
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for, flash
 import sys
 sys.path.insert(0, '/var/www/cap_winds_app')
 from db_config import get_connection
+from auth import login_required
 
 kq_admin = Blueprint('kq_admin', __name__, url_prefix='/admin/kq-stations')
 
+
 def sync_station_to_airports(cur, station_id, sync_type='upsert'):
     """
-    Sync a KQ station to the main airports table
-    
-    Args:
-        cur: Database cursor
-        station_id: Station ID to sync
-        sync_type: 'upsert' to add/update, 'delete' to remove
+    Sync a KQ station to the main airports table.
+    sync_type: 'upsert' to add/update, 'delete' to remove
     """
     try:
         if sync_type == 'delete':
-            # Remove from airports table
             cur.execute("""
-                DELETE FROM observations.airports 
+                DELETE FROM observations.airports
                 WHERE station_id = %s
             """, (station_id,))
             return
-        
-        # Get station data from custom_stations
+
         cur.execute("""
             SELECT station_id, name, latitude, longitude, elevation_ft
             FROM observations.custom_stations
             WHERE station_id = %s AND active = true
         """, (station_id,))
-        
+
         station = cur.fetchone()
         if not station:
-            # Station is inactive or doesn't exist - remove from airports
             cur.execute("""
-                DELETE FROM observations.airports 
+                DELETE FROM observations.airports
                 WHERE station_id = %s
             """, (station_id,))
             return
-        
-        # Upsert into airports table
+
         cur.execute("""
-            INSERT INTO observations.airports (station_id, name, location, elevation_ft, has_reporting, is_military)
+            INSERT INTO observations.airports
+                (station_id, name, location, elevation_ft, has_reporting, is_military)
             VALUES (%s, %s, ST_SetSRID(ST_MakePoint(%s, %s), 4326), %s, true, true)
             ON CONFLICT (station_id) DO UPDATE SET
-                name = EXCLUDED.name,
-                location = EXCLUDED.location,
-                elevation_ft = EXCLUDED.elevation_ft,
-                has_reporting = true, is_military = true
-        """, (station[0], station[1], station[3], station[2], station[4]))  # Note: lon, lat order for PostGIS
-        
+                name          = EXCLUDED.name,
+                location      = EXCLUDED.location,
+                elevation_ft  = EXCLUDED.elevation_ft,
+                has_reporting = true,
+                is_military   = true
+        """, (station[0], station[1], station[3], station[2], station[4]))
+
     except Exception as e:
-        # Log the error but don't break the main operation
         print(f"Warning: Failed to sync station {station_id} to airports table: {e}")
 
+
 def sync_all_active_stations_to_airports(cur):
-    """Sync all active KQ stations to airports table"""
+    """Sync all active KQ stations to airports table."""
     try:
-        # Get all active KQ stations
         cur.execute("""
-            SELECT station_id FROM observations.custom_stations 
+            SELECT station_id FROM observations.custom_stations
             WHERE active = true
         """)
-        active_stations = [row[0] for row in cur.fetchall()]
-        
-        # Sync each active station
-        for station_id in active_stations:
-            sync_station_to_airports(cur, station_id, 'upsert')
-            
+        for row in cur.fetchall():
+            sync_station_to_airports(cur, row[0], 'upsert')
     except Exception as e:
         print(f"Warning: Failed to sync all stations: {e}")
 
+
+# ---------------------------------------------------------------------------
+# PUBLIC route — no login required
+# ---------------------------------------------------------------------------
+
 @kq_admin.route('/', strict_slashes=False)
 def list_stations():
-    """List all KQ stations"""
+    """List all KQ stations — public view."""
     try:
         conn = get_connection()
-        cur = conn.cursor()
-        
+        cur  = conn.cursor()
+
         cur.execute("""
-            SELECT station_id, name, latitude, longitude, elevation_ft, 
+            SELECT station_id, name, latitude, longitude, elevation_ft,
                    notes, active, created_at
             FROM observations.custom_stations
             ORDER BY active DESC, station_id
         """)
-        
+
         stations = []
         for row in cur.fetchall():
             stations.append({
-                'station_id': row[0],
-                'name': row[1],
-                'latitude': row[2],
-                'longitude': row[3],
-                'elevation_ft': row[4],
-                'notes': row[5],
-                'active': row[6],
-                'created_at': row[7]
+                'station_id':  row[0],
+                'name':        row[1],
+                'latitude':    row[2],
+                'longitude':   row[3],
+                'elevation_ft':row[4],
+                'notes':       row[5],
+                'active':      row[6],
+                'created_at':  row[7],
             })
-        
+
         cur.close()
         conn.close()
-        
+
         return render_template('kq_stations.html', stations=stations)
-    
+
     except Exception as e:
         flash(f'Error loading stations: {e}', 'error')
         return render_template('kq_stations.html', stations=[])
 
+
+# ---------------------------------------------------------------------------
+# PROTECTED routes — login required
+# ---------------------------------------------------------------------------
+
 @kq_admin.route('/add', methods=['GET', 'POST'])
+@login_required
 def add_station():
-    """Add new KQ station"""
+    """Add new KQ station."""
     if request.method == 'POST':
         try:
-            station_id = request.form.get('station_id', '').strip().upper()
-            name = request.form.get('name', '').strip()
-            latitude = float(request.form.get('latitude'))
-            longitude = float(request.form.get('longitude'))
+            station_id   = request.form.get('station_id', '').strip().upper()
+            name         = request.form.get('name', '').strip()
+            latitude     = float(request.form.get('latitude'))
+            longitude    = float(request.form.get('longitude'))
             elevation_ft = request.form.get('elevation_ft', '').strip()
-            notes = request.form.get('notes', '').strip()
-            
-            if elevation_ft:
-                elevation_ft = int(elevation_ft)
-            else:
-                elevation_ft = None
-            
+            notes        = request.form.get('notes', '').strip()
+
+            elevation_ft = int(elevation_ft) if elevation_ft else None
+
             conn = get_connection()
-            cur = conn.cursor()
-            
-            # Insert/update in custom_stations
+            cur  = conn.cursor()
+
             cur.execute("""
-                INSERT INTO observations.custom_stations 
-                (station_id, name, latitude, longitude, elevation_ft, notes, active)
+                INSERT INTO observations.custom_stations
+                    (station_id, name, latitude, longitude, elevation_ft, notes, active)
                 VALUES (%s, %s, %s, %s, %s, %s, true)
                 ON CONFLICT (station_id) DO UPDATE SET
-                    name = EXCLUDED.name,
-                    latitude = EXCLUDED.latitude,
-                    longitude = EXCLUDED.longitude,
+                    name         = EXCLUDED.name,
+                    latitude     = EXCLUDED.latitude,
+                    longitude    = EXCLUDED.longitude,
                     elevation_ft = EXCLUDED.elevation_ft,
-                    notes = EXCLUDED.notes,
-                    active = true
+                    notes        = EXCLUDED.notes,
+                    active       = true
             """, (station_id, name, latitude, longitude, elevation_ft, notes))
-            
-            # Auto-sync to airports table for TAF/METAR integration
+
             sync_station_to_airports(cur, station_id, 'upsert')
-            
             conn.commit()
             cur.close()
             conn.close()
-            
+
             flash(f'Station {station_id} added successfully and synced to airports table!', 'success')
             return redirect(url_for('kq_admin.list_stations'))
-        
+
         except Exception as e:
             flash(f'Error adding station: {e}', 'error')
-    
+
     return render_template('kq_station_form.html', station=None, action='Add')
 
+
 @kq_admin.route('/edit/<station_id>', methods=['GET', 'POST'])
+@login_required
 def edit_station(station_id):
-    """Edit existing KQ station"""
+    """Edit existing KQ station."""
     if request.method == 'POST':
         try:
-            name = request.form.get('name', '').strip()
-            latitude = float(request.form.get('latitude'))
-            longitude = float(request.form.get('longitude'))
+            name         = request.form.get('name', '').strip()
+            latitude     = float(request.form.get('latitude'))
+            longitude    = float(request.form.get('longitude'))
             elevation_ft = request.form.get('elevation_ft', '').strip()
-            notes = request.form.get('notes', '').strip()
-            
-            if elevation_ft:
-                elevation_ft = int(elevation_ft)
-            else:
-                elevation_ft = None
-            
+            notes        = request.form.get('notes', '').strip()
+
+            elevation_ft = int(elevation_ft) if elevation_ft else None
+
             conn = get_connection()
-            cur = conn.cursor()
-            
-            # Update custom_stations
+            cur  = conn.cursor()
+
             cur.execute("""
                 UPDATE observations.custom_stations
-                SET name = %s, latitude = %s, longitude = %s, 
+                SET name = %s, latitude = %s, longitude = %s,
                     elevation_ft = %s, notes = %s
                 WHERE station_id = %s
             """, (name, latitude, longitude, elevation_ft, notes, station_id))
-            
-            # Auto-sync to airports table
+
             sync_station_to_airports(cur, station_id, 'upsert')
-            
             conn.commit()
             cur.close()
             conn.close()
-            
-            flash(f'Station {station_id} updated successfully and synced to airports table!', 'success')
+
+            flash(f'Station {station_id} updated and synced to airports table!', 'success')
             return redirect(url_for('kq_admin.list_stations'))
-        
+
         except Exception as e:
             flash(f'Error updating station: {e}', 'error')
-    
-    # Load station for editing
+
     try:
         conn = get_connection()
-        cur = conn.cursor()
-        
+        cur  = conn.cursor()
+
         cur.execute("""
             SELECT station_id, name, latitude, longitude, elevation_ft, notes, active
             FROM observations.custom_stations
             WHERE station_id = %s
         """, (station_id,))
-        
+
         row = cur.fetchone()
-        if row:
-            station = {
-                'station_id': row[0],
-                'name': row[1],
-                'latitude': row[2],
-                'longitude': row[3],
-                'elevation_ft': row[4],
-                'notes': row[5],
-                'active': row[6]
-            }
-        else:
-            station = None
-        
+        station = {
+            'station_id':  row[0],
+            'name':        row[1],
+            'latitude':    row[2],
+            'longitude':   row[3],
+            'elevation_ft':row[4],
+            'notes':       row[5],
+            'active':      row[6],
+        } if row else None
+
         cur.close()
         conn.close()
-        
+
         return render_template('kq_station_form.html', station=station, action='Edit')
-    
+
     except Exception as e:
         flash(f'Error loading station: {e}', 'error')
         return redirect(url_for('kq_admin.list_stations'))
 
+
 @kq_admin.route('/toggle/<station_id>', methods=['POST'])
+@login_required
 def toggle_station(station_id):
-    """Toggle station active/inactive"""
+    """Toggle station active/inactive."""
     try:
         conn = get_connection()
-        cur = conn.cursor()
-        
-        # Toggle the active status
+        cur  = conn.cursor()
+
         cur.execute("""
             UPDATE observations.custom_stations
             SET active = NOT active
             WHERE station_id = %s
             RETURNING active
         """, (station_id,))
-        
-        result = cur.fetchone()
+
+        result     = cur.fetchone()
         new_status = result[0] if result else False
-        
-        # Auto-sync to airports table based on new status
+
         if new_status:
-            # Station activated - add to airports table
             sync_station_to_airports(cur, station_id, 'upsert')
         else:
-            # Station deactivated - remove from airports table
             sync_station_to_airports(cur, station_id, 'delete')
-        
+
         conn.commit()
         cur.close()
         conn.close()
-        
-        status_text = 'activated' if new_status else 'deactivated'
-        airports_text = 'added to' if new_status else 'removed from'
-        flash(f'Station {station_id} {status_text} successfully and {airports_text} airports table!', 'success')
-    
+
+        status_text  = 'activated'   if new_status else 'deactivated'
+        airports_text = 'added to'   if new_status else 'removed from'
+        flash(f'Station {station_id} {status_text} and {airports_text} airports table!', 'success')
+
     except Exception as e:
         flash(f'Error toggling station: {e}', 'error')
-    
+
     return redirect(url_for('kq_admin.list_stations'))
 
+
 @kq_admin.route('/delete/<station_id>', methods=['POST'])
+@login_required
 def delete_station(station_id):
-    """Delete station"""
+    """Delete station permanently."""
     try:
         conn = get_connection()
-        cur = conn.cursor()
-        
-        # Remove from airports table first (to avoid foreign key issues)
+        cur  = conn.cursor()
+
         sync_station_to_airports(cur, station_id, 'delete')
-        
-        # Clean up related wind forecast data
+
         cur.execute("""
-            DELETE FROM observations.model_wind_forecasts 
+            DELETE FROM observations.model_wind_forecasts
             WHERE station_id = %s
         """, (station_id,))
-        
-        # Delete from custom_stations
+
         cur.execute("""
             DELETE FROM observations.custom_stations
             WHERE station_id = %s
         """, (station_id,))
-        
+
         conn.commit()
         cur.close()
         conn.close()
-        
-        flash(f'Station {station_id} deleted successfully and removed from airports table!', 'success')
-    
+
+        flash(f'Station {station_id} deleted and removed from airports table!', 'success')
+
     except Exception as e:
         flash(f'Error deleting station: {e}', 'error')
-    
+
     return redirect(url_for('kq_admin.list_stations'))
 
+
 @kq_admin.route('/sync-all', methods=['POST'])
+@login_required
 def sync_all_stations():
-    """
-    Utility endpoint to sync all active KQ stations to airports table
-    Useful for fixing data inconsistencies or after database maintenance
-    """
+    """Sync all active KQ stations to airports table."""
     try:
         conn = get_connection()
-        cur = conn.cursor()
-        
-        # First, remove all existing KQ stations from airports table
-        # (KQ stations have station_ids starting with 'KQ')
+        cur  = conn.cursor()
+
         cur.execute("""
-            DELETE FROM observations.airports 
+            DELETE FROM observations.airports
             WHERE station_id LIKE 'KQ%'
         """)
-        
-        # Then sync all active KQ stations
+
         sync_all_active_stations_to_airports(cur)
-        
-        # Count synced stations
+
         cur.execute("""
-            SELECT COUNT(*) FROM observations.custom_stations 
+            SELECT COUNT(*) FROM observations.custom_stations
             WHERE active = true
         """)
         active_count = cur.fetchone()[0]
-        
+
         conn.commit()
         cur.close()
         conn.close()
-        
+
         flash(f'Successfully synced {active_count} active KQ stations to airports table!', 'success')
-    
+
     except Exception as e:
         flash(f'Error syncing stations: {e}', 'error')
-    
-    return redirect(url_for('kq_admin.list_stations'))
 
+    return redirect(url_for('kq_admin.list_stations'))
 
