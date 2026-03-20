@@ -527,14 +527,13 @@
                 metarDiv.className = `metar-item ${metar.is_speci ? 'speci' : ''}`;
                 
                 const time = new Date(metar.observation_time);
+                const pad = n => String(n).padStart(2,'0');
                 const timeStr = time.toLocaleString('en-US', {
                     weekday: 'short',
                     month: 'short',
                     day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    timeZoneName: 'short'
-                });
+                    timeZone: 'UTC'
+                }) + ', ' + pad(time.getUTCHours()) + pad(time.getUTCMinutes()) + 'Z';
                 
                 metarDiv.innerHTML = `
                     <div class="metar-time">
@@ -649,8 +648,12 @@
             const validFrom = new Date(taf.valid_from);
             const validTo = new Date(taf.valid_to);
             
-            const header = `Issued: ${issueTime.toLocaleString()}
-Valid: ${validFrom.toLocaleDateString()} ${validFrom.toLocaleTimeString()} - ${validTo.toLocaleDateString()} ${validTo.toLocaleTimeString()}
+            const fmtUTC = dt => dt.toLocaleString('en-US', {
+                weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC'
+            }) + ', ' + String(dt.getUTCHours()).padStart(2,'0') +
+                String(dt.getUTCMinutes()).padStart(2,'0') + 'Z';
+            const header = `Issued: ${fmtUTC(issueTime)}
+Valid: ${fmtUTC(validFrom)} - ${fmtUTC(validTo)}
 
 ${taf.raw_text}`;
             
@@ -666,3 +669,4 @@ ${taf.raw_text}`;
     </script>
 </body>
 </html>
+

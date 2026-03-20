@@ -7,7 +7,7 @@ DATABASE_CONFIG = {
     'dbname': 'avwx_data',
     'user': 'avwx_user',
     'password': 'change_me_in_production',
-    'host': 'localhost',
+    'host': '192.168.0.60',
     'port': 5432
 }
 

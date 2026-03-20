@@ -19,6 +19,7 @@ Output structure:
 """
 
 import sys, os, gzip, json, math, shutil, tempfile, logging, argparse, traceback
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -32,10 +33,11 @@ _DIR        = Path(__file__).resolve().parent
 TILE_ROOT   = '/LDM/radar/mrms_tiles'
 LOG_FILE    = str(_DIR / 'logs' / 'mrms_renderer.log')
 
-ZOOM_LEVELS = [3, 4, 5, 6, 7, 8]   # z8 extends to ~10km/tile; composite fades at z9
-TILE_SIZE   = 256
-FILL_THRESH = -990.0
-MAX_FRAMES  = 30    # keep exactly this many frames; ~60 min at 2-min cycle
+ZOOM_LEVELS      = [3, 4, 5, 6, 7, 8, 9, 10]  # z10 ~2.5km/tile; pixelated but operationally useful
+TILE_SIZE        = 256
+FILL_THRESH      = -990.0
+MAX_FRAMES       = 30    # keep exactly this many frames; ~60 min at 2-min cycle
+MAX_ZOOM_WORKERS = 4     # parallel zoom-level renders; leave headroom for concurrent products
 
 # -- Colormaps: (value, R, G, B, A) breakpoints --------------------------------
 
@@ -320,6 +322,15 @@ def update_index(product_key, sector, valid_time, cfg):
 
 # -- Main pipeline -------------------------------------------------------------
 
+def _render_zoom_task(args):
+    """Module-level wrapper so ProcessPoolExecutor can pickle it."""
+    data, lat_1d, lon_1d, zoom, lut, cfg, out_base = args
+    t0 = datetime.now()
+    r, e = render_zoom(data, lat_1d, lon_1d, zoom, lut, cfg, out_base)
+    dt = (datetime.now() - t0).total_seconds()
+    return r, e, dt
+
+
 def render_product(product_key, sector, grib_path):
     cfg = PRODUCTS[product_key]
     lut = build_lut(cfg['cmap'], cfg['vmin'], cfg['vmax'])
@@ -333,10 +344,26 @@ def render_product(product_key, sector, grib_path):
     out_base = Path(TILE_ROOT) / product_key / sector.upper() / ts_name
 
     tot_r = tot_e = 0
-    for zoom in ZOOM_LEVELS:
-        t0 = datetime.now()
-        r, e = render_zoom(data, lat_1d, lon_1d, zoom, lut, cfg, out_base)
-        dt   = (datetime.now() - t0).total_seconds()
+
+    # Render zoom levels in parallel — each zoom is fully independent.
+    # ProcessPoolExecutor avoids the GIL for numpy-heavy work.
+    # Pass all args as a tuple to the module-level _render_zoom_task helper
+    # (nested functions cannot be pickled by multiprocessing).
+    zoom_args = [(data, lat_1d, lon_1d, z, lut, cfg, out_base) for z in ZOOM_LEVELS]
+    with ProcessPoolExecutor(max_workers=MAX_ZOOM_WORKERS) as pool:
+        futures = {pool.submit(_render_zoom_task, args): args[3] for args in zoom_args}
+        results = {}
+        for fut in as_completed(futures):
+            zoom = futures[fut]
+            try:
+                r, e, dt = fut.result()
+                results[zoom] = (r, e, dt)
+            except Exception as exc:
+                log.error(f"  z{zoom}: FAILED — {exc}")
+                results[zoom] = (0, 0, 0)
+
+    for zoom in sorted(results):
+        r, e, dt = results[zoom]
         log.info(f"  z{zoom}: {r} tiles — {dt:.1f}s")
         tot_r += r
 

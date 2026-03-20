@@ -19,7 +19,7 @@ log = logging.getLogger(__name__)
 def get_connection():
     """Database connection using existing parameters"""
     return psycopg2.connect(
-        host="localhost",
+        host="192.168.0.60",
         database="avwx_data",
         user="avwx_user"
     )

@@ -22,7 +22,7 @@ app = Flask(__name__)
 DB_CONFIG = {
     'dbname': 'avwx_data',
     'user': 'avwx_user',
-    'host': 'localhost'
+    'host': '192.168.0.60'
 }
 
 # =============================================================================

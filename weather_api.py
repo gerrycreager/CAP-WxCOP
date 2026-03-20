@@ -134,7 +134,7 @@ def get_recent_metar():
                 'station_id': row[0],
                 'latitude': float(row[1]) if row[1] is not None else None,
                 'longitude': float(row[2]) if row[2] is not None else None,
-                'observation_time': row[3].isoformat() if row[3] else None,
+                'observation_time': row[3].strftime('%Y-%m-%dT%H:%M:%SZ') if row[3] else None,
                 'temp_c': float(row[4]) if row[4] is not None else None,
                 'dewpoint_c': float(row[5]) if row[5] is not None else None,
                 'wind_dir': int(row[6]) if row[6] is not None else None,
@@ -318,9 +318,9 @@ def get_station_detail(station_id):
             if taf_row:
                 taf_data = {
                     'raw_text': taf_row[0],
-                    'valid_from': taf_row[1].isoformat() if taf_row[1] else None,
-                    'valid_to': taf_row[2].isoformat() if taf_row[2] else None,
-                    'issue_time': taf_row[3].isoformat() if taf_row[3] else None
+                    'valid_from': taf_row[1].strftime('%Y-%m-%dT%H:%M:%SZ') if taf_row[1] else None,
+                    'valid_to': taf_row[2].strftime('%Y-%m-%dT%H:%M:%SZ') if taf_row[2] else None,
+                    'issue_time': taf_row[3].strftime('%Y-%m-%dT%H:%M:%SZ') if taf_row[3] else None
                 }
         except Exception:
             taf_data = None
@@ -350,7 +350,7 @@ def get_station_detail(station_id):
                     sky_conditions = []
             
             metar_data = {
-                'observation_time': row[3].isoformat() if row[3] else None,
+                'observation_time': row[3].strftime('%Y-%m-%dT%H:%M:%SZ') if row[3] else None,
                 'temp_c': float(row[4]) if row[4] is not None else None,
                 'dewpoint_c': float(row[5]) if row[5] is not None else None,
                 'wind_dir': int(row[6]) if row[6] is not None else None,
@@ -447,7 +447,7 @@ def get_station_history(station_id):
                     sky_conditions = []
             
             history.append({
-                'observation_time': row[0].isoformat() if row[0] else None,
+                'observation_time': row[0].strftime('%Y-%m-%dT%H:%M:%SZ') if row[0] else None,
                 'temp_c': float(row[1]) if row[1] is not None else None,
                 'dewpoint_c': float(row[2]) if row[2] is not None else None,
                 'wind_dir': int(row[3]) if row[3] is not None else None,
@@ -528,7 +528,7 @@ def get_wind_constraints():
                 'constraint_level': row[1],
                 'wind_speed_kts': row[2],
                 'wind_dir': row[3],
-                'valid_time': row[4].isoformat() if row[4] else None,
+                'valid_time': row[4].strftime('%Y-%m-%dT%H:%M:%SZ') if row[4] else None,
                 'airport_name': row[5],
                 'latitude': float(row[6]) if row[6] else None,
                 'longitude': float(row[7]) if row[7] else None

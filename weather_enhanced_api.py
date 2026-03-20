@@ -161,7 +161,7 @@ def get_recent_metar_enhanced():
                 'station_id': row[0],
                 'latitude': float(row[1]) if row[1] is not None else None,
                 'longitude': float(row[2]) if row[2] is not None else None,
-                'observation_time': row[3].isoformat() if row[3] else None,
+                'observation_time': row[3].strftime('%Y-%m-%dT%H:%M:%SZ') if row[3] else None,
                 'temp_c': float(row[4]) if row[4] is not None else None,
                 'dewpoint_c': float(row[5]) if row[5] is not None else None,
                 'wind_dir': int(row[6]) if row[6] is not None else None,

@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 DB_CONFIG = {
     'dbname': 'avwx_data',
     'user': 'avwx_user',
-    'host': 'localhost'
+    'host': '192.168.0.60'
 }
 
 class TimeoutError(Exception):

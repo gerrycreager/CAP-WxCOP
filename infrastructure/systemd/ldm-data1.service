@@ -1,0 +1,39 @@
+[Unit]
+Description=Unidata LDM Data Manager (data1 - full ingest)
+Documentation=https://www.unidata.ucar.edu/software/ldm/
+After=network-online.target nfs-client.target
+Wants=network-online.target
+# Ensure NFS mounts are available before starting if needed
+# After=mnt-data1\x2dldm.mount
+
+[Service]
+Type=forking
+User=ldm
+Group=ldm
+
+# Use ldmadmin for start/stop - it handles queue checks and pqact
+ExecStartPre=/home/ldm/bin/ldmadmin queuecheck
+ExecStart=/home/ldm/bin/ldmadmin start
+ExecStop=/home/ldm/bin/ldmadmin stop
+ExecReload=/home/ldm/bin/ldmadmin restart
+
+# PID file written by ldmd
+PIDFile=/home/ldm/ldmd.pid
+
+# Restart on failure, but not on clean stop
+Restart=on-failure
+RestartSec=30
+TimeoutStartSec=60
+TimeoutStopSec=30
+
+# Give ldm access to its environment
+Environment="PATH=/home/ldm/bin:/home/ldm/util:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="LDMHOME=/home/ldm"
+
+# Log to syslog (ldm also keeps its own logs in ~/var/logs/)
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ldm
+
+[Install]
+WantedBy=multi-user.target
