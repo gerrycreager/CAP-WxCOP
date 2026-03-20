@@ -88,7 +88,7 @@ gempak/
 hrrr_data/
 
 # LDM subtree inside app dir (symlinks/configs that shouldn't travel)
-ldm/
+/LDM/
 
 # Static MRMS tiles (path relative to app root, not /var/www/html)
 static/mrms_tiles/
