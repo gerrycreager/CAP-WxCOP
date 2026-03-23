@@ -1,395 +1,592 @@
-#!/var/www/cap_winds_app/venv/bin/python3
+#!/usr/bin/env python3
 """
-mrms_tile_renderer.py - MRMS GRIB2 to Leaflet PNG tile pyramid renderer
+mrms_tile_renderer.py  —  CAP WxCOP MRMS tile renderer
+Renders MRMS GRIB2 products to Leaflet-compatible PNG tile pyramids.
 
-Called by mrms_render_pipe.sh on every LDM ingest. Renders tiles into a
-timestamped directory, updates index.json, and prunes frames to keep exactly
-MAX_FRAMES most recent frames. The map polls index.json every 4 minutes
-and animates using pre-rendered static tiles - no per-request rendering.
+Usage (called from mrms_render_pipe.sh):
+    python3 mrms_tile_renderer.py <product_key> <sector> <grib2_gz_path>
 
-Usage:
-    mrms_tile_renderer.py <product_key> <sector> <grib2gz_path>
+product_key : composite | mesh | mesh_max_30min | mesh_max_60min |
+              mesh_max_120min | mesh_max_240min | mesh_max_360min |
+              mesh_max_1440min | lightning | azshear
+sector      : CONUS | ALASKA | HAWAII | CARIB | GUAM
 
-    product_key : composite | mesh | lightning | azshear
-    sector      : CONUS | ALASKA | HAWAII | CARIB | GUAM
-
-Output structure:
-    <TILE_ROOT>/<product>/<sector>/<YYYYMMDD-HHMM>/3..8/{x}/{y}.png
-    <TILE_ROOT>/<product>/<sector>/index.json
+Tile pyramid: zoom 3–10, written to TILE_ROOT/<product>/<SECTOR>/<timestamp>/{z}/{x}/{y}.png
+Index JSON:   TILE_ROOT/<product>/<SECTOR>/index.json  (rolling 30-frame window)
 """
 
-import sys, os, gzip, json, math, shutil, tempfile, logging, argparse, traceback
-from concurrent.futures import ProcessPoolExecutor, as_completed
-from datetime import datetime, timezone, timedelta
+import sys, os, json, gzip, shutil, tempfile, logging, re, math
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
-import pygrib
-from PIL import Image
 
-# -- Configuration -------------------------------------------------------------
+# ── logging ───────────────────────────────────────────────────────────────────
+LOG_FILE = '/var/www/cap_winds_app/logs/mrms_renderer.log'
+os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
+logging.basicConfig(
+    filename=LOG_FILE, level=logging.INFO,
+    format='%(asctime)s %(levelname)s %(message)s')
+log = logging.getLogger(__name__)
 
-_DIR        = Path(__file__).resolve().parent
-TILE_ROOT   = '/LDM/radar/mrms_tiles'
-LOG_FILE    = str(_DIR / 'logs' / 'mrms_renderer.log')
+# ── paths ─────────────────────────────────────────────────────────────────────
+TILE_ROOT   = Path('/LDM/radar/mrms_tiles')
+MAX_FRAMES  = 30
+ZOOM_MIN    = 3
+ZOOM_MAX    = 10
 
-ZOOM_LEVELS      = [3, 4, 5, 6, 7, 8, 9, 10]  # z10 ~2.5km/tile; pixelated but operationally useful
-TILE_SIZE        = 256
-FILL_THRESH      = -990.0
-MAX_FRAMES       = 30    # keep exactly this many frames; ~60 min at 2-min cycle
-MAX_ZOOM_WORKERS = 4     # parallel zoom-level renders; leave headroom for concurrent products
+# ── product definitions ────────────────────────────────────────────────────────
+#   vmin/vmax are the physical units rendered by the colormap.
+#   Units: composite → dBZ;  mesh* → inches;  azshear → 0.001/s;  lightning → fl/km²/min
 
-# -- Colormaps: (value, R, G, B, A) breakpoints --------------------------------
-
-_REFL = [
-    (-30,   0,   0,   0,   0), (  5,   4, 233, 231, 200),
-    ( 10,   1, 159, 244, 220), ( 15,   3,   0, 244, 220),
-    ( 20,   3,   0, 244, 220), ( 25,   2, 253,   2, 220),
-    ( 30,   0, 200,   0, 220), ( 35,   0, 144,   0, 220),
-    ( 40, 255, 255,   0, 220), ( 45, 231, 192,   0, 220),
-    ( 50, 255, 144,   0, 220), ( 55, 255,   0,   0, 220),
-    ( 60, 214,   0,   0, 220), ( 65, 192,   0,   0, 220),
-    ( 70, 255,   0, 255, 230), ( 75, 192,   0, 192, 230),
-    ( 80, 255, 255, 255, 240),
+_REFL_STOPS = [
+    (-30, (0,   0,   0,   0)),
+    (  5, (4,   233, 231, 200)),
+    ( 10, (1,   159, 244, 220)),
+    ( 15, (3,   0,   244, 220)),
+    ( 20, (3,   0,   244, 220)),
+    ( 25, (2,   253, 2,   220)),
+    ( 30, (0,   200, 0,   220)),
+    ( 35, (0,   144, 0,   220)),
+    ( 40, (255, 255, 0,   220)),
+    ( 45, (231, 192, 0,   220)),
+    ( 50, (255, 144, 0,   220)),
+    ( 55, (255, 0,   0,   220)),
+    ( 60, (214, 0,   0,   220)),
+    ( 65, (192, 0,   0,   220)),
+    ( 70, (255, 0,   255, 230)),
+    ( 75, (192, 0,   192, 230)),
+    ( 80, (255, 255, 255, 240)),
 ]
-_MESH = [
-    (  0,   0,   0,   0,   0), (  1,   0, 255, 255, 180),
-    (  6,   0, 200, 255, 200), ( 12,   0, 255,   0, 210),
-    ( 19, 255, 255,   0, 220), ( 25, 255, 165,   0, 230),
-    ( 38, 255,   0,   0, 230), ( 50, 200,   0, 200, 240),
-    ( 75, 255, 255, 255, 250),
+
+# MESH colormap: 0–3 inches.
+# 0.00–0.25: transparent (no hail / trace)
+# 0.25–0.75: light blue → cyan (small hail)
+# 0.75–1.00: yellow (marginally severe, ~penny)
+# 1.00–1.50: orange (severe, quarter+)
+# 1.50–2.00: red
+# 2.00–2.50: dark red / crimson
+# 2.50–3.00: magenta / white (extreme)
+_MESH_STOPS = [
+    (0.00, (0,   0,   0,   0)),
+    (0.10, (0,   0,   0,   0)),    # keep transparent below 0.1"
+    (0.25, (100, 200, 255, 180)),  # light blue — trace hail
+    (0.50, (0,   200, 255, 200)),  # cyan
+    (0.75, (0,   255, 150, 210)),  # cyan-green
+    (1.00, (255, 255, 0,   220)),  # yellow — severe threshold
+    (1.25, (255, 165, 0,   225)),  # orange
+    (1.50, (255, 80,  0,   230)),  # red-orange
+    (1.75, (255, 0,   0,   230)),  # red
+    (2.00, (180, 0,   0,   235)),  # dark red
+    (2.50, (200, 0,   200, 240)),  # magenta
+    (3.00, (255, 255, 255, 250)),  # white cap
 ]
-_LTNG = [
-    (  0,   0,   0,   0,   0), (  5, 255, 255, 100, 160),
-    ( 20, 255, 200,   0, 190), ( 40, 255, 140,   0, 210),
-    ( 60, 255,   0,   0, 220), ( 80, 200,   0, 200, 230),
-    (100, 255, 255, 255, 250),
+
+# Azimuthal shear: divergent blue↔red centered on 0. Units: 0.001/s
+# Operational concern threshold ≈ ±0.005 s⁻¹  (stored as ±5 in 0.001/s)
+_AZSHEAR_STOPS = [
+    (-20, (0,   0,   200, 230)),   # strong anticyclonic — deep blue
+    (-10, (0,   100, 255, 210)),
+    ( -5, (100, 180, 255, 180)),   # weak anticyclonic — light blue
+    ( -2, (150, 210, 255, 120)),
+    (  0, (0,   0,   0,   0)),     # zero — transparent
+    (  2, (255, 210, 150, 120)),
+    (  5, (255, 180, 100, 180)),   # weak cyclonic — light orange
+    ( 10, (255, 80,  0,   210)),
+    ( 20, (255, 0,   0,   230)),   # strong cyclonic — red
 ]
-# Azimuthal shear: bipolar colormap. Units: s⁻¹
-# Negative = anticyclonic (blue), near-zero = transparent, positive = cyclonic (red)
-# Operationally significant: |shear| > 0.005 s⁻¹; tornado-warning threshold ~0.02 s⁻¹
-_AZSH = [
-    (-0.050, 100,   0, 255, 230),   # strong anticyclonic: deep blue
-    (-0.020,   0, 100, 255, 220),   # moderate anticyclonic: blue
-    (-0.010,   0, 200, 255, 160),   # weak anticyclonic: light blue
-    (-0.005,   0,   0,   0,   0),   # below noise floor: transparent
-    ( 0.000,   0,   0,   0,   0),   # zero: transparent
-    ( 0.005,   0,   0,   0,   0),   # below noise floor: transparent
-    ( 0.010, 255, 200,   0, 160),   # weak cyclonic: yellow
-    ( 0.020, 255, 100,   0, 220),   # moderate cyclonic: orange
-    ( 0.030, 255,   0,   0, 230),   # significant cyclonic: red
-    ( 0.050, 255, 255, 255, 240),   # extreme cyclonic: white
+
+# Lightning density: flash/km²/min — used for NLDN (CONUS only).
+# Kept here for future use.
+_LIGHTNING_STOPS = [
+    (0.0,  (0,   0,   0,   0)),
+    (0.01, (255, 255, 0,   180)),
+    (0.05, (255, 165, 0,   200)),
+    (0.10, (255, 0,   0,   220)),
+    (0.50, (255, 0,   255, 240)),
 ]
 
 PRODUCTS = {
-    'composite': {'cmap': _REFL, 'vmin': -30,    'vmax':  80,
-                  'label': 'Composite Reflectivity (dBZ)'},
-    'mesh':      {'cmap': _MESH, 'vmin':   0,    'vmax':  75,
-                  'label': 'MESH Hail Size (mm)'},
-    'lightning': {'cmap': _LTNG, 'vmin':   0,    'vmax': 100,
-                  'label': 'Lightning Probability 60min (%)'},
-    'azshear':   {'cmap': _AZSH, 'vmin': -0.05,  'vmax':  0.05,
-                  'label': 'Azimuthal Shear 0-2km AGL (s⁻¹)'},
+    'composite': {
+        'stops': _REFL_STOPS,
+        'vmin': -30, 'vmax': 80,
+        'label': 'Composite Reflectivity (dBZ)',
+        'units': 'dBZ',
+        'cb_labels': ['-30', '0', '20', '40', '60', '80'],
+        'missing': -99,
+    },
+    'mesh': {
+        'stops': _MESH_STOPS,
+        'vmin': 0.0, 'vmax': 3.0,
+        'label': 'MESH — Max Estimated Hail Size (in)',
+        'units': 'inches',
+        'cb_labels': ['0', '0.5', '1.0', '1.5', '2.0', '2.5', '3.0+'],
+        'missing': -99,
+    },
+    'mesh_max_30min': {
+        'stops': _MESH_STOPS,
+        'vmin': 0.0, 'vmax': 3.0,
+        'label': 'MESH 30-min Max Hail Size (in)',
+        'units': 'inches',
+        'cb_labels': ['0', '0.5', '1.0', '1.5', '2.0', '2.5', '3.0+'],
+        'missing': -99,
+    },
+    'mesh_max_60min': {
+        'stops': _MESH_STOPS,
+        'vmin': 0.0, 'vmax': 3.0,
+        'label': 'MESH 1-hr Max Hail Size (in)',
+        'units': 'inches',
+        'cb_labels': ['0', '0.5', '1.0', '1.5', '2.0', '2.5', '3.0+'],
+        'missing': -99,
+    },
+    'mesh_max_120min': {
+        'stops': _MESH_STOPS,
+        'vmin': 0.0, 'vmax': 3.0,
+        'label': 'MESH 2-hr Max Hail Size (in)',
+        'units': 'inches',
+        'cb_labels': ['0', '0.5', '1.0', '1.5', '2.0', '2.5', '3.0+'],
+        'missing': -99,
+    },
+    'mesh_max_240min': {
+        'stops': _MESH_STOPS,
+        'vmin': 0.0, 'vmax': 3.0,
+        'label': 'MESH 4-hr Max Hail Size (in)',
+        'units': 'inches',
+        'cb_labels': ['0', '0.5', '1.0', '1.5', '2.0', '2.5', '3.0+'],
+        'missing': -99,
+    },
+    'mesh_max_360min': {
+        'stops': _MESH_STOPS,
+        'vmin': 0.0, 'vmax': 3.0,
+        'label': 'MESH 6-hr Max Hail Size (in)',
+        'units': 'inches',
+        'cb_labels': ['0', '0.5', '1.0', '1.5', '2.0', '2.5', '3.0+'],
+        'missing': -99,
+    },
+    'mesh_max_1440min': {
+        'stops': _MESH_STOPS,
+        'vmin': 0.0, 'vmax': 3.0,
+        'label': 'MESH 24-hr Max Hail Size (in)',
+        'units': 'inches',
+        'cb_labels': ['0', '0.5', '1.0', '1.5', '2.0', '2.5', '3.0+'],
+        'missing': -99,
+    },
+    'azshear': {
+        'stops': _AZSHEAR_STOPS,
+        'vmin': -20, 'vmax': 20,
+        'label': 'Azimuthal Shear 0–2 km AGL (×10⁻³ s⁻¹)',
+        'units': '0.001/s',
+        'cb_labels': ['-20', '-10', '-5', '0', '5', '10', '20'],
+        'missing': 0,
+    },
+    'lightning': {
+        'stops': _LIGHTNING_STOPS,
+        'vmin': 0.0, 'vmax': 0.5,
+        'label': 'CG Lightning Density (fl/km²/min)',
+        'units': 'fl/km²/min',
+        'cb_labels': ['0', '0.01', '0.05', '0.1', '0.5'],
+        'missing': -1,
+    },
 }
 
-# -- Logging -------------------------------------------------------------------
-
-def setup_logging():
-    os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
-    logging.basicConfig(
-        filename=LOG_FILE, level=logging.INFO,
-        format='%(asctime)s %(levelname)s %(message)s',
-        datefmt='%Y-%m-%dT%H:%M:%SZ',
-    )
-    logging.getLogger().addHandler(logging.StreamHandler(sys.stderr))
-
-log = logging.getLogger(__name__)
-
-# -- Colormap LUT --------------------------------------------------------------
-
-def _interp(cmap, v):
-    if v <= cmap[0][0]:  return (0, 0, 0, 0)
-    if v >= cmap[-1][0]: return cmap[-1][1:]
-    for i in range(len(cmap) - 1):
-        v0, r0, g0, b0, a0 = cmap[i]
-        v1, r1, g1, b1, a1 = cmap[i+1]
-        if v0 <= v <= v1:
-            t = (v - v0) / (v1 - v0) if v1 > v0 else 0.0
-            return (int(r0+t*(r1-r0)), int(g0+t*(g1-g0)),
-                    int(b0+t*(b1-b0)), int(a0+t*(a1-a0)))
+# ── colormap interpolation ─────────────────────────────────────────────────────
+def interp_color(stops, vmin, vmax, value):
+    """Return (r,g,b,a) uint8 for a physical value."""
+    s = stops
+    if value <= s[0][0]:
+        return s[0][1]
+    if value >= s[-1][0]:
+        return s[-1][1]
+    for i in range(len(s) - 1):
+        v0, c0 = s[i]
+        v1, c1 = s[i + 1]
+        if v0 <= value <= v1:
+            f = (value - v0) / (v1 - v0) if v1 > v0 else 0.0
+            return tuple(int(c0[k] + f * (c1[k] - c0[k])) for k in range(4))
     return (0, 0, 0, 0)
 
-def build_lut(cmap, vmin, vmax):
-    lut = np.zeros((256, 4), dtype=np.uint8)
-    for i in range(256):
-        lut[i] = _interp(cmap, vmin + (vmax - vmin) * i / 255.0)
+
+def build_lut(stops, vmin, vmax, n=4096):
+    """Pre-build a lookup table mapping [0..n-1] → RGBA."""
+    lut = np.zeros((n, 4), dtype=np.uint8)
+    for i in range(n):
+        v = vmin + (i / (n - 1)) * (vmax - vmin)
+        lut[i] = interp_color(stops, vmin, vmax, v)
     return lut
 
-# -- Tile math -----------------------------------------------------------------
 
-def deg2tile(lat, lon, z):
-    n = 2 ** z
-    x = int((lon + 180) / 360 * n)
-    y = int((1 - math.asinh(math.tan(math.radians(lat))) / math.pi) / 2 * n)
+# ── tile math ──────────────────────────────────────────────────────────────────
+def ll_to_tile(lat, lon, zoom):
+    """Convert lat/lon to tile x,y at given zoom."""
+    n = 2 ** zoom
+    x = int((lon + 180.0) / 360.0 * n)
+    lat_r = math.radians(lat)
+    y = int((1.0 - math.log(math.tan(lat_r) + 1.0 / math.cos(lat_r)) / math.pi) / 2.0 * n)
     return x, y
 
-def tile2deg(x, y, z):
-    n = 2 ** z
-    return (math.degrees(math.atan(math.sinh(math.pi * (1 - 2 * y / n)))),
-            x / n * 360 - 180)
 
-def merc_frac(lat):
-    lr = math.radians(max(min(lat, 85.051129), -85.051129))
-    return (1 - math.asinh(math.tan(lr)) / math.pi) / 2
-
-# -- GRIB2 reading -------------------------------------------------------------
-
-def read_grib2gz(path):
-    """Return (data_2d, lat_1d_descending, lon_1d_ascending, valid_time)."""
-    with gzip.open(path, 'rb') as gz:
-        raw = gz.read()
-    with tempfile.NamedTemporaryFile(suffix='.grib2', delete=False) as tmp:
-        tmp.write(raw)
-        tmp_path = tmp.name
-    try:
-        grbs   = pygrib.open(tmp_path)
-        grb    = grbs[1]
-        data   = grb.values.astype(np.float32)
-        lats2d, lons2d = grb.latlons()
-        try:
-            vt = datetime(
-                grb.validityDate // 10000,
-                (grb.validityDate % 10000) // 100,
-                grb.validityDate % 100,
-                grb.validityTime // 100,
-                grb.validityTime % 100,
-                tzinfo=timezone.utc,
-            )
-        except Exception:
-            vt = datetime.now(timezone.utc)
-        grbs.close()
-    finally:
-        os.unlink(tmp_path)
-
-    data[data < FILL_THRESH] = np.nan
-    lons2d = np.where(lons2d > 180, lons2d - 360, lons2d)
-    lat_1d = lats2d[:, 0]
-    lon_1d = lons2d[0, :]
-    if lat_1d[0] < lat_1d[-1]:
-        data   = np.flipud(data)
-        lat_1d = lat_1d[::-1]
-    return data, lat_1d, lon_1d, vt
-
-# -- Warp + slice --------------------------------------------------------------
-
-STRIP_ROWS = 4
-
-def _warp_strip(data, lat_1d, lon_1d, zoom, lut, cfg,
-                x_min, x_max, y_start, y_end):
-    nrows, ncols = data.shape
-    cW = (x_max - x_min + 1) * TILE_SIZE
-    cH = (y_end - y_start) * TILE_SIZE
-
-    c_lat_max, c_lon_min = tile2deg(x_min,     y_start, zoom)
-    c_lat_min, c_lon_max = tile2deg(x_max + 1, y_end,   zoom)
-
-    out_lons  = np.linspace(c_lon_min, c_lon_max, cW, dtype=np.float32)
-    merc_rows = np.linspace(merc_frac(c_lat_max), merc_frac(c_lat_min),
-                            cH, dtype=np.float64)
-    out_lats  = np.degrees(
-        np.arctan(np.sinh(np.pi * (1 - 2 * merc_rows)))
-    ).astype(np.float32)
-
-    lat_asc  = lat_1d[::-1]
-    raw_r    = np.searchsorted(lat_asc,
-                               out_lats.clip(float(lat_asc[0]), float(lat_asc[-1])))
-    src_rows = (nrows - 1) - np.clip(raw_r, 0, nrows - 1)
-    src_cols = np.searchsorted(lon_1d,
-                               out_lons.clip(float(lon_1d[0]), float(lon_1d[-1])))
-    src_cols = np.clip(src_cols, 0, ncols - 1)
-
-    strip    = data[np.ix_(src_rows, src_cols)]
-    vmin, vmax = cfg['vmin'], cfg['vmax']
-    nan_mask = np.isnan(strip)
-    scaled   = np.clip((strip - vmin) / (vmax - vmin) * 255, 0, 255)
-    scaled[nan_mask] = 0
-    rgba     = lut[scaled.astype(np.uint8)]
-    rgba[nan_mask] = [0, 0, 0, 0]
-    return rgba
-
-
-def render_zoom(data, lat_1d, lon_1d, zoom, lut, cfg, out_base):
+def tile_to_ll_bounds(x, y, zoom):
+    """Return (lat_max, lat_min, lon_min, lon_max) for tile."""
     n = 2 ** zoom
-    x_min, y_min = deg2tile(float(lat_1d[0]),  float(lon_1d[0]),  zoom)
-    x_max, y_max = deg2tile(float(lat_1d[-1]), float(lon_1d[-1]), zoom)
-    x_min = max(0, x_min);     y_min = max(0, y_min)
-    x_max = min(n - 1, x_max); y_max = min(n - 1, y_max)
+    lon_min = x / n * 360.0 - 180.0
+    lon_max = (x + 1) / n * 360.0 - 180.0
 
-    rendered = empty = 0
-    y = y_min
-    while y <= y_max:
-        y_end = min(y + STRIP_ROWS, y_max + 1)
-        rgba  = _warp_strip(data, lat_1d, lon_1d, zoom, lut, cfg,
-                            x_min, x_max, y, y_end)
-        for xi, tx in enumerate(range(x_min, x_max + 1)):
-            cs = xi * TILE_SIZE;  ce = cs + TILE_SIZE
-            for yi, ty in enumerate(range(y, y_end)):
-                rs = yi * TILE_SIZE;  re = rs + TILE_SIZE
-                patch = rgba[rs:re, cs:ce]
-                if patch.shape == (TILE_SIZE, TILE_SIZE, 4) and patch[:, :, 3].any():
-                    tdir = out_base / str(zoom) / str(tx)
-                    tdir.mkdir(parents=True, exist_ok=True)
-                    Image.fromarray(patch, 'RGBA').save(tdir / f'{ty}.png', 'PNG')
-                    rendered += 1
-                else:
-                    empty += 1
-        y = y_end
-    return rendered, empty
+    def y_to_lat(yi):
+        return math.degrees(math.atan(math.sinh(math.pi * (1 - 2 * yi / n))))
 
-# -- index.json management -----------------------------------------------------
+    lat_max = y_to_lat(y)
+    lat_min = y_to_lat(y + 1)
+    return lat_max, lat_min, lon_min, lon_max
 
-def ts_to_dirname(dt):
-    return dt.strftime('%Y%m%d-%H%M')
 
-def dirname_to_dt(name):
+# ── timestamp parsing ──────────────────────────────────────────────────────────
+TS_RE = re.compile(r'(\d{8})-(\d{6})')
+
+def parse_timestamp(path_str):
+    """Extract timestamp from filename pattern YYYYMMDD-HHMMSS.
+    Falls back to reading valid_time from GRIB2 metadata if filename
+    contains no parseable timestamp (e.g. mktemp random names).
+    """
+    m = TS_RE.search(path_str)
+    if m:
+        date_s, time_s = m.group(1), m.group(2)
+        dt = datetime(
+            int(date_s[:4]), int(date_s[4:6]), int(date_s[6:8]),
+            int(time_s[:2]), int(time_s[2:4]), int(time_s[4:6]),
+            tzinfo=timezone.utc)
+        stamp = f'{date_s[:4]}{date_s[4:6]}{date_s[6:8]}-{time_s[:2]}{time_s[2:4]}'
+        return stamp, dt
+
+    # Fallback: read valid_time from GRIB2 metadata
+    log.debug('No timestamp in filename %s — reading from GRIB2 metadata', path_str)
     try:
-        return datetime.strptime(name, '%Y%m%d-%H%M').replace(tzinfo=timezone.utc)
-    except ValueError:
+        import cfgrib
+        tmp = None
+        src = str(path_str)
+        if src.endswith('.gz'):
+            tmp = tempfile.NamedTemporaryFile(suffix='.grib2', delete=False)
+            with gzip.open(src, 'rb') as gz:
+                shutil.copyfileobj(gz, tmp)
+            tmp.close()
+            src = tmp.name
+        datasets = cfgrib.open_datasets(src,
+                                         errors='ignore',
+                                         backend_kwargs={'filter_by_keys': {}})
+        if datasets:
+            ds = datasets[0]
+            var = list(ds.data_vars)[0]
+            vt = ds[var].attrs.get('GRIB_validityDate'), ds[var].attrs.get('GRIB_validityTime')
+            if vt[0] and vt[1] is not None:
+                date_s = str(int(vt[0]))          # e.g. 20260322
+                time_s = str(int(vt[1])).zfill(6) # e.g. 003000 → 003000
+                dt = datetime(
+                    int(date_s[:4]), int(date_s[4:6]), int(date_s[6:8]),
+                    int(time_s[:2]), int(time_s[2:4]), int(time_s[4:6]),
+                    tzinfo=timezone.utc)
+                stamp = f'{date_s[:4]}{date_s[4:6]}{date_s[6:8]}-{time_s[:2]}{time_s[2:4]}'
+                log.info('Timestamp from GRIB2 metadata: %s', stamp)
+                return stamp, dt
+    except Exception as e:
+        log.warning('GRIB2 metadata timestamp read failed: %s', e)
+    finally:
+        if tmp and os.path.exists(tmp.name):
+            os.unlink(tmp.name)
+
+    return None, None
+
+
+# ── GRIB2 reading ──────────────────────────────────────────────────────────────
+def read_grib2(path):
+    """
+    Read first message from a GRIB2(.gz) file.
+    Returns (data_2d, lats_1d, lons_1d) all as numpy arrays.
+    Missing/fill values are replaced with np.nan.
+    Requires cfgrib (eccodes backend).
+    """
+    import cfgrib
+    tmp = None
+    try:
+        if str(path).endswith('.gz'):
+            tmp = tempfile.NamedTemporaryFile(suffix='.grib2', delete=False)
+            with gzip.open(path, 'rb') as gz:
+                shutil.copyfileobj(gz, tmp)
+            tmp.close()
+            src = tmp.name
+        else:
+            src = str(path)
+
+        datasets = cfgrib.open_datasets(src,
+                                         errors='ignore',
+                                         backend_kwargs={'filter_by_keys': {}})
+        if not datasets:
+            raise ValueError('No GRIB2 messages decoded')
+
+        ds = datasets[0]
+        var = list(ds.data_vars)[0]
+        da  = ds[var]
+
+        # MRMS GRIB2 uses 0 → 360 longitude convention
+        lons = da.longitude.values
+        lats = da.latitude.values
+        data = da.values.astype(np.float32)
+
+        # Convert fill / missing to nan
+        fill = float(da.attrs.get('_FillValue', -999.0))
+        data[data == fill] = np.nan
+        data[data < -900]  = np.nan
+
+        # Convert MESH from mm to inches if needed
+        # MRMS MESH GRIB2 is stored in mm
+        if 'mesh' in str(path).lower() and np.nanmax(data) > 20:
+            data = data / 25.4   # mm → inches
+
+        return data, lats, lons
+
+    finally:
+        if tmp and os.path.exists(tmp.name):
+            os.unlink(tmp.name)
+
+
+# ── tile rendering ─────────────────────────────────────────────────────────────
+TILE_SIZE = 256
+
+def render_tile(data, lats, lons, x, y, zoom, lut, vmin, vmax):
+    """
+    Render a single 256×256 RGBA PNG tile.
+    Returns bytes or None if tile is entirely transparent.
+    """
+    from PIL import Image
+
+    lat_max, lat_min, lon_min, lon_max = tile_to_ll_bounds(x, y, zoom)
+
+    # Subset the data to the tile bbox (with a small buffer)
+    dlat = (lats.max() - lats.min()) / lats.shape[0] if lats.ndim > 1 else abs(lats[1] - lats[0]) if len(lats) > 1 else 0.01
+    dlon = (lons.max() - lons.min()) / lons.shape[1] if lons.ndim > 1 else abs(lons[1] - lons[0]) if len(lons) > 1 else 0.01
+    buf = max(dlat, dlon) * 2
+
+    if lats.ndim == 2:
+        lat_1d = lats[:, 0]
+        lon_1d = lons[0, :]
+    else:
+        lat_1d = lats
+        lon_1d = lons
+
+    # Handle 0→360 longitude
+    if lon_1d.max() > 180:
+        lon_1d = lon_1d - 360.0
+
+    lat_mask = (lat_1d >= lat_min - buf) & (lat_1d <= lat_max + buf)
+    lon_mask = (lon_1d >= lon_min - buf) & (lon_1d <= lon_max + buf)
+
+    if not lat_mask.any() or not lon_mask.any():
         return None
 
-def update_index(product_key, sector, valid_time, cfg):
-    """
-    Append new frame, prune oldest frames beyond MAX_FRAMES, write atomically.
-    Frame count is fixed at MAX_FRAMES so the animation always has the same
-    number of frames to display regardless of poll timing.
-    Returns the final index dict.
-    """
-    sector_up  = sector.upper()
-    base       = Path(TILE_ROOT) / product_key / sector_up
-    index_path = base / 'index.json'
-    tmp_path   = base / 'index.json.tmp'
-    now_utc    = datetime.now(timezone.utc)
+    lat_idx = np.where(lat_mask)[0]
+    lon_idx = np.where(lon_mask)[0]
+    sub_data = data[np.ix_(lat_idx, lon_idx)]
+    sub_lats = lat_1d[lat_idx]
+    sub_lons = lon_1d[lon_idx]
 
-    frames = []
-    if index_path.exists():
-        try:
-            frames = json.loads(index_path.read_text()).get('frames', [])
-        except Exception as e:
-            log.warning(f"index.json unreadable, starting fresh: {e}")
+    if np.all(np.isnan(sub_data)):
+        return None
 
-    ts_name  = ts_to_dirname(valid_time)
-    tile_url = (f'/CAP_WxCOP/static/mrms_tiles/{product_key}/{sector_up}'
-                f'/{ts_name}/{{z}}/{{x}}/{{y}}.png')
+    n_lut = len(lut) - 1
 
-    # Replace any existing entry for this timestamp
-    frames = [f for f in frames if f.get('timestamp') != ts_name]
-    frames.append({
-        'timestamp':  ts_name,
-        'valid_time': valid_time.isoformat(),
-        'rendered':   now_utc.isoformat(),
+    # ── Vectorized nearest-neighbour resampling ───────────────────────────────
+    px_lons = lon_min + (np.arange(TILE_SIZE) + 0.5) / TILE_SIZE * (lon_max - lon_min)
+    px_lats = lat_max - (np.arange(TILE_SIZE) + 0.5) / TILE_SIZE * (lat_max - lat_min)
+
+    dlon_step = sub_lons[1] - sub_lons[0] if len(sub_lons) > 1 else dlon
+    dlat_step = sub_lats[0] - sub_lats[1] if len(sub_lats) > 1 else dlat
+
+    lx_arr = np.round((px_lons - sub_lons[0]) / dlon_step).astype(np.int32)
+    ly_arr = np.round((sub_lats[0] - px_lats) / abs(dlat_step)).astype(np.int32)
+
+    lx_oob = (lx_arr < 0) | (lx_arr >= len(sub_lons))
+    ly_oob = (ly_arr < 0) | (ly_arr >= len(sub_lats))
+
+    lx_arr = np.clip(lx_arr, 0, len(sub_lons) - 1)
+    ly_arr = np.clip(ly_arr, 0, len(sub_lats) - 1)
+
+    ly_2d = ly_arr[:, np.newaxis]
+    lx_2d = lx_arr[np.newaxis, :]
+
+    sampled = sub_data[ly_2d, lx_2d]
+
+    oob_2d = ly_oob[:, np.newaxis] | lx_oob[np.newaxis, :]
+    sampled = sampled.copy()
+    sampled[oob_2d] = np.nan
+
+    nan_mask = np.isnan(sampled)
+    t = np.where(nan_mask, 0.0, np.clip((sampled - vmin) / (vmax - vmin), 0.0, 1.0))
+    lut_idx = (t * n_lut).astype(np.int32)
+    lut_idx[nan_mask] = 0
+
+    tile_img = lut[lut_idx]
+    tile_img = tile_img.copy()
+    tile_img[nan_mask] = 0
+
+    if tile_img[:, :, 3].max() == 0:
+        return None
+
+    img = Image.fromarray(tile_img, 'RGBA')
+    import io
+    buf_io = io.BytesIO()
+    img.save(buf_io, 'PNG', optimize=True)
+    return buf_io.getvalue()
+
+
+# ── index management ───────────────────────────────────────────────────────────
+def update_index(product, sector, timestamp, valid_dt, zoom_min, zoom_max):
+    index_path = TILE_ROOT / product / sector / 'index.json'
+    tile_url = f'/CAP_WxCOP/static/mrms_tiles/{product}/{sector}/{timestamp}/{{z}}/{{x}}/{{y}}.png'
+
+    entry = {
+        'timestamp':  timestamp,
+        'valid_time': valid_dt.isoformat(),
+        'rendered':   datetime.now(timezone.utc).isoformat(),
         'tile_url':   tile_url,
-    })
-
-    # Sort by timestamp, then trim to MAX_FRAMES keeping the newest
-    frames.sort(key=lambda f: f.get('timestamp', ''))
-    if len(frames) > MAX_FRAMES:
-        to_remove = frames[:-MAX_FRAMES]
-        frames    = frames[-MAX_FRAMES:]
-        for f in to_remove:
-            old_dir = base / f.get('timestamp', '')
-            if old_dir.is_dir():
-                try:
-                    shutil.rmtree(old_dir)
-                    log.info(f"Pruned {old_dir}")
-                except Exception as e:
-                    log.warning(f"Could not prune {old_dir}: {e}")
-
-    index = {
-        'product':    product_key,
-        'sector':     sector_up,
-        'label':      cfg['label'],
-        'max_frames': MAX_FRAMES,
-        'zoom_min':   min(ZOOM_LEVELS),
-        'zoom_max':   max(ZOOM_LEVELS),
-        'latest':     frames[-1]['timestamp'] if frames else ts_name,
-        'frames':     frames,
     }
 
-    base.mkdir(parents=True, exist_ok=True)
-    tmp_path.write_text(json.dumps(index, indent=2))
-    tmp_path.rename(index_path)
-    return index
+    if index_path.exists():
+        with open(index_path) as f:
+            idx = json.load(f)
+    else:
+        idx = {
+            'product':    product,
+            'sector':     sector,
+            'label':      PRODUCTS[product]['label'],
+            'units':      PRODUCTS[product]['units'],
+            'cb_labels':  PRODUCTS[product]['cb_labels'],
+            'vmin':       PRODUCTS[product]['vmin'],
+            'vmax':       PRODUCTS[product]['vmax'],
+            'max_frames': MAX_FRAMES,
+            'zoom_min':   zoom_min,
+            'zoom_max':   zoom_max,
+            'latest':     timestamp,
+            'frames':     [],
+        }
 
-# -- Main pipeline -------------------------------------------------------------
+    # Remove duplicate timestamp if re-rendered
+    idx['frames'] = [f for f in idx['frames'] if f['timestamp'] != timestamp]
+    idx['frames'].append(entry)
+    idx['frames'].sort(key=lambda f: f['timestamp'])
+    idx['frames'] = idx['frames'][-MAX_FRAMES:]
+    idx['latest'] = idx['frames'][-1]['timestamp']
+    idx['label']  = PRODUCTS[product]['label']
+    idx['units']  = PRODUCTS[product]['units']
+    idx['cb_labels'] = PRODUCTS[product]['cb_labels']
+    idx['vmin']   = PRODUCTS[product]['vmin']
+    idx['vmax']   = PRODUCTS[product]['vmax']
 
-def _render_zoom_task(args):
-    """Module-level wrapper so ProcessPoolExecutor can pickle it."""
-    data, lat_1d, lon_1d, zoom, lut, cfg, out_base = args
-    t0 = datetime.now()
-    r, e = render_zoom(data, lat_1d, lon_1d, zoom, lut, cfg, out_base)
-    dt = (datetime.now() - t0).total_seconds()
-    return r, e, dt
+    with open(index_path, 'w') as f:
+        json.dump(idx, f, indent=2)
 
 
-def render_product(product_key, sector, grib_path):
-    cfg = PRODUCTS[product_key]
-    lut = build_lut(cfg['cmap'], cfg['vmin'], cfg['vmax'])
+def scour_old_frames(product, sector):
+    """Remove tile directories not referenced by the current index."""
+    index_path = TILE_ROOT / product / sector / 'index.json'
+    if not index_path.exists():
+        return
+    with open(index_path) as f:
+        idx = json.load(f)
+    keep = {fr['timestamp'] for fr in idx['frames']}
+    sector_dir = TILE_ROOT / product / sector
+    for d in sector_dir.iterdir():
+        if d.is_dir() and d.name not in keep:
+            shutil.rmtree(d, ignore_errors=True)
+            log.info('Scoured old frame dir: %s', d)
 
-    log.info(f"START {product_key}/{sector} <- {Path(grib_path).name}")
-    data, lat_1d, lon_1d, vt = read_grib2gz(grib_path)
-    log.info(f"  Grid {data.shape}, valid {vt.isoformat()}, "
-             f"range {np.nanmin(data):.4f}..{np.nanmax(data):.4f}")
 
-    ts_name  = ts_to_dirname(vt)
-    out_base = Path(TILE_ROOT) / product_key / sector.upper() / ts_name
-
-    tot_r = tot_e = 0
-
-    # Render zoom levels in parallel — each zoom is fully independent.
-    # ProcessPoolExecutor avoids the GIL for numpy-heavy work.
-    # Pass all args as a tuple to the module-level _render_zoom_task helper
-    # (nested functions cannot be pickled by multiprocessing).
-    zoom_args = [(data, lat_1d, lon_1d, z, lut, cfg, out_base) for z in ZOOM_LEVELS]
-    with ProcessPoolExecutor(max_workers=MAX_ZOOM_WORKERS) as pool:
-        futures = {pool.submit(_render_zoom_task, args): args[3] for args in zoom_args}
-        results = {}
-        for fut in as_completed(futures):
-            zoom = futures[fut]
-            try:
-                r, e, dt = fut.result()
-                results[zoom] = (r, e, dt)
-            except Exception as exc:
-                log.error(f"  z{zoom}: FAILED — {exc}")
-                results[zoom] = (0, 0, 0)
-
-    for zoom in sorted(results):
-        r, e, dt = results[zoom]
-        log.info(f"  z{zoom}: {r} tiles — {dt:.1f}s")
-        tot_r += r
-
-    index = update_index(product_key, sector, vt, cfg)
-    log.info(f"DONE {product_key}/{sector}/{ts_name}: "
-             f"{tot_r} tiles, {len(index['frames'])}/{MAX_FRAMES} frames in index")
-    return index
-
-# -- Entry point ---------------------------------------------------------------
-
-if __name__ == '__main__':
-    setup_logging()
-    p = argparse.ArgumentParser(description='MRMS GRIB2 tile renderer')
-    p.add_argument('product_key', choices=list(PRODUCTS.keys()))
-    p.add_argument('sector')
-    p.add_argument('grib_path')
-    args = p.parse_args()
-
-    if not os.path.exists(args.grib_path):
-        log.error(f"Not found: {args.grib_path}")
+# ── main render pipeline ───────────────────────────────────────────────────────
+def render(product_key, sector, grib_path):
+    if product_key not in PRODUCTS:
+        log.error('Unknown product_key: %s', product_key)
         sys.exit(1)
+
+    pdef = PRODUCTS[product_key]
+    grib_path = Path(grib_path)
+    if not grib_path.exists():
+        log.error('GRIB2 file not found: %s', grib_path)
+        sys.exit(1)
+
+    timestamp, valid_dt = parse_timestamp(str(grib_path))
+    if not timestamp:
+        log.error('Could not parse timestamp from: %s', grib_path)
+        sys.exit(1)
+
+    out_dir = TILE_ROOT / product_key / sector / timestamp
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    log.info('Rendering %s/%s  timestamp=%s  from %s', product_key, sector, timestamp, grib_path.name)
 
     try:
-        result = render_product(args.product_key, args.sector, args.grib_path)
-        print(json.dumps(result, indent=2))
+        data, lats, lons = read_grib2(grib_path)
     except Exception as e:
-        log.error(f"FAILED: {e}\n{traceback.format_exc()}")
+        log.error('GRIB2 read failed: %s', e)
         sys.exit(1)
+
+    lut = build_lut(pdef['stops'], pdef['vmin'], pdef['vmax'])
+
+    # Per-sector zoom cap: CONUS has a huge grid, cap at z8 to keep render time <30s.
+    # OCONUS sectors are smaller — z9 is fine. All sectors floor at ZOOM_MIN.
+    ZOOM_MAX_SECTOR = 8 if sector == 'CONUS' else ZOOM_MAX
+
+    # Pre-compute 1-D lat/lon arrays once (used for tile range and bbox checks)
+    if lats.ndim == 2:
+        lat_1d_g = lats[:, 0]; lon_1d_g = lons[0, :]
+    else:
+        lat_1d_g = lats; lon_1d_g = lons.copy()
+    if lon_1d_g.max() > 180:
+        lon_1d_g = lon_1d_g - 360.0
+    dlat_g = abs(lat_1d_g[1] - lat_1d_g[0]) if len(lat_1d_g) > 1 else 0.01
+    dlon_g = abs(lon_1d_g[1] - lon_1d_g[0]) if len(lon_1d_g) > 1 else 0.01
+
+    tiles_written = 0
+    for zoom in range(ZOOM_MIN, ZOOM_MAX_SECTOR + 1):
+        x_min, y_max = ll_to_tile(lat_1d_g.min(), lon_1d_g.min(), zoom)
+        x_max, y_min = ll_to_tile(lat_1d_g.max(), lon_1d_g.max(), zoom)
+        n = 2 ** zoom
+        x_min = max(0, x_min - 1); x_max = min(n - 1, x_max + 1)
+        y_min = max(0, y_min - 1); y_max = min(n - 1, y_max + 1)
+
+        for tx in range(x_min, x_max + 1):
+            for ty in range(y_min, y_max + 1):
+                # Quick bbox pre-check: skip tile if no data falls within it
+                lat_max_t, lat_min_t, lon_min_t, lon_max_t = tile_to_ll_bounds(tx, ty, zoom)
+                buf = max(dlat_g, dlon_g)
+                lat_mask = (lat_1d_g >= lat_min_t - buf) & (lat_1d_g <= lat_max_t + buf)
+                lon_mask = (lon_1d_g >= lon_min_t - buf) & (lon_1d_g <= lon_max_t + buf)
+                if not lat_mask.any() or not lon_mask.any():
+                    continue
+                # Check if any non-NaN data in this bbox
+                li = np.where(lat_mask)[0]; lj = np.where(lon_mask)[0]
+                if np.all(np.isnan(data[np.ix_(li, lj)])):
+                    continue
+                try:
+                    png = render_tile(data, lats, lons, tx, ty, zoom,
+                                      lut, pdef['vmin'], pdef['vmax'])
+                except Exception as e:
+                    log.warning('Tile z%d/%d/%d failed: %s', zoom, tx, ty, e)
+                    continue
+                if png is None:
+                    continue
+                tile_path = out_dir / str(zoom) / str(tx)
+                tile_path.mkdir(parents=True, exist_ok=True)
+                (tile_path / f'{ty}.png').write_bytes(png)
+                tiles_written += 1
+
+    log.info('Wrote %d tiles for %s/%s/%s', tiles_written, product_key, sector, timestamp)
+
+    update_index(product_key, sector, timestamp, valid_dt, ZOOM_MIN, ZOOM_MAX)
+    scour_old_frames(product_key, sector)
+    log.info('Done: %s/%s/%s', product_key, sector, timestamp)
+
+
+if __name__ == '__main__':
+    if len(sys.argv) != 4:
+        print(f'Usage: {sys.argv[0]} <product_key> <sector> <grib2_gz_path>')
+        print(f'Products: {", ".join(PRODUCTS.keys())}')
+        sys.exit(1)
+    render(sys.argv[1], sys.argv[2], sys.argv[3])
 
