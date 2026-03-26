@@ -27,8 +27,36 @@
             background: white; padding: 15px; border-radius: 8px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.3);
             z-index: 1000; max-width: 285px;
+            transition: transform 0.25s ease, opacity 0.25s ease;
+        }
+        .controls.collapsed {
+            transform: translateX(calc(100% + 12px));
+            opacity: 0;
+            pointer-events: none;
         }
         .controls h3 { margin-bottom: 10px; font-size: 16px; color: #2c3e50; }
+
+        /* Panel toggle tab */
+        #panelToggle {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 1001;
+            background: linear-gradient(135deg, #2c5f41, #4a7c59);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            padding: 7px 10px;
+            cursor: pointer;
+            font-size: 16px;
+            line-height: 1;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+            transition: background 0.15s;
+            display: none;  /* hidden when panel visible */
+        }
+        #panelToggle:hover { background: linear-gradient(135deg, #4a7c59, #2c5f41); }
+        .controls { top: 54px; }
+        #panelToggle { top: 54px; }
 
         .layer-selector {
             width: 100%; padding: 8px; margin-bottom: 10px;
@@ -142,7 +170,6 @@
             opacity: 0.85; flex-shrink: 0;
         }
         #map          { height: calc(100vh - 44px); margin-top: 44px; }
-        .controls     { top: 54px; }
         .home-btn     { display: none; }
 
         /* ── MRMS radar player bar ───────────────────────────── */
@@ -269,8 +296,15 @@
 
     <div id="loading">Loading weather data...</div>
 
-    <div class="controls">
-        <h3>Map Layer</h3>
+    <button id="panelToggle" onclick="togglePanel()" title="Show controls">☰</button>
+
+    <div class="controls" id="controlsPanel">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+            <h3 style="margin:0;">Map Layer</h3>
+            <button onclick="togglePanel()" title="Hide controls"
+                style="background:none;border:none;cursor:pointer;font-size:18px;
+                       color:#888;line-height:1;padding:0 2px;">&times;</button>
+        </div>
         <select id="layerSelector" class="layer-selector">
             <option value="street">Street Map</option>
             <option value="sectional">VFR Sectional (zoom &gt;5 mi)</option>
@@ -303,6 +337,22 @@
         <label class="checkbox-label"><input type="checkbox" id="tfrToggle"> TFRs</label>
         <label class="checkbox-label"><input type="checkbox" id="airmetToggle"> AIRMETs/SIGMETs</label>
         <label class="checkbox-label"><input type="checkbox" id="fzlvlToggle"> FZLVL Contours</label>
+        <label class="checkbox-label"><input type="checkbox" id="glmToggle"> GLM Lightning</label>
+        <div id="glmSubControls" style="display:none; margin-top:4px; margin-left:20px;">
+            <div style="font-size:11px;color:#555;margin-bottom:3px;">Time window</div>
+            <select id="glmMinutes" style="width:100%;font-size:12px;padding:2px;">
+                <option value="5">Last 5 min</option>
+                <option value="15" selected>Last 15 min</option>
+                <option value="30">Last 30 min</option>
+                <option value="60">Last 60 min</option>
+            </select>
+            <div style="font-size:10px;color:#888;margin-top:3px;" id="glmStatus"></div>
+            <div style="margin-top:4px;font-size:10px;line-height:1.6;">
+                <span style="color:#ff2222;">●</span> &lt;5 min &nbsp;
+                <span style="color:#ffcc00;">●</span> 5–15 min &nbsp;
+                <span style="color:#00cc44;">●</span> &gt;15 min
+            </div>
+        </div>
 
         <div class="divider"></div>
         <h3>Flight Categories</h3>
@@ -329,9 +379,22 @@
         <div class="divider"></div>
         <h3>Radar</h3>
         <label class="checkbox-label">
-            <input type="checkbox" id="radarToggle"> MRMS Composite Refl
+            <input type="checkbox" id="radarToggle"> MRMS Radar
         </label>
         <div id="radarSubControls" style="display:none; margin-top:6px;">
+            <div style="font-size:11px;color:#555;margin-bottom:3px;">Product</div>
+            <select id="mrmsProduct" class="msel" style="width:100%;margin-bottom:5px;">
+                <option value="composite">Composite Reflectivity</option>
+                <optgroup label="MESH — Hail Size">
+                    <option value="mesh">MESH (Instantaneous)</option>
+                    <option value="mesh_max_30min">MESH Max 30-min</option>
+                    <option value="mesh_max_60min">MESH Max 1-hr</option>
+                    <option value="mesh_max_120min">MESH Max 2-hr</option>
+                    <option value="mesh_max_240min">MESH Max 4-hr</option>
+                    <option value="mesh_max_360min">MESH Max 6-hr</option>
+                    <option value="mesh_max_1440min">MESH Max 24-hr</option>
+                </optgroup>
+            </select>
             <div style="font-size:11px;color:#555;margin-bottom:3px;">Opacity</div>
             <input type="range" id="mrmsOpacity" min="20" max="100" value="70"
                 style="width:100%;accent-color:#2c5f41;">
@@ -341,6 +404,14 @@
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
+        // ── Panel toggle ──────────────────────────────────────────
+        function togglePanel() {
+            var panel  = document.getElementById('controlsPanel');
+            var btn    = document.getElementById('panelToggle');
+            var hidden = panel.classList.toggle('collapsed');
+            btn.style.display = hidden ? 'block' : 'none';
+        }
+        // ─────────────────────────────────────────────────────────
         var map, labelsLayer, baseLayers = {}, tfrLayer;
         var airmetLayer = null;
         var fzlvlLines = [], fzlvlLabels = [];
@@ -1095,64 +1166,148 @@
 
         // ── MRMS radar overlay ─────────────────────────────────────────────
         (function() {
-            var CMAP_STOPS = [
-                [-30,[0,0,0,0]],[5,[4,233,231,200]],[10,[1,159,244,220]],
-                [15,[3,0,244,220]],[20,[3,0,244,220]],[25,[2,253,2,220]],
-                [30,[0,200,0,220]],[35,[0,144,0,220]],[40,[255,255,0,220]],
-                [45,[231,192,0,220]],[50,[255,144,0,220]],[55,[255,0,0,220]],
-                [60,[214,0,0,220]],[65,[192,0,0,220]],[70,[255,0,255,230]],
-                [75,[192,0,192,230]],[80,[255,255,255,240]]
-            ];
-            var VMIN=-30, VMAX=80;
-
-            function interpColor(t) {
-                var v=VMIN+t*(VMAX-VMIN), s=CMAP_STOPS;
-                if (v<=s[0][0]) return s[0][1];
-                if (v>=s[s.length-1][0]) return s[s.length-1][1];
-                for (var i=0;i<s.length-1;i++) {
-                    if (v>=s[i][0]&&v<=s[i+1][0]) {
-                        var f=(s[i+1][0]>s[i][0])?(v-s[i][0])/(s[i+1][0]-s[i][0]):0;
-                        var c0=s[i][1],c1=s[i+1][1];
-                        return [c0[0]+f*(c1[0]-c0[0]),c0[1]+f*(c1[1]-c0[1]),
-                                c0[2]+f*(c1[2]-c0[2]),c0[3]+f*(c1[3]-c0[3])];
+            function interpColorFromStops(stops, vmin, vmax, t) {
+                var v = vmin + t * (vmax - vmin);
+                var s = stops;
+                if (v <= s[0][0]) return s[0][1];
+                if (v >= s[s.length-1][0]) return s[s.length-1][1];
+                for (var i=0; i<s.length-1; i++) {
+                    if (v >= s[i][0] && v <= s[i+1][0]) {
+                        var f = (s[i+1][0]>s[i][0]) ? (v-s[i][0])/(s[i+1][0]-s[i][0]) : 0;
+                        var c0=s[i][1], c1=s[i+1][1];
+                        return [c0[0]+f*(c1[0]-c0[0]), c0[1]+f*(c1[1]-c0[1]),
+                                c0[2]+f*(c1[2]-c0[2]), c0[3]+f*(c1[3]-c0[3])];
                     }
                 }
                 return [0,0,0,0];
             }
 
-            function drawColorbar() {
-                var canvas=document.getElementById('mrmsCbCanvas');
+            function updateMrmsColorbar(productKey) {
+                var pdef = MRMS_PRODUCTS[productKey] || MRMS_PRODUCTS['composite'];
+                var canvas = document.getElementById('mrmsCbCanvas');
+                var title  = document.querySelector('#mrmsColorbar .cb-title');
+                var labels = document.getElementById('mrmsCbLabels');
                 if (!canvas) return;
-                var ctx=canvas.getContext('2d');
-                for (var x=0;x<160;x++) {
-                    var c=interpColor(x/160);
-                    ctx.fillStyle='rgba('+Math.round(c[0])+','+Math.round(c[1])+','+
-                        Math.round(c[2])+','+(c[3]/255).toFixed(2)+')';
-                    ctx.fillRect(x,0,1,canvas.height);
+                var ctx = canvas.getContext('2d');
+                for (var x=0; x<160; x++) {
+                    var c = interpColorFromStops(pdef.stops, pdef.vmin, pdef.vmax, x/160);
+                    ctx.fillStyle = 'rgba('+Math.round(c[0])+','+Math.round(c[1])+','+
+                                    Math.round(c[2])+','+(c[3]/255).toFixed(2)+')';
+                    ctx.fillRect(x, 0, 1, canvas.height);
                 }
-                var labels=document.getElementById('mrmsCbLabels');
-                if (labels) labels.innerHTML=['-30','0','20','40','60','80']
+                if (title)  title.textContent  = pdef.label;
+                if (labels) labels.innerHTML   = (pdef.cbLabels || [])
                     .map(function(l){return '<span>'+l+'</span>';}).join('');
             }
+
+            function drawColorbar() { updateMrmsColorbar('composite'); }
 
             var mrmsFrames=[], mrmsIdx=-1, mrmsPlaying=false, mrmsRockDir=1;
             var mrmsTimer=null, mrmsPollTimer=null;
             var mrmsLayer=null, mrmsLayers={};
             var mrmsIndexData=null;
 
+            // ── MRMS sector selection based on map viewport ────────────────
+            var MRMS_SECTORS = [
+                { name: 'ALASKA', latMin: 50.0, latMax: 72.0, lonMin: -180.0, lonMax: -129.0 },
+                { name: 'HAWAII', latMin: 17.0, latMax: 23.5, lonMin: -161.0, lonMax: -154.0 },
+                { name: 'GUAM',   latMin:  9.0, latMax: 22.0, lonMin:  139.0, lonMax:  148.0 },
+                { name: 'CARIB',  latMin: 14.0, latMax: 22.5, lonMin:  -68.0, lonMax:  -60.0 },
+            ];
+
+            window.getMrmsSector = function getMrmsSector() {
+                if (!map) return 'CONUS';
+                var c   = map.getCenter();
+                var lat = c.lat;
+                var lon = c.lng;
+                lon = ((lon + 180) % 360 + 360) % 360 - 180;
+                for (var i = 0; i < MRMS_SECTORS.length; i++) {
+                    var s = MRMS_SECTORS[i];
+                    if (lat >= s.latMin && lat <= s.latMax &&
+                        lon >= s.lonMin && lon <= s.lonMax) {
+                        return s.name;
+                    }
+                }
+                return 'CONUS';
+            }
+
+            var _mrmsSector = 'CONUS';
+
+            // ── MRMS product definitions (colormap, labels, path) ────────────
+            var MRMS_PRODUCTS = {
+                'composite': {
+                    path:      'composite',
+                    label:     'Composite Reflectivity (dBZ)',
+                    cbLabels:  ['-30','0','20','40','60','80'],
+                    stops: [
+                        [-30,[0,0,0,0]],[5,[4,233,231,200]],[10,[1,159,244,220]],
+                        [15,[3,0,244,220]],[20,[3,0,244,220]],[25,[2,253,2,220]],
+                        [30,[0,200,0,220]],[35,[0,144,0,220]],[40,[255,255,0,220]],
+                        [45,[231,192,0,220]],[50,[255,144,0,220]],[55,[255,0,0,220]],
+                        [60,[214,0,0,220]],[65,[192,0,0,220]],[70,[255,0,255,230]],
+                        [75,[192,0,192,230]],[80,[255,255,255,240]]
+                    ], vmin:-30, vmax:80
+                },
+                'mesh': {
+                    path:     'mesh',
+                    label:    'MESH — Max Estimated Hail Size (in)',
+                    cbLabels: ['0','0.5','1.0','1.5','2.0','2.5','3+'],
+                    stops: [
+                        [0.00,[0,0,0,0]],[0.10,[0,0,0,0]],
+                        [0.25,[100,200,255,180]],[0.50,[0,200,255,200]],
+                        [0.75,[0,255,150,210]],[1.00,[255,255,0,220]],
+                        [1.25,[255,165,0,225]],[1.50,[255,80,0,230]],
+                        [1.75,[255,0,0,230]],[2.00,[180,0,0,235]],
+                        [2.50,[200,0,200,240]],[3.00,[255,255,255,250]]
+                    ], vmin:0, vmax:3
+                },
+                'mesh_max_30min':  { path:'mesh_max_30min',  label:'MESH 30-min Max Hail (in)' },
+                'mesh_max_60min':  { path:'mesh_max_60min',  label:'MESH 1-hr Max Hail (in)'   },
+                'mesh_max_120min': { path:'mesh_max_120min', label:'MESH 2-hr Max Hail (in)'   },
+                'mesh_max_240min': { path:'mesh_max_240min', label:'MESH 4-hr Max Hail (in)'   },
+                'mesh_max_360min': { path:'mesh_max_360min', label:'MESH 6-hr Max Hail (in)'   },
+                'mesh_max_1440min':{ path:'mesh_max_1440min',label:'MESH 24-hr Max Hail (in)'  },
+            };
+            // Inherit MESH colormap for all MESH_Max variants
+            ['mesh_max_30min','mesh_max_60min','mesh_max_120min',
+             'mesh_max_240min','mesh_max_360min','mesh_max_1440min'].forEach(function(k){
+                MRMS_PRODUCTS[k].stops    = MRMS_PRODUCTS['mesh'].stops;
+                MRMS_PRODUCTS[k].vmin     = 0;
+                MRMS_PRODUCTS[k].vmax     = 3;
+                MRMS_PRODUCTS[k].cbLabels = MRMS_PRODUCTS['mesh'].cbLabels;
+            });
+
+            var _mrmsProduct = 'composite';
+
             function fetchMrmsIndex() {
-                fetch('/CAP_WxCOP/static/mrms_tiles/composite/CONUS/index.json?_='+Date.now())
+                var sector  = getMrmsSector();
+                var product = document.getElementById('mrmsProduct')
+                              ? document.getElementById('mrmsProduct').value
+                              : 'composite';
+                if (sector !== _mrmsSector || product !== _mrmsProduct) {
+                    _mrmsSector   = sector;
+                    _mrmsProduct  = product;
+                    mrmsIndexData = null;
+                    mrmsFrames    = [];
+                    mrmsLayers    = {};
+                    if (mrmsLayer) { map.removeLayer(mrmsLayer); mrmsLayer = null; }
+                }
+                var pdef = MRMS_PRODUCTS[product] || MRMS_PRODUCTS['composite'];
+                fetch('/CAP_WxCOP/static/mrms_tiles/' + pdef.path + '/' + sector +
+                      '/index.json?_=' + Date.now())
                     .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
                     .then(function(data) {
                         mrmsIndexData = data;
-                        var n=(data.frames||[]).length;
+                        var n = (data.frames||[]).length;
                         document.getElementById('mrmsStatus').textContent =
-                            n ? n+' frames available' : 'Waiting for data (renders every 2 min)';
+                            sector + ' / ' + (data.label || pdef.label) + ': ' +
+                            (n ? n+' frames' : 'Waiting for data');
+                        updateMrmsColorbar(product);
                         if (n) rebuildMrmsFrames();
                     })
                     .catch(function(e){
                         document.getElementById('mrmsStatus').textContent =
-                            'Radar unavailable — check LDM pipeline ('+e.message+')';
+                            'Radar unavailable ('+e.message+')';
                     });
             }
 
@@ -1183,8 +1338,9 @@
                 if (!mrmsLayers[f.tile_url]) {
                     mrmsLayers[f.tile_url] = L.tileLayer(f.tile_url, {
                         opacity: 0,
-                        maxZoom: mrmsIndexData.zoom_max,
-                        minZoom: mrmsIndexData.zoom_min,
+                        maxZoom: 18,   // allow all zoom levels
+                        minZoom: 1,    // show at overview zoom too
+                        maxNativeZoom: mrmsIndexData.zoom_max,  // tile res cap; Leaflet upscales beyond this
                         zIndex: 400,
                         errorTileUrl: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
                     });
@@ -1331,6 +1487,19 @@
                     if(mrmsLayer) mrmsLayer.setOpacity(this.value/100);
                 });
 
+                document.getElementById('mrmsProduct').addEventListener('change', function() {
+                    // Reset on product switch — sector stays the same
+                    _mrmsProduct  = this.value;
+                    mrmsIndexData = null;
+                    mrmsFrames    = [];
+                    mrmsLayers    = {};
+                    if (mrmsLayer && map.hasLayer(mrmsLayer)) {
+                        map.removeLayer(mrmsLayer);
+                        mrmsLayer = null;
+                    }
+                    fetchMrmsIndex();
+                });
+
                 document.getElementById('mBtnPlay').addEventListener('click',mrmsTogglePlay);
                 document.getElementById('mBtnFirst').addEventListener('click',function(){mrmsGoTo(0);});
                 document.getElementById('mBtnLast').addEventListener('click',function(){mrmsGoTo(mrmsFrames.length-1);});
@@ -1347,13 +1516,98 @@
                 document.addEventListener('touchmove',function(e){if(mDrag)mrmsScrub(e.touches[0]);},{passive:true});
                 document.addEventListener('touchend',function(){mDrag=false;});
             });
+
+            // ── GLM Lightning Layer ────────────────────────────────────────
+            var glmLayer    = null;
+            var glmPollTimer = null;
+            var GLM_COLORS  = ['#ff2222', '#ffcc00', '#00cc44']; // red, yellow, green
+
+            function fetchGlmFlashes() {
+                if (!document.getElementById('glmToggle').checked) return;
+                var minutes = document.getElementById('glmMinutes').value;
+                var bounds  = map.getBounds();
+                var url = '/CAP_WxCOP/api/weather-enhanced/glm/flashes'
+                        + '?minutes=' + minutes
+                        + '&min_lat=' + bounds.getSouth().toFixed(3)
+                        + '&max_lat=' + bounds.getNorth().toFixed(3)
+                        + '&min_lon=' + bounds.getWest().toFixed(3)
+                        + '&max_lon=' + bounds.getEast().toFixed(3);
+
+                fetch(url)
+                    .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+                    .then(function(data) {
+                        if (glmLayer) { map.removeLayer(glmLayer); glmLayer = null; }
+                        glmLayer = L.geoJSON(data, {
+                            pointToLayer: function(feature, latlng) {
+                                var bucket  = feature.properties.age_bucket;
+                                var opacity = bucket === 0 ? 0.95 : bucket === 1 ? 0.75 : 0.55;
+                                var radius  = bucket === 0 ? 4 : bucket === 1 ? 3 : 2;
+                                return L.circleMarker(latlng, {
+                                    radius:      radius,
+                                    fillColor:   GLM_COLORS[bucket],
+                                    color:       'rgba(0,0,0,0.3)',
+                                    weight:      0.5,
+                                    fillOpacity: opacity,
+                                    opacity:     opacity,
+                                    interactive: false   // don't block clicks on airports below
+                                });
+                            }
+                        });
+                        glmLayer.addTo(map);
+                        // Keep radar on top if active
+                        if (document.getElementById('radarToggle').checked && glmLayer) {
+                            glmLayer.bringToBack();
+                        }
+                        var status = document.getElementById('glmStatus');
+                        if (status) {
+                            status.textContent = data.count + ' flashes / last ' + minutes + ' min';
+                        }
+                    })
+                    .catch(function(e){
+                        var status = document.getElementById('glmStatus');
+                        if (status) status.textContent = 'GLM unavailable: ' + e.message;
+                    });
+            }
+
+            // GLM toggle handler
+            document.getElementById('glmToggle').addEventListener('change', function() {
+                var sub = document.getElementById('glmSubControls');
+                if (this.checked) {
+                    sub.style.display = 'block';
+                    fetchGlmFlashes();
+                    glmPollTimer = setInterval(fetchGlmFlashes, 60000);
+                } else {
+                    sub.style.display = 'none';
+                    if (glmLayer) { map.removeLayer(glmLayer); glmLayer = null; }
+                    if (glmPollTimer) { clearInterval(glmPollTimer); glmPollTimer = null; }
+                    var status = document.getElementById('glmStatus');
+                    if (status) status.textContent = '';
+                }
+            });
+
+            document.getElementById('glmMinutes').addEventListener('change', fetchGlmFlashes);
+
+            // Refresh GLM on map move if active
+            map.on('moveend', function() {
+                if (document.getElementById('glmToggle').checked) {
+                    fetchGlmFlashes();
+                }
+                // Switch MRMS sector when panning to OCONUS
+                if (document.getElementById('radarToggle').checked) {
+                    var newSector = getMrmsSector();
+                    if (newSector !== _mrmsSector) fetchMrmsIndex();
+                }
+                // (product changes handled by the select change handler)
+            });
+            // ── End GLM ────────────────────────────────────────────────────
+
         })();
     </script>
 
     <!-- MRMS colorbar -->
     <div id="mrmsColorbar">
         <div class="cb-panel">
-            <div class="cb-title">Composite Reflectivity (dBZ)</div>
+            <div class="cb-title">Composite Reflectivity (dBZ)</div>  <!-- updated by updateMrmsColorbar() -->
             <canvas id="mrmsCbCanvas" width="160" height="12"></canvas>
             <div class="cb-labels" id="mrmsCbLabels"></div>
         </div>
@@ -1394,6 +1648,7 @@
         </div>
     </div>
 
+    </script>
+
 </body>
 </html>
-

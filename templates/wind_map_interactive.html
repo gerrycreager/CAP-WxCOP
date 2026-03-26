@@ -258,9 +258,64 @@
             opacity: 0.85; flex-shrink: 0;
         }
         /* Shift map and controls down; hide old home button */
-        #map          { height: calc(100vh - 44px); margin-top: 44px; }
-        .controls     { top: 54px; }
+        #map          { height: calc(100vh - 92px); margin-top: 92px; }
+        .controls     { top: 102px; }
         .home-btn     { display: none; }
+
+        /* ── Time strip ─────────────────────────────────────── */
+        #timeStrip {
+            position: fixed;
+            top: 44px; left: 0; right: 0;
+            height: 48px;
+            background: #1a2a1a;
+            border-bottom: 1px solid #2e4a2e;
+            display: flex;
+            align-items: center;
+            padding: 0 12px;
+            gap: 10px;
+            z-index: 1090;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+        }
+        #timeStrip .ts-label {
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            color: #aed6a0;
+            white-space: nowrap;
+            min-width: 220px;
+            flex-shrink: 0;
+        }
+        #timeStrip .ts-label .ts-now {
+            color: #ffc107;
+            font-weight: 700;
+        }
+        #timeStrip input[type=range] {
+            flex: 1;
+            height: 4px;
+            accent-color: #4a9e4a;
+            cursor: pointer;
+        }
+        .ts-step-btn {
+            background: #2c5f2c;
+            color: white;
+            border: 1px solid #4a9e4a;
+            border-radius: 4px;
+            padding: 4px 11px;
+            font-size: 13px;
+            cursor: pointer;
+            flex-shrink: 0;
+            line-height: 1;
+        }
+        .ts-step-btn:hover  { background: #3a7a3a; }
+        .ts-step-btn:active { background: #1e4a1e; }
+        .ts-step-btn:disabled { opacity: 0.35; cursor: default; }
+
+        #timeStrip .ts-mode {
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            color: #6a8a6a;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
         /* ── Hazard sidebar ──────────────────────────────────── */
         #hazardSidebar {
             display: none;
@@ -334,6 +389,18 @@
         <span class="tb-utc" id="tbUtc"></span>
     </div>
     <a href="/" class="home-btn">&#127968; Home</a>
+
+    <!-- Time strip -->
+    <div id="timeStrip">
+        <button class="ts-step-btn" id="stepBackBtn" title="Previous hour">&#9664;</button>
+        <button class="ts-step-btn" id="stepFwdBtn"  title="Next hour">&#9654;</button>
+        <div class="ts-label" id="tsLabel">
+            <span class="ts-now">Loading forecast times...</span>
+        </div>
+        <input type="range" id="timeSlider" min="0" max="12" step="1" value="0">
+        <div class="ts-mode" id="tsMode">WORST CASE</div>
+    </div>
+
     <div id="map"></div>
     <div id="loading">Loading wind constraint forecast data...</div>
 
@@ -476,6 +543,13 @@
         var highlightStation = null;
         var currentLayerName = 'street';
 
+        // ── Temporal slider state ─────────────────────────────
+        var _availableTimes = [];   // [{valid_time, forecast_hour}, ...]
+        var _modelRun = null;       // ISO string of current model run
+        var _currentHourIdx = null; // null = worst-case mode
+
+        var _sliderDebounce = null;
+
         // label_priority from API: 1=Military, 2=Major(>=10k/INTL), 3=Regional(5-9999ft), 4=Small(<5000ft)
         // Zoom thresholds match weather map for consistency
         var TIER_MIN_ZOOM = { 1: 0, 2: 3, 3: 3, 4: 10, 5: 12 };
@@ -527,6 +601,7 @@
             labelsLayer = L.layerGroup().addTo(map);
 
             setupControls();
+            initSlider();
             loadWindForecastData();
 
             map.on('zoomend moveend', function() { filterMarkers(); updateLabels(); });
@@ -590,8 +665,11 @@
                 }
             });
 
-            // Region selector
+            // Region selector — reset slider to worst-case on region change
             document.getElementById('regionSelector').addEventListener('change', function() {
+                _currentHourIdx = null;
+                document.getElementById('timeSlider').value = 0;
+                updateSliderLabel(0);
                 loadWindForecastData();
             });
 
@@ -1146,10 +1224,97 @@
             return bestRunway;
         }
 
+        // ── Temporal slider functions ─────────────────────────
+
+        function initSlider() {
+            fetch('/CAP_WxCOP/api/wind-forecast/available-times')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (!data.times || data.times.length === 0) return;
+                    _availableTimes = data.times;
+                    _modelRun = data.model_run;
+                    var slider = document.getElementById('timeSlider');
+                    slider.min = 0;
+                    slider.max = _availableTimes.length;  // 0 = worst-case, 1..N = hours
+                    slider.value = 0;
+                    updateSliderLabel(0);
+                    console.log('Slider initialized: ' + _availableTimes.length + ' forecast hours, run ' + _modelRun);
+                })
+                .catch(function(e) { console.warn('Could not load available times:', e); });
+
+            document.getElementById('timeSlider').addEventListener('input', function() {
+                var idx = parseInt(this.value);
+                updateSliderLabel(idx);
+                clearTimeout(_sliderDebounce);
+                _sliderDebounce = setTimeout(function() {
+                    _currentHourIdx = idx === 0 ? null : idx - 1;
+                    loadWindForecastData();
+                }, 300);
+            });
+
+            document.getElementById('stepBackBtn').addEventListener('click', function() {
+                var slider = document.getElementById('timeSlider');
+                var idx = Math.max(0, parseInt(slider.value) - 1);
+                slider.value = idx;
+                updateSliderLabel(idx);
+                _currentHourIdx = idx === 0 ? null : idx - 1;
+                loadWindForecastData();
+            });
+
+            document.getElementById('stepFwdBtn').addEventListener('click', function() {
+                var slider = document.getElementById('timeSlider');
+                var max = parseInt(slider.max);
+                var idx = Math.min(max, parseInt(slider.value) + 1);
+                slider.value = idx;
+                updateSliderLabel(idx);
+                _currentHourIdx = idx === 0 ? null : idx - 1;
+                loadWindForecastData();
+            });
+        }
+
+        function updateSliderLabel(idx) {
+            var label  = document.getElementById('tsLabel');
+            var modeEl = document.getElementById('tsMode');
+            var backBtn = document.getElementById('stepBackBtn');
+            var fwdBtn  = document.getElementById('stepFwdBtn');
+            var maxIdx  = _availableTimes.length;
+
+            if (idx === 0 || _availableTimes.length === 0) {
+                label.innerHTML = '<span class="ts-now">Worst case — max wind F+00 to F+12</span>';
+                modeEl.textContent = 'WORST CASE';
+            } else {
+                var entry = _availableTimes[idx - 1];
+                var vt = new Date(entry.valid_time + (entry.valid_time.endsWith('Z') ? '' : 'Z'));
+                var days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+                var mons = ['Jan','Feb','Mar','Apr','May','Jun',
+                            'Jul','Aug','Sep','Oct','Nov','Dec'];
+                var day  = days[vt.getUTCDay()];
+                var mon  = mons[vt.getUTCMonth()];
+                var dd   = String(vt.getUTCDate()).padStart(2,'0');
+                var hh   = String(vt.getUTCHours()).padStart(2,'0');
+                var mm   = String(vt.getUTCMinutes()).padStart(2,'0');
+                label.innerHTML = 'Valid <span class="ts-now">' +
+                    hh + mm + 'Z ' + day + ' ' + dd + ' ' + mon + '</span>';
+                modeEl.textContent = 'HOURLY';
+            }
+
+            // Update step button states
+            if (backBtn) backBtn.disabled = (idx <= 0);
+            if (fwdBtn)  fwdBtn.disabled  = (idx >= maxIdx);
+        }
+
         function loadWindForecastData() {
             var region = document.getElementById('regionSelector').value;
-            var url = '/CAP_WxCOP/api/wind-forecast/' + region;
             var regionName = document.getElementById('regionSelector').selectedOptions[0].text;
+
+            // Build URL — append valid_time if a specific hour is selected
+            var url = '/CAP_WxCOP/api/wind-forecast/' + region;
+            if (_currentHourIdx !== null && _availableTimes.length > 0) {
+                var vt = _availableTimes[_currentHourIdx].valid_time;
+                // Ensure no trailing Z mismatch — API expects naive ISO
+                vt = vt.replace('Z','').replace('+00:00','');
+                url += '?valid_time=' + encodeURIComponent(vt);
+            }
 
             // Clear existing markers
             windMarkers.forEach(function(m) { if (m._map) map.removeLayer(m); });
@@ -1175,10 +1340,9 @@
                         currentAirports = data.airports;
                         windMarkers = [];
                         data.airports.forEach(addWindMarker);
-                        filterMarkers();  // adds markers with zoom/tier gating
+                        filterMarkers();
                         updateLabels();
 
-                        // Fit map to region bounds if provided
                         if (data.bounds) {
                             var b = data.bounds;
                             map.fitBounds([[b.south, b.west], [b.north, b.east]]);
@@ -1190,10 +1354,12 @@
                         console.log('Loaded ' + data.airports.length + ' airports (' + milCount + ' military)');
                     } else {
                         console.log('No wind data returned for region: ' + region);
-                    loadingEl.textContent = 'No data for ' + regionName + ' — check model pipeline';
-                    loadingEl.style.display = 'block';
-                    setTimeout(function() { loadingEl.style.display = 'none';
-                        loadingEl.textContent = 'Loading wind constraint forecast data...'; }, 4000);
+                        loadingEl.textContent = 'No data for ' + regionName + ' — check model pipeline';
+                        loadingEl.style.display = 'block';
+                        setTimeout(function() {
+                            loadingEl.style.display = 'none';
+                            loadingEl.textContent = 'Loading wind constraint forecast data...';
+                        }, 4000);
                     }
                 })
                 .catch(function(error) {

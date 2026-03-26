@@ -166,6 +166,7 @@ def get_wind_forecasts_by_states(state_list, limit=5000):
                 'max_wind_kts':    int(row[3]) if row[3] else 0,
                 'max_gust_kts':    int(row[4]) if row[4] else None,
                 'min_wind_kts':    int(row[5]) if row[5] else 0,
+                'wind_dir':        int(row[11]) if row[11] is not None else None,
                 'max_wind_time':   None,
                 'max_gust_time':   None,
                 'model':           row[6] or 'HRRR',
@@ -197,60 +198,99 @@ def get_wind_forecasts_by_states(state_list, limit=5000):
         return [], None
 
 
-def get_wind_forecasts_in_bounds(west, south, east, north, limit=5000):
+def get_wind_forecasts_in_bounds(west, south, east, north, limit=5000, valid_time=None):
     """
-    Query model_wind_forecasts with JOIN to airports table
-    Includes label priority for smart map labeling
+    Query model_wind_forecasts with JOIN to airports table.
+    Includes label priority for smart map labeling.
+    If valid_time (datetime) is provided, returns per-hour data for that valid time
+    from the latest model run covering it. Otherwise returns worst-case across f000-f012.
     """
     try:
         conn = get_connection()
         cur = conn.cursor()
-        
-        # Get latest model run
-        cur.execute("""
-            SELECT DISTINCT model_run 
-            FROM observations.model_wind_forecasts 
-            ORDER BY model_run DESC 
-            LIMIT 1
-        """)
-        
+
+        if valid_time is not None:
+            cur.execute("""
+                SELECT DISTINCT model_run
+                FROM observations.model_wind_forecasts
+                WHERE valid_time = %s
+                ORDER BY model_run DESC LIMIT 1
+            """, (valid_time,))
+        else:
+            cur.execute("""
+                SELECT model_run FROM (
+                    SELECT model_run, MAX(forecast_hour) as max_fh
+                    FROM observations.model_wind_forecasts
+                    GROUP BY model_run
+                ) sub WHERE max_fh >= 12
+                ORDER BY model_run DESC LIMIT 1
+            """)
+
         result = cur.fetchone()
         if not result:
             cur.close()
             conn.close()
             log.warning("No model runs found in database")
             return []
-        
+
         latest_run = result[0]
         log.info(f"Using model run: {latest_run}")
-        
-        # Query WITH JOIN to airports table
-        query = """
-        SELECT 
-            mwf.station_id,
-            ST_X(mwf.location::geometry) as lon,
-            ST_Y(mwf.location::geometry) as lat,
-            MAX(mwf.wind_speed_kts) as max_wind_kts,
-            MAX(mwf.wind_gust_kts) as max_gust_kts,
-            MIN(mwf.wind_speed_kts) as min_wind_kts,
-            mwf.model_name,
-            mwf.wind_category,
-            a.name as airport_name,
-            a.longest_runway_ft,
-            a.is_military
-        FROM observations.model_wind_forecasts mwf
-        INNER JOIN observations.airports a ON mwf.station_id = a.station_id
-        WHERE mwf.model_run = %s
-            AND ST_X(mwf.location::geometry) BETWEEN %s AND %s
-            AND ST_Y(mwf.location::geometry) BETWEEN %s AND %s
-            AND mwf.forecast_hour <= 12
-        GROUP BY mwf.station_id, mwf.location, mwf.model_name, mwf.wind_category, a.name, a.longest_runway_ft, a.is_military
-        ORDER BY MAX(mwf.wind_speed_kts) DESC
-        LIMIT %s
-        """
-        
-        cur.execute(query, (latest_run, west, east, south, north, limit))
-        
+
+        if valid_time is not None:
+            query = """
+            SELECT
+                mwf.station_id,
+                ST_X(mwf.location::geometry) as lon,
+                ST_Y(mwf.location::geometry) as lat,
+                mwf.wind_speed_kts as max_wind_kts,
+                mwf.wind_gust_kts  as max_gust_kts,
+                mwf.wind_speed_kts as min_wind_kts,
+                mwf.model_name,
+                mwf.wind_category,
+                a.name as airport_name,
+                a.longest_runway_ft,
+                a.is_military,
+                mwf.wind_dir,
+                mwf.forecast_hour
+            FROM observations.model_wind_forecasts mwf
+            INNER JOIN observations.airports a ON mwf.station_id = a.station_id
+            WHERE mwf.model_run = %s
+                AND mwf.valid_time = %s
+                AND ST_X(mwf.location::geometry) BETWEEN %s AND %s
+                AND ST_Y(mwf.location::geometry) BETWEEN %s AND %s
+            ORDER BY mwf.wind_speed_kts DESC
+            LIMIT %s
+            """
+            cur.execute(query, (latest_run, valid_time, west, east, south, north, limit))
+        else:
+            query = """
+            SELECT
+                mwf.station_id,
+                ST_X(mwf.location::geometry) as lon,
+                ST_Y(mwf.location::geometry) as lat,
+                MAX(mwf.wind_speed_kts) as max_wind_kts,
+                MAX(mwf.wind_gust_kts) as max_gust_kts,
+                MIN(mwf.wind_speed_kts) as min_wind_kts,
+                mwf.model_name,
+                mwf.wind_category,
+                a.name as airport_name,
+                a.longest_runway_ft,
+                a.is_military,
+                NULL as wind_dir,
+                NULL as forecast_hour
+            FROM observations.model_wind_forecasts mwf
+            INNER JOIN observations.airports a ON mwf.station_id = a.station_id
+            WHERE mwf.model_run = %s
+                AND ST_X(mwf.location::geometry) BETWEEN %s AND %s
+                AND ST_Y(mwf.location::geometry) BETWEEN %s AND %s
+                AND mwf.forecast_hour <= 12
+            GROUP BY mwf.station_id, mwf.location, mwf.model_name, mwf.wind_category,
+                     a.name, a.longest_runway_ft, a.is_military
+            ORDER BY MAX(mwf.wind_speed_kts) DESC
+            LIMIT %s
+            """
+            cur.execute(query, (latest_run, west, east, south, north, limit))
+
         airports = []
         for row in cur.fetchall():
             station_id = row[0]
@@ -258,7 +298,7 @@ def get_wind_forecasts_in_bounds(west, south, east, north, limit=5000):
             runway_ft = int(row[9]) if row[9] else None
             is_mil    = bool(row[10]) if row[10] is not None else False
             label_priority = get_label_priority(name, runway_ft, station_id, is_mil)
-            
+
             airports.append({
                 'station_id': station_id,
                 'lon': float(row[1]) if row[1] else 0,
@@ -266,6 +306,7 @@ def get_wind_forecasts_in_bounds(west, south, east, north, limit=5000):
                 'max_wind_kts': int(row[3]) if row[3] else 0,
                 'max_gust_kts': int(row[4]) if row[4] else None,
                 'min_wind_kts': int(row[5]) if row[5] else 0,
+                'wind_dir': int(row[11]) if row[11] is not None else None,
                 'max_wind_time': None,
                 'max_gust_time': None,
                 'model': row[6] or 'HRRR',
@@ -340,57 +381,112 @@ def generate_wind_grid(airports, bounds, grid_resolution=50):
         'max_wind': float(np.nanmax(grid_wind))
     }
 
+@wind_forecast_api.route('/available-times')
+def get_available_times():
+    """Return list of valid_times available from latest complete HRRR run.
+    Used by the temporal slider to populate its steps.
+    """
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        # Latest complete run
+        cur.execute("""
+            SELECT model_run FROM (
+                SELECT model_run, MAX(forecast_hour) as max_fh
+                FROM observations.model_wind_forecasts
+                GROUP BY model_run
+            ) sub WHERE max_fh >= 12
+            ORDER BY model_run DESC LIMIT 1
+        """)
+        result = cur.fetchone()
+        if not result:
+            cur.close(); conn.close()
+            return jsonify({'error': 'No complete model runs available'}), 404
+        model_run = result[0]
+        cur.execute("""
+            SELECT DISTINCT valid_time, forecast_hour
+            FROM observations.model_wind_forecasts
+            WHERE model_run = %s
+            ORDER BY valid_time
+        """, (model_run,))
+        rows = cur.fetchall()
+        cur.close(); conn.close()
+        return jsonify({
+            'model_run': model_run.isoformat(),
+            'model_name': 'HRRR',
+            'times': [
+                {'valid_time': r[0].isoformat(), 'forecast_hour': r[1]}
+                for r in rows
+            ]
+        })
+    except Exception as e:
+        log.error(f"Error fetching available times: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
 @wind_forecast_api.route('/region/<region_code>')
 def get_region_forecasts(region_code):
     """Get wind forecasts for a CAP region.
     State-based regions use iso_region filter for accurate edge coverage.
     OCONUS territories fall back to bounding box.
+    Optional ?valid_time=ISO8601 for temporal slider.
     """
     region_code = region_code.upper()
 
     if region_code not in ALL_REGIONS:
         return jsonify({'error': 'Invalid region code'}), 400
 
+    # Parse optional valid_time param
+    valid_time = None
+    vt_str = request.args.get('valid_time')
+    if vt_str:
+        try:
+            from dateutil.parser import parse as parse_dt
+            valid_time = parse_dt(vt_str).replace(tzinfo=None)
+        except Exception as e:
+            log.warning(f"Invalid valid_time param: {vt_str} — {e}")
+
     # State-based query for CONUS regions
     if region_code in REGION_STATES:
-        airports, bounds = get_wind_forecasts_by_states(REGION_STATES[region_code])
+        airports, bounds = get_wind_forecasts_by_states(
+            REGION_STATES[region_code], valid_time=valid_time)
         if not bounds:
             bounds = REGION_BOUNDS.get(region_code, {'west':-125,'south':24,'east':-66,'north':50})
-        # If state query returned nothing (iso_region mismatch in DB), fall back to bbox
         if not airports:
             log.warning(f"State query empty for {region_code}, falling back to bounding box")
             bounds = REGION_BOUNDS.get(region_code, {'west':-125,'south':24,'east':-66,'north':50})
             airports = get_wind_forecasts_in_bounds(
                 bounds['west'], bounds['south'],
-                bounds['east'], bounds['north']
+                bounds['east'], bounds['north'],
+                valid_time=valid_time
             )
     else:
-        # OCONUS / CONUS overview — bounding box
         bounds = REGION_BOUNDS[region_code]
         airports = get_wind_forecasts_in_bounds(
             bounds['west'], bounds['south'],
-            bounds['east'], bounds['north']
+            bounds['east'], bounds['north'],
+            valid_time=valid_time
         )
-    
-    # Generate wind grid for contours
+
     wind_grid = None
     if len(airports) >= 3:
         try:
             wind_grid = generate_wind_grid(airports, bounds, grid_resolution=40)
         except Exception as e:
             log.warning(f"Failed to generate wind grid: {e}")
-    
+
     response = {
         'region': region_code,
         'bounds': bounds,
         'count': len(airports),
         'airports': airports,
+        'valid_time': valid_time.isoformat() if valid_time else None,
         'timestamp': datetime.utcnow().isoformat()
     }
-    
+
     if wind_grid:
         response['wind_grid'] = wind_grid
-    
+
     return jsonify(response)
 @wind_forecast_api.route('/state/<state_code>')
 def get_state_forecasts(state_code):
@@ -459,60 +555,80 @@ def get_state_forecasts(state_code):
         return jsonify({'error': 'State not supported or bounds not defined'}), 400
     
     bounds = state_bounds[state_code]
+    valid_time = None
+    vt_str = request.args.get('valid_time')
+    if vt_str:
+        try:
+            from dateutil.parser import parse as parse_dt
+            valid_time = parse_dt(vt_str).replace(tzinfo=None)
+        except Exception as e:
+            log.warning(f"Invalid valid_time param: {vt_str} — {e}")
+
     airports = get_wind_forecasts_in_bounds(
-        bounds['west'], bounds['south'], 
-        bounds['east'], bounds['north']
+        bounds['west'], bounds['south'],
+        bounds['east'], bounds['north'],
+        valid_time=valid_time
     )
-    
-    # Generate wind grid for contours
+
     wind_grid = None
     if len(airports) >= 3:
         try:
             wind_grid = generate_wind_grid(airports, bounds, grid_resolution=40)
         except Exception as e:
             log.warning(f"Failed to generate wind grid: {e}")
-    
+
     response = {
         'state': state_code,
         'bounds': bounds,
         'count': len(airports),
         'airports': airports,
+        'valid_time': valid_time.isoformat() if valid_time else None,
         'timestamp': datetime.utcnow().isoformat()
     }
-    
+
     if wind_grid:
         response['wind_grid'] = wind_grid
-    
+
     return jsonify(response)
 
 @wind_forecast_api.route('/conus')
 def get_conus_forecasts():
     """Get wind forecasts for entire CONUS"""
     bounds = REGION_BOUNDS['CONUS']
+    valid_time = None
+    vt_str = request.args.get('valid_time')
+    if vt_str:
+        try:
+            from dateutil.parser import parse as parse_dt
+            valid_time = parse_dt(vt_str).replace(tzinfo=None)
+        except Exception as e:
+            log.warning(f"Invalid valid_time param: {vt_str} — {e}")
+
     airports = get_wind_forecasts_in_bounds(
-        bounds['west'], bounds['south'], 
-        bounds['east'], bounds['north']
+        bounds['west'], bounds['south'],
+        bounds['east'], bounds['north'],
+        valid_time=valid_time
     )
-    
-    # Generate wind grid for contours
+
     wind_grid = None
     if len(airports) >= 3:
         try:
             wind_grid = generate_wind_grid(airports, bounds, grid_resolution=50)
         except Exception as e:
             log.warning(f"Failed to generate wind grid: {e}")
-    
+
     response = {
         'region': 'CONUS',
         'bounds': bounds,
         'count': len(airports),
         'airports': airports,
+        'valid_time': valid_time.isoformat() if valid_time else None,
         'timestamp': datetime.utcnow().isoformat()
     }
-    
+
     if wind_grid:
         response['wind_grid'] = wind_grid
-    
+
     return jsonify(response)
     """Get wind forecasts for custom bounding box"""
     try:

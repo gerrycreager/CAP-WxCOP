@@ -107,7 +107,7 @@ def verify_password(username, password):
     user  = users.get(username)
     if not user:
         # Constant-time dummy check to prevent username enumeration
-        bcrypt.checkpw(b'dummy', b'$2b$12$invalidhashpadding00000000000000000000000000000000000')
+        bcrypt.checkpw(b'dummy', bcrypt.hashpw(b'dummy', bcrypt.gensalt(rounds=4)))
         return None
     try:
         if bcrypt.checkpw(password.encode(), user['hash'].encode()):
