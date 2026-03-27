@@ -92,3 +92,4 @@ hrrr_data/
 
 # Static MRMS tiles (path relative to app root, not /var/www/html)
 static/mrms_tiles/
+.cache/
