@@ -604,6 +604,18 @@
             initSlider();
             loadWindForecastData();
 
+            // Auto-refresh wind constraints every 15 minutes.
+            // Model data (HRRR, GFS, AIGFS) is ingested hourly; 15-min interval
+            // ensures the display reflects the latest available model run without
+            // requiring a page reload. Refresh only fires if the user is on the
+            // current (latest) time step — slider interactions are not disturbed.
+            setInterval(function() {
+                var slider = document.getElementById('timeSlider');
+                if (slider && parseInt(slider.value) === 0) {
+                    loadWindForecastData();
+                }
+            }, 15 * 60 * 1000);
+
             map.on('zoomend moveend', function() { filterMarkers(); updateLabels(); });
 
             map.on('click', function(e) {

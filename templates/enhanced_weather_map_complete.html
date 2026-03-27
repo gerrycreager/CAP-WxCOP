@@ -575,6 +575,11 @@
             setupControls();
             loadWeatherData();
 
+            // Auto-refresh METAR/flight status every 10 minutes.
+            // METARs are issued hourly; 10-min interval ensures data is
+            // never more than ~10 min stale without requiring a page reload.
+            setInterval(loadWeatherData, 10 * 60 * 1000);
+
             // Both filterMarkers and updateLabels run on zoom/pan so markers
             // disappear/appear correctly at tier zoom thresholds.
             map.on('zoomend moveend', function() { filterMarkers(); updateLabels(); });
