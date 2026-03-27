@@ -597,6 +597,9 @@
             // Both filterMarkers and updateLabels run on zoom/pan so markers
             // disappear/appear correctly at tier zoom thresholds.
             map.on('zoomend moveend', function() { filterMarkers(); updateLabels(); });
+
+            // Initialize airspace layer toggle handlers now that map exists.
+            if (typeof initAirspaceLayers === 'function') initAirspaceLayers();
         }
 
         function setupControls() {
@@ -1650,7 +1653,7 @@
                 return { color: '#dc6400', weight: 1.5, opacity: 0.9,
                          fillColor: '#e07800', fillOpacity: 0.20 };
             } else {
-                // MOA, Warning, Alert
+                // MOA, Warning, Alert, Danger
                 return { color: '#5000c8', weight: 1, opacity: 0.8,
                          fillColor: '#7020e0', fillOpacity: 0.12 };
             }
@@ -1662,17 +1665,27 @@
         }
 
         // ── Popup content ────────────────────────────────────────────────────
+        var SUA_TYPE_NAMES = {
+            'P':   'Prohibited',
+            'R':   'Restricted',
+            'MOA': 'Military Operations Area',
+            'W':   'Warning Area',
+            'A':   'Alert Area',
+            'D':   'Danger Area',
+        };
+
         function suaPopup(feature) {
             var p = feature.properties;
             var name = p.NAME || p.SUA_NAME || '';
-            var type = p.TYPE_CODE || p.TYPE || '';
+            var typeCode = (p.TYPE_CODE || p.TYPE || '').toUpperCase();
+            var typeName = SUA_TYPE_NAMES[typeCode] || typeCode;
             var ident = p.IDENT || p.SUA_ID || '';
             var alt_lo = p.LOWER_VAL || p.ALT_LO || '';
             var alt_hi = p.UPPER_VAL || p.ALT_HI || '';
             var schedule = p.TIME_CODE || p.SCHEDULE || 'See NOTAMs';
             return '<div style="font-size:13px;min-width:160px;">' +
                    '<strong>' + ident + ' ' + name + '</strong><br>' +
-                   '<span style="color:#555;">' + type + '</span><br>' +
+                   '<span style="color:#555;">' + typeName + '</span><br>' +
                    (alt_lo ? 'Alt: ' + alt_lo + ' – ' + alt_hi + '<br>' : '') +
                    'Schedule: ' + schedule +
                    '</div>';
@@ -1740,7 +1753,7 @@
             if (_suaLoading) { setTimeout(function(){loadSua(callback);}, 500); return; }
             _suaLoading = true;
             setAirspaceStatus('Loading SUA…');
-            fetch('/static/geo/sua.geojson')
+            fetch('/CAP_WxCOP/static/geo/sua.geojson')
                 .then(function(r) {
                     if (!r.ok) throw new Error('SUA fetch failed: ' + r.status);
                     return r.json();
@@ -1763,7 +1776,7 @@
             if (_mtrLoading) { setTimeout(function(){loadMtr(callback);}, 500); return; }
             _mtrLoading = true;
             setAirspaceStatus('Loading MTR…');
-            fetch('/static/geo/mtr.geojson')
+            fetch('/CAP_WxCOP/static/geo/mtr.geojson')
                 .then(function(r) {
                     if (!r.ok) throw new Error('MTR fetch failed: ' + r.status);
                     return r.json();
@@ -1787,7 +1800,8 @@
             else { if (map.hasLayer(layerRef)) map.removeLayer(layerRef); }
         }
 
-        // ── Toggle event handlers ────────────────────────────────────────────
+        // ── Toggle event handlers — called from initMap() after map exists ──
+        function initAirspaceLayers() {
         document.getElementById('suaProhibToggle').addEventListener('change', function() {
             if (this.checked) {
                 loadSua(function(data) {
@@ -1831,6 +1845,7 @@
                 if (mtrLayer && map.hasLayer(mtrLayer)) map.removeLayer(mtrLayer);
             }
         });
+        } // end initAirspaceLayers
 
     })();
     </script>
@@ -1883,3 +1898,4 @@
 
 </body>
 </html>
+
