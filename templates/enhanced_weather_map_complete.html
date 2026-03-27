@@ -338,6 +338,20 @@
         <label class="checkbox-label"><input type="checkbox" id="airmetToggle"> AIRMETs/SIGMETs</label>
         <label class="checkbox-label"><input type="checkbox" id="fzlvlToggle"> FZLVL Contours</label>
         <label class="checkbox-label"><input type="checkbox" id="glmToggle"> GLM Lightning</label>
+
+        <div class="divider"></div>
+        <h3>Airspace</h3>
+        <label class="checkbox-label"><input type="checkbox" id="suaProhibToggle"> Prohibited (P-)</label>
+        <label class="checkbox-label"><input type="checkbox" id="suaRestrictToggle"> Restricted (R-)</label>
+        <label class="checkbox-label"><input type="checkbox" id="suaMoaToggle"> MOA / Warning / Alert</label>
+        <label class="checkbox-label"><input type="checkbox" id="mtrToggle"> Mil Training Routes (MTR)</label>
+        <div id="airspaceStatus" style="font-size:10px;color:#888;margin-top:3px;margin-left:4px;"></div>
+        <div style="margin-top:4px;margin-left:4px;font-size:10px;line-height:1.8;">
+            <span style="display:inline-block;width:12px;height:4px;background:rgba(180,0,0,0.7);margin-right:4px;vertical-align:middle;"></span>Prohibited &nbsp;
+            <span style="display:inline-block;width:12px;height:4px;background:rgba(220,100,0,0.6);margin-right:4px;vertical-align:middle;"></span>Restricted<br>
+            <span style="display:inline-block;width:12px;height:4px;background:rgba(80,0,200,0.5);margin-right:4px;vertical-align:middle;"></span>MOA/Warn/Alert &nbsp;
+            <span style="display:inline-block;width:12px;height:4px;background:rgba(0,100,180,0.6);margin-right:4px;vertical-align:middle;"></span>MTR
+        </div>
         <div id="glmSubControls" style="display:none; margin-top:4px; margin-left:20px;">
             <div style="font-size:11px;color:#555;margin-bottom:3px;">Time window</div>
             <select id="glmMinutes" style="width:100%;font-size:12px;padding:2px;">
@@ -1607,6 +1621,218 @@
             // ── End GLM ────────────────────────────────────────────────────
 
         })();
+    </script>
+
+    <!-- ── Airspace GeoJSON layers ────────────────────────────────────────── -->
+    <script>
+    (function() {
+        // Layer groups — one per display category
+        var suaProhibLayer = null;   // Prohibited (P-)
+        var suaRestrictLayer = null; // Restricted (R-)
+        var suaMoaLayer = null;      // MOA / Warning / Alert
+        var mtrLayer = null;         // Military Training Routes
+
+        // GeoJSON data cache (loaded once, toggled on/off)
+        var _suaData = null;
+        var _mtrData = null;
+        var _suaLoading = false;
+        var _mtrLoading = false;
+
+        // ── Styling ──────────────────────────────────────────────────────────
+        function suaStyle(feature) {
+            var t = (feature.properties.TYPE_CODE || '').toUpperCase();
+            if (t === 'P') {
+                // Prohibited
+                return { color: '#b40000', weight: 1.5, opacity: 0.9,
+                         fillColor: '#cc0000', fillOpacity: 0.25 };
+            } else if (t === 'R') {
+                // Restricted
+                return { color: '#dc6400', weight: 1.5, opacity: 0.9,
+                         fillColor: '#e07800', fillOpacity: 0.20 };
+            } else {
+                // MOA, Warning, Alert
+                return { color: '#5000c8', weight: 1, opacity: 0.8,
+                         fillColor: '#7020e0', fillOpacity: 0.12 };
+            }
+        }
+
+        function mtrStyle() {
+            return { color: '#0064b4', weight: 1.5, opacity: 0.75,
+                     fillColor: '#0080d0', fillOpacity: 0.10 };
+        }
+
+        // ── Popup content ────────────────────────────────────────────────────
+        function suaPopup(feature) {
+            var p = feature.properties;
+            var name = p.NAME || p.SUA_NAME || '';
+            var type = p.TYPE_CODE || p.TYPE || '';
+            var ident = p.IDENT || p.SUA_ID || '';
+            var alt_lo = p.LOWER_VAL || p.ALT_LO || '';
+            var alt_hi = p.UPPER_VAL || p.ALT_HI || '';
+            var schedule = p.TIME_CODE || p.SCHEDULE || 'See NOTAMs';
+            return '<div style="font-size:13px;min-width:160px;">' +
+                   '<strong>' + ident + ' ' + name + '</strong><br>' +
+                   '<span style="color:#555;">' + type + '</span><br>' +
+                   (alt_lo ? 'Alt: ' + alt_lo + ' – ' + alt_hi + '<br>' : '') +
+                   'Schedule: ' + schedule +
+                   '</div>';
+        }
+
+        function mtrPopup(feature) {
+            var p = feature.properties;
+            var ident = p.MTR_IDENT || p.IDENT || '';
+            var type = ident.startsWith('IR') ? 'IR (Instrument)' :
+                       ident.startsWith('VR') ? 'VR (Visual)' :
+                       ident.startsWith('SR') ? 'SR (Slow Speed)' : 'MTR';
+            var alt_lo = p.LOWER_ALT || p.ALT_LO || '';
+            var alt_hi = p.UPPER_ALT || p.ALT_HI || '';
+            var width  = p.WIDTH || '';
+            return '<div style="font-size:13px;min-width:140px;">' +
+                   '<strong>' + ident + '</strong><br>' +
+                   '<span style="color:#555;">' + type + '</span><br>' +
+                   (alt_lo ? 'Alt: ' + alt_lo + ' – ' + alt_hi + '<br>' : '') +
+                   (width ? 'Width: ±' + width + ' NM' : '') +
+                   '</div>';
+        }
+
+        // ── Layer builders ───────────────────────────────────────────────────
+        function buildSuaLayers(data) {
+            var prohibFeatures = { type:'FeatureCollection', features:[] };
+            var restrictFeatures = { type:'FeatureCollection', features:[] };
+            var moaFeatures = { type:'FeatureCollection', features:[] };
+
+            data.features.forEach(function(f) {
+                var t = (f.properties.TYPE_CODE || '').toUpperCase();
+                if (t === 'P') prohibFeatures.features.push(f);
+                else if (t === 'R') restrictFeatures.features.push(f);
+                else moaFeatures.features.push(f);
+            });
+
+            suaProhibLayer = L.geoJSON(prohibFeatures, {
+                style: suaStyle,
+                onEachFeature: function(f, l) { l.bindPopup(suaPopup(f)); }
+            });
+            suaRestrictLayer = L.geoJSON(restrictFeatures, {
+                style: suaStyle,
+                onEachFeature: function(f, l) { l.bindPopup(suaPopup(f)); }
+            });
+            suaMoaLayer = L.geoJSON(moaFeatures, {
+                style: suaStyle,
+                onEachFeature: function(f, l) { l.bindPopup(suaPopup(f)); }
+            });
+        }
+
+        function buildMtrLayer(data) {
+            mtrLayer = L.geoJSON(data, {
+                style: mtrStyle,
+                onEachFeature: function(f, l) { l.bindPopup(mtrPopup(f)); }
+            });
+        }
+
+        // ── Load and toggle helpers ──────────────────────────────────────────
+        function setAirspaceStatus(msg) {
+            var el = document.getElementById('airspaceStatus');
+            if (el) el.textContent = msg;
+        }
+
+        function loadSua(callback) {
+            if (_suaData) { callback(_suaData); return; }
+            if (_suaLoading) { setTimeout(function(){loadSua(callback);}, 500); return; }
+            _suaLoading = true;
+            setAirspaceStatus('Loading SUA…');
+            fetch('/static/geo/sua.geojson')
+                .then(function(r) {
+                    if (!r.ok) throw new Error('SUA fetch failed: ' + r.status);
+                    return r.json();
+                })
+                .then(function(data) {
+                    _suaData = data;
+                    _suaLoading = false;
+                    setAirspaceStatus('');
+                    callback(data);
+                })
+                .catch(function(e) {
+                    _suaLoading = false;
+                    setAirspaceStatus('SUA unavailable');
+                    console.error('Airspace SUA load error:', e);
+                });
+        }
+
+        function loadMtr(callback) {
+            if (_mtrData) { callback(_mtrData); return; }
+            if (_mtrLoading) { setTimeout(function(){loadMtr(callback);}, 500); return; }
+            _mtrLoading = true;
+            setAirspaceStatus('Loading MTR…');
+            fetch('/static/geo/mtr.geojson')
+                .then(function(r) {
+                    if (!r.ok) throw new Error('MTR fetch failed: ' + r.status);
+                    return r.json();
+                })
+                .then(function(data) {
+                    _mtrData = data;
+                    _mtrLoading = false;
+                    setAirspaceStatus('');
+                    callback(data);
+                })
+                .catch(function(e) {
+                    _mtrLoading = false;
+                    setAirspaceStatus('MTR unavailable');
+                    console.error('Airspace MTR load error:', e);
+                });
+        }
+
+        function toggleSuaLayer(layerRef, show) {
+            if (!layerRef) return;
+            if (show) { if (!map.hasLayer(layerRef)) layerRef.addTo(map); }
+            else { if (map.hasLayer(layerRef)) map.removeLayer(layerRef); }
+        }
+
+        // ── Toggle event handlers ────────────────────────────────────────────
+        document.getElementById('suaProhibToggle').addEventListener('change', function() {
+            if (this.checked) {
+                loadSua(function(data) {
+                    if (!suaProhibLayer) buildSuaLayers(data);
+                    toggleSuaLayer(suaProhibLayer, true);
+                });
+            } else {
+                toggleSuaLayer(suaProhibLayer, false);
+            }
+        });
+
+        document.getElementById('suaRestrictToggle').addEventListener('change', function() {
+            if (this.checked) {
+                loadSua(function(data) {
+                    if (!suaRestrictLayer) buildSuaLayers(data);
+                    toggleSuaLayer(suaRestrictLayer, true);
+                });
+            } else {
+                toggleSuaLayer(suaRestrictLayer, false);
+            }
+        });
+
+        document.getElementById('suaMoaToggle').addEventListener('change', function() {
+            if (this.checked) {
+                loadSua(function(data) {
+                    if (!suaMoaLayer) buildSuaLayers(data);
+                    toggleSuaLayer(suaMoaLayer, true);
+                });
+            } else {
+                toggleSuaLayer(suaMoaLayer, false);
+            }
+        });
+
+        document.getElementById('mtrToggle').addEventListener('change', function() {
+            if (this.checked) {
+                loadMtr(function(data) {
+                    if (!mtrLayer) buildMtrLayer(data);
+                    if (!map.hasLayer(mtrLayer)) mtrLayer.addTo(map);
+                });
+            } else {
+                if (mtrLayer && map.hasLayer(mtrLayer)) map.removeLayer(mtrLayer);
+            }
+        });
+
+    })();
     </script>
 
     <!-- MRMS colorbar -->
