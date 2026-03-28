@@ -96,7 +96,28 @@ def get_label_priority(name, runway_ft, station_id, is_military=False):
     return 4
 
 
-def get_wind_forecasts_by_states(state_list, limit=5000):
+def _get_latest_run(cur, valid_time=None):
+    """
+    Return the most recent model_run datetime using a fast indexed query.
+    If valid_time is given, finds the latest run covering that valid time.
+    ORDER BY model_run DESC LIMIT 1 hits idx_model_winds_run efficiently.
+    """
+    if valid_time is not None:
+        cur.execute("""
+            SELECT model_run FROM observations.model_wind_forecasts
+            WHERE valid_time = %s
+            ORDER BY model_run DESC LIMIT 1
+        """, (valid_time,))
+    else:
+        cur.execute("""
+            SELECT model_run FROM observations.model_wind_forecasts
+            ORDER BY model_run DESC LIMIT 1
+        """)
+    result = cur.fetchone()
+    return result[0] if result else None
+
+
+def get_wind_forecasts_by_states(state_list, limit=5000, valid_time=None):
     """
     Query wind forecasts for a list of iso_region codes (e.g. ['US-NC','US-SC']).
     Uses state membership rather than bounding box so irregular region shapes
@@ -108,45 +129,64 @@ def get_wind_forecasts_by_states(state_list, limit=5000):
         conn = get_connection()
         cur = conn.cursor()
 
-        cur.execute("""
-            SELECT DISTINCT model_run
-            FROM observations.model_wind_forecasts
-            ORDER BY model_run DESC LIMIT 1
-        """)
-        result = cur.fetchone()
-        if not result:
+        latest_run = _get_latest_run(cur, valid_time)
+        if not latest_run:
             cur.close(); conn.close()
             log.warning("No model runs found")
             return [], None
 
-        latest_run = result[0]
-
         placeholders = ','.join(['%s'] * len(state_list))
-        query = f"""
-        SELECT
-            mwf.station_id,
-            ST_X(mwf.location::geometry) as lon,
-            ST_Y(mwf.location::geometry) as lat,
-            MAX(mwf.wind_speed_kts) as max_wind_kts,
-            MAX(mwf.wind_gust_kts) as max_gust_kts,
-            MIN(mwf.wind_speed_kts) as min_wind_kts,
-            mwf.model_name,
-            mwf.wind_category,
-            a.name as airport_name,
-            a.longest_runway_ft,
-            a.is_military
-        FROM observations.model_wind_forecasts mwf
-        INNER JOIN observations.airports a ON mwf.station_id = a.station_id
-        WHERE mwf.model_run = %s
-            AND a.iso_region IN ({placeholders})
-            AND mwf.forecast_hour <= 12
-        GROUP BY mwf.station_id, mwf.location, mwf.model_name, mwf.wind_category,
-                 a.name, a.longest_runway_ft, a.is_military
-        ORDER BY MAX(mwf.wind_speed_kts) DESC
-        LIMIT %s
-        """
 
-        cur.execute(query, [latest_run] + state_list + [limit])
+        if valid_time is not None:
+            query = f"""
+            SELECT
+                mwf.station_id,
+                ST_X(mwf.location::geometry) as lon,
+                ST_Y(mwf.location::geometry) as lat,
+                mwf.wind_speed_kts as max_wind_kts,
+                mwf.wind_gust_kts  as max_gust_kts,
+                mwf.wind_speed_kts as min_wind_kts,
+                mwf.model_name,
+                mwf.wind_category,
+                a.name as airport_name,
+                a.longest_runway_ft,
+                a.is_military,
+                mwf.wind_dir
+            FROM observations.model_wind_forecasts mwf
+            INNER JOIN observations.airports a ON mwf.station_id = a.station_id
+            WHERE mwf.model_run = %s
+                AND mwf.valid_time = %s
+                AND a.iso_region IN ({placeholders})
+            ORDER BY mwf.wind_speed_kts DESC
+            LIMIT %s
+            """
+            cur.execute(query, [latest_run, valid_time] + state_list + [limit])
+        else:
+            query = f"""
+            SELECT
+                mwf.station_id,
+                ST_X(mwf.location::geometry) as lon,
+                ST_Y(mwf.location::geometry) as lat,
+                MAX(mwf.wind_speed_kts) as max_wind_kts,
+                MAX(mwf.wind_gust_kts)  as max_gust_kts,
+                MIN(mwf.wind_speed_kts) as min_wind_kts,
+                mwf.model_name,
+                mwf.wind_category,
+                a.name as airport_name,
+                a.longest_runway_ft,
+                a.is_military,
+                NULL as wind_dir
+            FROM observations.model_wind_forecasts mwf
+            INNER JOIN observations.airports a ON mwf.station_id = a.station_id
+            WHERE mwf.model_run = %s
+                AND a.iso_region IN ({placeholders})
+                AND mwf.forecast_hour <= 12
+            GROUP BY mwf.station_id, mwf.location, mwf.model_name, mwf.wind_category,
+                     a.name, a.longest_runway_ft, a.is_military
+            ORDER BY MAX(mwf.wind_speed_kts) DESC
+            LIMIT %s
+            """
+            cur.execute(query, [latest_run] + state_list + [limit])
 
         airports = []
         lats, lons = [], []
@@ -156,26 +196,28 @@ def get_wind_forecasts_by_states(state_list, limit=5000):
             is_mil    = bool(row[10]) if row[10] is not None else False
             label_priority = get_label_priority(name, runway_ft, row[0], is_mil)
 
-            lat, lon = float(row[2]) if row[2] else 0, float(row[1]) if row[1] else 0
-            lats.append(lat); lons.append(lon)
+            lat = float(row[2]) if row[2] else 0
+            lon = float(row[1]) if row[1] else 0
+            lats.append(lat)
+            lons.append(lon)
 
             airports.append({
-                'station_id':      row[0],
-                'lon':             lon,
-                'lat':             lat,
-                'max_wind_kts':    int(row[3]) if row[3] else 0,
-                'max_gust_kts':    int(row[4]) if row[4] else None,
-                'min_wind_kts':    int(row[5]) if row[5] else 0,
-                'wind_dir':        int(row[11]) if row[11] is not None else None,
-                'max_wind_time':   None,
-                'max_gust_time':   None,
-                'model':           row[6] or 'HRRR',
-                'category':        row[7] or 'NORMAL',
-                'name':            name,
+                'station_id':        row[0],
+                'lon':               lon,
+                'lat':               lat,
+                'max_wind_kts':      int(row[3]) if row[3] else 0,
+                'max_gust_kts':      int(row[4]) if row[4] else None,
+                'min_wind_kts':      int(row[5]) if row[5] else 0,
+                'wind_dir':          int(row[11]) if row[11] is not None else None,
+                'max_wind_time':     None,
+                'max_gust_time':     None,
+                'model':             row[6] or 'HRRR',
+                'category':          row[7] or 'NORMAL',
+                'name':              name,
                 'longest_runway_ft': runway_ft,
-                'label_priority':  label_priority,
-                'is_military':     is_mil,
-                'type':            'airport',
+                'label_priority':    label_priority,
+                'is_military':       is_mil,
+                'type':              'airport',
             })
 
         cur.close(); conn.close()
@@ -201,39 +243,20 @@ def get_wind_forecasts_by_states(state_list, limit=5000):
 def get_wind_forecasts_in_bounds(west, south, east, north, limit=5000, valid_time=None):
     """
     Query model_wind_forecasts with JOIN to airports table.
-    Includes label priority for smart map labeling.
-    If valid_time (datetime) is provided, returns per-hour data for that valid time
-    from the latest model run covering it. Otherwise returns worst-case across f000-f012.
+    Uses ST_MakeEnvelope + && operator to hit idx_model_winds_location GiST index.
+    If valid_time provided, returns per-hour data; otherwise worst-case f000-f012.
     """
     try:
         conn = get_connection()
         cur = conn.cursor()
 
-        if valid_time is not None:
-            cur.execute("""
-                SELECT DISTINCT model_run
-                FROM observations.model_wind_forecasts
-                WHERE valid_time = %s
-                ORDER BY model_run DESC LIMIT 1
-            """, (valid_time,))
-        else:
-            cur.execute("""
-                SELECT model_run FROM (
-                    SELECT model_run, MAX(forecast_hour) as max_fh
-                    FROM observations.model_wind_forecasts
-                    GROUP BY model_run
-                ) sub WHERE max_fh >= 12
-                ORDER BY model_run DESC LIMIT 1
-            """)
-
-        result = cur.fetchone()
-        if not result:
+        latest_run = _get_latest_run(cur, valid_time)
+        if not latest_run:
             cur.close()
             conn.close()
             log.warning("No model runs found in database")
             return []
 
-        latest_run = result[0]
         log.info(f"Using model run: {latest_run}")
 
         if valid_time is not None:
@@ -256,12 +279,11 @@ def get_wind_forecasts_in_bounds(west, south, east, north, limit=5000, valid_tim
             INNER JOIN observations.airports a ON mwf.station_id = a.station_id
             WHERE mwf.model_run = %s
                 AND mwf.valid_time = %s
-                AND ST_X(mwf.location::geometry) BETWEEN %s AND %s
-                AND ST_Y(mwf.location::geometry) BETWEEN %s AND %s
+                AND mwf.location && ST_MakeEnvelope(%s, %s, %s, %s, 4326)
             ORDER BY mwf.wind_speed_kts DESC
             LIMIT %s
             """
-            cur.execute(query, (latest_run, valid_time, west, east, south, north, limit))
+            cur.execute(query, (latest_run, valid_time, west, south, east, north, limit))
         else:
             query = """
             SELECT
@@ -281,15 +303,14 @@ def get_wind_forecasts_in_bounds(west, south, east, north, limit=5000, valid_tim
             FROM observations.model_wind_forecasts mwf
             INNER JOIN observations.airports a ON mwf.station_id = a.station_id
             WHERE mwf.model_run = %s
-                AND ST_X(mwf.location::geometry) BETWEEN %s AND %s
-                AND ST_Y(mwf.location::geometry) BETWEEN %s AND %s
+                AND mwf.location && ST_MakeEnvelope(%s, %s, %s, %s, 4326)
                 AND mwf.forecast_hour <= 12
             GROUP BY mwf.station_id, mwf.location, mwf.model_name, mwf.wind_category,
                      a.name, a.longest_runway_ft, a.is_military
             ORDER BY MAX(mwf.wind_speed_kts) DESC
             LIMIT %s
             """
-            cur.execute(query, (latest_run, west, east, south, north, limit))
+            cur.execute(query, (latest_run, west, south, east, north, limit))
 
         airports = []
         for row in cur.fetchall():

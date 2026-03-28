@@ -42,7 +42,33 @@
             box-shadow: 0 2px 10px rgba(0,0,0,0.3);
             z-index: 1000;
             max-width: 285px;
+            max-height: calc(100vh - 120px);
+            overflow-y: auto;
+            transition: transform 0.25s ease, opacity 0.25s ease;
         }
+        .controls.collapsed {
+            transform: translateX(calc(100% + 12px));
+            opacity: 0;
+            pointer-events: none;
+        }
+        #panelToggle {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 1001;
+            background: linear-gradient(135deg, #2c5f41, #4a7c59);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            padding: 7px 10px;
+            cursor: pointer;
+            font-size: 16px;
+            line-height: 1;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+            transition: background 0.15s;
+            display: none;
+        }
+        #panelToggle:hover { background: linear-gradient(135deg, #4a7c59, #2c5f41); }
         .controls h3 { margin-bottom: 10px; font-size: 16px; color: #2c3e50; }
         
         .layer-selector {
@@ -260,6 +286,7 @@
         /* Shift map and controls down; hide old home button */
         #map          { height: calc(100vh - 92px); margin-top: 92px; }
         .controls     { top: 102px; }
+        #panelToggle  { top: 102px; }
         .home-btn     { display: none; }
 
         /* ── Time strip ─────────────────────────────────────── */
@@ -318,13 +345,12 @@
         }
         /* ── Hazard sidebar ──────────────────────────────────── */
         #hazardSidebar {
-            display: none;
             position: fixed;
-            top: 44px; left: 0; bottom: 0;
+            top: 92px; left: 0; bottom: 0;
             width: 320px;
             background: white;
             box-shadow: 2px 0 12px rgba(0,0,0,0.25);
-            z-index: 1050;
+            z-index: 1200;
             display: flex;
             flex-direction: column;
             font-family: 'Courier New', monospace;
@@ -342,10 +368,20 @@
             font-size: 10px; font-weight: 400; opacity: 0.75; margin-top: 1px;
         }
         #hazardSidebar .sb-close {
-            cursor: pointer; font-size: 18px; line-height: 1;
-            opacity: 0.7; padding: 0 2px;
+            cursor: pointer;
+            font-size: 20px;
+            line-height: 1;
+            color: white;
+            opacity: 0.85;
+            padding: 2px 6px;
+            border-radius: 4px;
+            background: rgba(255,255,255,0.15);
+            flex-shrink: 0;
         }
-        #hazardSidebar .sb-close:hover { opacity: 1; }
+        #hazardSidebar .sb-close:hover {
+            opacity: 1;
+            background: rgba(255,255,255,0.3);
+        }
         #hazardSidebar .sb-body {
             flex: 1; overflow-y: auto; padding: 0;
         }
@@ -389,6 +425,7 @@
         <span class="tb-utc" id="tbUtc"></span>
     </div>
     <a href="/" class="home-btn">&#127968; Home</a>
+    <button id="panelToggle" onclick="togglePanel()" title="Show controls">&#9776;</button>
 
     <!-- Time strip -->
     <div id="timeStrip">
@@ -404,8 +441,14 @@
     <div id="map"></div>
     <div id="loading">Loading wind constraint forecast data...</div>
 
-    <div class="controls">
-        <h3>Map Layer</h3>
+    <div class="controls" id="controlsPanel">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <h3 style="margin:0;">Map Layer</h3>
+            <button onclick="togglePanel()"
+                title="Collapse panel"
+                style="background:none;border:none;cursor:pointer;font-size:18px;
+                       color:#555;padding:0 2px;line-height:1;">&#x2715;</button>
+        </div>
         <select id="layerSelector" class="layer-selector">
             <option value="street">Street Map</option>
             <option value="sectional">VFR Sectional (zoom >5 mi)</option>
@@ -533,6 +576,13 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script>
+        function togglePanel() {
+            var panel = document.getElementById('controlsPanel');
+            var btn   = document.getElementById('panelToggle');
+            var hidden = panel.classList.toggle('collapsed');
+            btn.style.display = hidden ? 'block' : 'none';
+        }
+
         var map, labelsLayer, baseLayers = {};
         var airmetLayer, sigmetLayer;
         var fzlvlLayer = null;
@@ -604,11 +654,9 @@
             initSlider();
             loadWindForecastData();
 
-            // Auto-refresh wind constraints every 15 minutes.
-            // Model data (HRRR, GFS, AIGFS) is ingested hourly; 15-min interval
-            // ensures the display reflects the latest available model run without
-            // requiring a page reload. Refresh only fires if the user is on the
-            // current (latest) time step — slider interactions are not disturbed.
+            // Auto-refresh wind constraints every 15 minutes, but only
+            // when the slider is at position 0 (current/latest time step)
+            // so users examining future hours are not interrupted.
             setInterval(function() {
                 var slider = document.getElementById('timeSlider');
                 if (slider && parseInt(slider.value) === 0) {
