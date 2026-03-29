@@ -6,7 +6,6 @@ Fixed routing: Professional landing page, enhanced weather map, all APIs working
 
 import os
 import sys
-import secrets as _secrets
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, send_from_directory, jsonify
 
@@ -15,53 +14,13 @@ sys.path.insert(0, '/var/www/cap_winds_app')
 # Initialize Flask app with subpath support
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
-app.config['APPLICATION_ROOT'] = '/CAP_WxCOP'
+app.config['APPLICATION_ROOT'] = '/CAP_WxCOP_DEV'
 
-# ============================================================================
-# SECRET KEY - loaded from /etc/cap_wxcop/secret.key
-# Generate with: cap_wxcop_user genkey
-# ============================================================================
+# Secret key for sessions/flash messages
+app.secret_key = 'cap-winds-secret-key-change-me'
 
-def _load_secret_key():
-    key_file = '/etc/cap_wxcop/secret.key'
-    try:
-        with open(key_file) as f:
-            key = f.read().strip()
-            if key:
-                return key
-    except FileNotFoundError:
-        pass
-    # Generate and save on first run
-    os.makedirs('/etc/cap_wxcop', exist_ok=True)
-    key = _secrets.token_hex(32)
-    with open(key_file, 'w') as f:
-        f.write(key + '\n')
-    os.chmod(key_file, 0o640)
-    try:
-        import grp
-        gid = grp.getgrnam('www-data').gr_gid
-        os.chown(key_file, 0, gid)
-    except Exception:
-        pass
-    print(f"Generated new session key at {key_file}")
-    return key
-
-app.secret_key = _load_secret_key()
-app.config['PERMANENT_SESSION_LIFETIME'] = 8 * 3600  # 8 hours
-
-# ============================================================================
-# BLUEPRINT REGISTRATION
-# ============================================================================
-
+# Import and register blueprints - COMPLETE VERSION
 print("Loading CAP Weather COP APIs...")
-
-# Authentication - login/logout/TOTP MFA for protected routes
-try:
-    from auth import auth as auth_blueprint
-    app.register_blueprint(auth_blueprint)
-    print("✓ Auth registered at /CAP_WxCOP/auth")
-except Exception as e:
-    print(f"❌ CRITICAL: Could not load Auth module: {e}")
 
 # Weather API - Core METAR/TAF functionality
 try:
@@ -71,7 +30,7 @@ try:
 except Exception as e:
     print(f"❌ CRITICAL: Could not load Weather API: {e}")
 
-# KQ Admin - Custom station management (view public, add/edit/delete protected)
+# KQ Admin - Custom station management
 try:
     from kq_admin import kq_admin
     app.register_blueprint(kq_admin, url_prefix='/admin/kq-stations')
@@ -135,6 +94,22 @@ try:
 except Exception as e:
     print(f"⚠ Could not load AIRMET/SIGMET API: {e}")
 
+# Cadet Weather API
+try:
+    from cadet_wx_api import cadet_wx_bp
+    app.register_blueprint(cadet_wx_bp)
+    print("✓ Cadet Weather API registered at /CAP_WxCOP/api/cadet_wx")
+except Exception as e:
+    print(f"⚠ Could not load Cadet Weather API: {e}")
+
+# GLM Lightning API
+try:
+    from glm_api import glm_bp
+    app.register_blueprint(glm_bp, url_prefix='/api/glm')
+    print("✓ GLM Lightning API registered at /CAP_WxCOP/api/glm")
+except Exception as e:
+    print(f"⚠ Could not load GLM API: {e}")
+
 print("CAP Weather COP initialization complete.\n")
 
 # ============================================================================
@@ -143,12 +118,12 @@ print("CAP Weather COP initialization complete.\n")
 
 @app.route('/')
 def landing_page():
-    """Professional CAP Weather COP landing page"""
+    """CAP Weather COP landing page"""
     return render_template('index.html')
 
 @app.route('/weather-map')
 def weather_map():
-    """Weather map with military prioritization and 2500 station capacity"""
+    """Weather map with military airfield priority"""
     return render_template('enhanced_weather_map_complete.html')
 
 @app.route('/wind-map')
@@ -167,43 +142,71 @@ def mrms_radar():
 
 @app.route('/enhanced-weather-map')
 def enhanced_weather_map_legacy():
+    """Legacy route - redirect to new weather map"""
     return render_template('enhanced_weather_map_complete.html')
 
 @app.route('/enhanced_weather_map.html')
 def enhanced_weather_map_html_legacy():
+    """Legacy route - redirect to new weather map"""
     return render_template('enhanced_weather_map_complete.html')
 
 @app.route('/weather_map.html')
 def weather_map_legacy():
+    """Legacy weather map route"""
     return render_template('weather_map.html')
 
 @app.route('/radar_animation.html')
 def radar_animation():
+    """Radar animation page"""
     try:
         return render_template('radar_animation.html')
-    except Exception:
+    except:
         return "<h1>Radar Animation</h1><p>Template not found</p><p><a href='/CAP_WxCOP/'>← Back to Home</a></p>"
 
 @app.route('/manual_taf.html')
 def manual_taf_page_legacy():
+    """Legacy manual TAF route"""
     try:
         return render_template('manual_taf.html')
-    except Exception:
+    except:
         return "<h1>Manual TAF</h1><p>Template not found</p><p><a href='/CAP_WxCOP/'>← Back to Home</a></p>"
 
 @app.route('/kq_stations.html')
 def kq_stations_legacy():
+    """Legacy KQ stations route"""
     try:
         return render_template('kq_stations.html')
-    except Exception:
+    except:
         return "<h1>KQ Stations</h1><p>Template not found</p><p><a href='/CAP_WxCOP/'>← Back to Home</a></p>"
 
 @app.route('/incident_archive.html')
 def incident_archive_legacy():
+    """Legacy incident archive route"""
     try:
         return render_template('incident_archive.html')
-    except Exception:
+    except:
         return "<h1>Incident Archive</h1><p>Template not found</p><p><a href='/CAP_WxCOP/'>← Back to Home</a></p>"
+
+@app.route('/cadet-wx')
+def cadet_wx_map():
+    try:
+        return render_template('cadet_wx_map.html')
+    except:
+        return "<h1>Cadet WX</h1><p>Template not found</p><p><a href='/CAP_WxCOP/'>← Back to Home</a></p>"
+
+@app.route('/cadet-wx-plan')
+def cadet_wx_plan():
+    try:
+        return render_template('cadet_wx_plan.html')
+    except:
+        return "<h1>Cadet WX Planning</h1><p>Template not found</p><p><a href='/CAP_WxCOP/'>← Back to Home</a></p>"
+
+@app.route('/cadet-sites/manage')
+def cadet_site_mgmt():
+    try:
+        return render_template('cadet_site_mgmt.html')
+    except:
+        return "<h1>Cadet Site Management</h1><p>Template not found</p><p><a href='/CAP_WxCOP/'>← Back to Home</a></p>"
 
 # ============================================================================
 # STATIC FILE HANDLERS - Wind constraint products, shapefiles
@@ -211,6 +214,7 @@ def incident_archive_legacy():
 
 @app.route('/cap_winds/<path:filename>')
 def serve_wind_maps(filename):
+    """Serve generated wind constraint maps"""
     try:
         return send_from_directory('/var/www/cap_winds_app/static/batch_maps', filename)
     except FileNotFoundError:
@@ -218,6 +222,7 @@ def serve_wind_maps(filename):
 
 @app.route('/cap_winds_shp/<path:filename>')
 def serve_shapefiles(filename):
+    """Serve wind constraint shapefiles"""
     try:
         return send_from_directory('/var/www/cap_winds_app/static/batch_maps', filename)
     except FileNotFoundError:
@@ -229,90 +234,73 @@ def serve_shapefiles(filename):
 
 @app.route('/api/regions')
 def get_regions():
+    """Get available CAP regions"""
     regions = {
         'conus': 'Continental US',
-        'glr':   'Great Lakes Region',
-        'mar':   'Middle Atlantic Region',
-        'ncr':   'National Capital Region',
-        'ner':   'Northeast Region',
-        'pcr':   'Pacific Region',
-        'rmr':   'Rocky Mountain Region',
-        'ser':   'Southeast Region',
-        'swr':   'Southwest Region',
-        # OCONUS subregions
-        'pcr-ak': 'Pacific Region - Alaska',
-        'pcr-hi': 'Pacific Region - Hawaii',
-        'pcr-gu': 'Pacific Region - Guam',
-        'ser-pr': 'Southeast Region - Puerto Rico/USVI',
+        'glr': 'Great Lakes Region', 
+        'mar': 'Middle Atlantic Region',
+        'ncr': 'National Capital Region',
+        'ner': 'Northeast Region',
+        'pcr': 'Pacific Region',
+        'rmr': 'Rocky Mountain Region',
+        'ser': 'Southeast Region',
+        'swr': 'Southwest Region'
     }
     return jsonify(regions)
 
 @app.route('/api/status')
 def system_status():
+    """System health and status endpoint"""
     try:
+        # Basic system check
         status = {
-            'status':    'operational',
+            'status': 'operational',
             'timestamp': datetime.utcnow().isoformat(),
             'services': {
-                'weather_api':      'active',
-                'wind_forecast':    'active',
-                'radar':            'active',
-                'enhanced_weather': 'active',
+                'weather_api': 'active',
+                'wind_forecast': 'active', 
+                'radar': 'active',
+                'enhanced_weather': 'active'
             },
-            'version': '2.0.0-production',
+            'version': '2.0.0-production'
         }
+        
         return jsonify(status)
     except Exception as e:
         return jsonify({
-            'status':    'degraded',
-            'error':     str(e),
-            'timestamp': datetime.utcnow().isoformat(),
+            'status': 'degraded',
+            'error': str(e),
+            'timestamp': datetime.utcnow().isoformat()
         }), 500
 
 @app.route('/health')
 def health_check():
-    try:
-        from db_config import get_connection
-        conn = get_connection()
-        cur  = conn.cursor()
-        cur.execute("""
-            SELECT COUNT(*) FROM observations.metar
-            WHERE observation_time > NOW() - INTERVAL '2 hours'
-        """)
-        recent_metars = cur.fetchone()[0]
-        cur.execute("SELECT COUNT(*) FROM observations.airports")
-        total_airports = cur.fetchone()[0]
-        cur.close()
-        conn.close()
-        return jsonify({
-            'status':         'healthy',
-            'database':       'connected',
-            'recent_metars':  recent_metars,
-            'total_airports': total_airports,
-            'timestamp':      datetime.utcnow().isoformat(),
-        })
-    except Exception as e:
-        return jsonify({
-            'status':    'degraded',
-            'database':  'error',
-            'error':     str(e),
-            'timestamp': datetime.utcnow().isoformat(),
-        }), 500
+    """Simple health check for monitoring"""
+    return jsonify({
+        'status': 'healthy',
+        'service': 'CAP Weather COP',
+        'timestamp': datetime.utcnow().isoformat()
+    })
 
 # ============================================================================
-# LEGACY WIND CONSTRAINTS GENERATOR
+# LEGACY WIND CONSTRAINTS GENERATOR - Separate route for old functionality
 # ============================================================================
 
 @app.route('/legacy-wind-generator', methods=['GET', 'POST'])
 def legacy_wind_generator():
+    """Legacy wind constraints map generator - moved to separate route"""
+    # Import the old generation logic here if needed
+    # This keeps the old functionality accessible but separate from main interface
+    
     if request.method == 'GET':
         return """
         <h1>Legacy Wind Constraints Generator</h1>
         <p>This is the original wind constraints map generator.</p>
         <p><a href="/CAP_WxCOP/">← Return to Main Interface</a></p>
-        <p>For modern wind analysis, use the
-           <a href="/CAP_WxCOP/wind-map">Interactive Wind Map</a></p>
+        <p>For modern wind analysis, use the <a href="/CAP_WxCOP/wind-map">Interactive Wind Map</a></p>
         """
+    
+    # Handle POST requests for legacy generation if needed
     return jsonify({'message': 'Legacy generator - use modern interface'})
 
 # ============================================================================
@@ -321,24 +309,26 @@ def legacy_wind_generator():
 
 @app.errorhandler(404)
 def not_found_error(error):
-    return render_template('error.html',
-                           error_code=404,
-                           error_message="Page not found",
-                           home_url="/CAP_WxCOP/"), 404
+    """Custom 404 page"""
+    return render_template('error.html', 
+                         error_code=404,
+                         error_message="Page not found",
+                         home_url="/CAP_WxCOP/"), 404
 
 @app.errorhandler(500)
 def internal_error(error):
+    """Custom 500 page"""
     return render_template('error.html',
-                           error_code=500,
-                           error_message="Internal server error",
-                           home_url="/CAP_WxCOP/"), 500
+                         error_code=500, 
+                         error_message="Internal server error",
+                         home_url="/CAP_WxCOP/"), 500
 
 # ============================================================================
-# MAIN
+# MAIN APPLICATION
 # ============================================================================
-
-app.url_map.strict_slashes = False
 
 if __name__ == '__main__':
     app.run(debug=False, host='0.0.0.0', port=5000)
+
+app.url_map.strict_slashes = False
 
