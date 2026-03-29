@@ -1,95 +1,74 @@
-# Python
-__pycache__/
-*.py[cod]
-*.pyo
-*.pyd
-.Python
-*.egg
-*.egg-info/
-dist/
-build/
-.eggs/
-
-# Virtual environments
-venv/
-env/
-.venv/
-
-# Flask / runtime
-instance/
-.webassets-cache
-*.wsgi.bak
-
-# Logs
-logs/
-*.log
-
-# Rendered radar tiles — ephemeral, too large for git
-mrms_tiles/
-/LDM/
-
-# Backups created during deployment
-templates.bak*/
-*.bak.*
-*.bak
+*~
 *.backup*
-
+# Backups created during deployment
+*.bak
+*.bak.*
+build/
+.cache/
+config_local.py
+dist/
 # Downloaded/cached data
 downloads/
+.DS_Store
+# Editor
+*.egg
+*.egg-info/
+.eggs/
+.env
+env/
+# Flask / runtime
+gempak/
+Gempak/
+# Gempak compiled software tree
+# Generated inventory/listing files
+git_init_sequence.sh
 *.grib2
 *.grib2.gz
-tmp/
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Editor
-*.swp
-*.swo
-*~
-.vim/
-.viminfo
+hrrr_data/
+# HRRR data directory
+# IDE
+.idea/
+instance/
+/LDM/
+# LDM subtree inside app dir (symlinks/configs that shouldn't travel)
+*.log
+logs/
+# Logs
+*.lst
+model_data/
+mrms_tiles/
+# One-off scripts
 *.orig
-
+# OS
+__pycache__/
+*.py[cod]
+*.pyd
+*.pyo
+# Python
+.Python
+# Rendered radar tiles — ephemeral, too large for git
 # Secrets / config with credentials
 secrets.py
-config_local.py
-.env
-
-# Static generated outputs (wind maps, shapefiles)
-static/batch_maps/
-static/output/
-
-# IDE
-.vscode/
-.idea/
-
-
-# Tarballs and tree dumps
-*.tgz
-*.tree
-.cache/
-model_data/
-
-# One-off scripts
-git_init_sequence.sh
 simple_status_test.sh
-.cache/
-
-# Generated inventory/listing files
-*.lst
-
-# Gempak compiled software tree
-Gempak/
-gempak/
-
-# HRRR data directory
-hrrr_data/
-
-# LDM subtree inside app dir (symlinks/configs that shouldn't travel)
-/LDM/
-
-# Static MRMS tiles (path relative to app root, not /var/www/html)
+static/batch_maps/
+# Static generated outputs (wind maps, shapefiles)
 static/mrms_tiles/
-.cache/
+static/mrms_tiles.old/
+# Static MRMS tiles (path relative to app root, not /var/www/html)
+static/output/
+*.swo
+*.swp
+# Tarballs and tree dumps
+templates.bak*/
+*.tgz
+Thumbs.db
+tmp/
+*.tree
+.venv/
+venv/
+.vim/
+.viminfo
+# Virtual environments
+.vscode/
+.webassets-cache
+*.wsgi.bak
