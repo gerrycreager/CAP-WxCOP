@@ -38,7 +38,7 @@ cadet_wx_bp = Blueprint('cadet_wx', __name__)
 # ---------------------------------------------------------------------------
 
 def heat_stress_color(heat_index_c, tmp_c):
-    """CAPR 60-2 §2.6.13 Table 2.2 — Heat Stress."""
+    """CAPR 60-2 §2.6.13 Table 2.2 — Heat Stress (heat index fallback)."""
     hi_f = None
     if heat_index_c is not None:
         hi_f = heat_index_c * 9/5 + 32
@@ -52,6 +52,54 @@ def heat_stress_color(heat_index_c, tmp_c):
         return 'YELLOW'  # Moderate
     else:
         return 'RED'     # High / Extreme (>103°F)
+
+
+def wbgt_flag(wbgt_c):
+    """
+    DAFI 48-151 Ch.4 Table 4.1 — WBGT Flag Color for cadet training.
+    Returns one of: 'WHITE', 'GREEN', 'YELLOW', 'RED', 'BLACK', 'UNKNOWN'
+
+    Flag  WBGT (°F)   Meaning
+    ----  ---------   -------
+    White  78–81.9    Caution — fluid intake every 30 min
+    Green  82–84.9    Caution — fluid intake every 20 min
+    Yellow 85–87.9    Caution — limit strenuous activity for unacclimatized
+    Red    88–89.9    Caution — limit intense exercise >1hr for acclimatized
+    Black  ≥90        Suspend PT/strenuous outdoor training
+    """
+    if wbgt_c is None:
+        return 'UNKNOWN'
+    wbgt_f = wbgt_c * 9/5 + 32
+    if wbgt_f < 78:
+        return 'GREEN'    # Below White flag — no restriction
+    elif wbgt_f < 82:
+        return 'WHITE'
+    elif wbgt_f < 85:
+        return 'GREEN'
+    elif wbgt_f < 88:
+        return 'YELLOW'
+    elif wbgt_f < 90:
+        return 'RED'
+    else:
+        return 'BLACK'
+
+
+# DAFI flag → 3-color stoplight mapping
+_DAFI_FLAG_TO_STOPLIGHT = {
+    'GREEN':   'GREEN',
+    'WHITE':   'GREEN',   # Caution but no restriction
+    'YELLOW':  'YELLOW',
+    'RED':     'YELLOW',  # Limit but not suspend
+    'BLACK':   'RED',     # Suspend PT
+    'UNKNOWN': 'UNKNOWN',
+}
+
+def wbgt_color(wbgt_c):
+    """
+    DAFI 48-151 Ch.4 — WBGT stoplight for 3-color display.
+    Uses wbgt_flag() and maps to GREEN/YELLOW/RED.
+    """
+    return _DAFI_FLAG_TO_STOPLIGHT.get(wbgt_flag(wbgt_c), 'UNKNOWN')
 
 
 def cold_stress_color(wind_chill_c, tmp_c):
@@ -411,9 +459,7 @@ def build_current_stoplight(cur, site):
     elif model_data:
         use_data, source, obs_time = model_data, 'MODEL_F00', model_time
     else:
-        return _no_data_result(site_id, site['site_name'])
-
-    # --- WWA ---
+        return _no_data_result(site_id, site['site_name'], lat, lon)
     wwa_phenoms = get_wwa_for_point(cur, lat, lon)
 
     # --- GLM lightning (with WWA proxy fallback) ---
@@ -474,6 +520,7 @@ def build_current_stoplight(cur, site):
             'precip_rate_mmhr': use_data.get('precip_rate_mmhr'),
             'precip_type':      use_data.get('precip_type'),
             'wbgt_c':           use_data.get('wbgt_c'),
+            'wbgt_flag':        wbgt_flag(use_data.get('wbgt_c')),
             'cape_jkg':         use_data.get('cape_jkg'),
             'ceil_ft':          use_data.get('ceil_ft'),
         },
@@ -482,7 +529,7 @@ def build_current_stoplight(cur, site):
     }
 
 
-def _no_data_result(site_id, site_name):
+def _no_data_result(site_id, site_name, lat=None, lon=None):
     return {
         'site_id':     site_id,
         'site_name':   site_name,
@@ -493,6 +540,8 @@ def _no_data_result(site_id, site_name):
         'conditions':  {},
         'wwa':         [],
         'lightning':   None,
+        'lat':         lat,
+        'lon':         lon,
     }
 
 
@@ -525,7 +574,7 @@ def build_forecast_stoplight(cur, site, forecast_hour):
     all_hours = cur.fetchall()
 
     if not all_hours:
-        return _no_data_result(site_id, site['site_name'])
+        return _no_data_result(site_id, site['site_name'], lat, lon)
 
     wwa_phenoms = get_wwa_for_point(cur, lat, lon)
     has_warning = any(sig == 'W' for ph, sig in wwa_phenoms if ph in ('TO','SV'))
@@ -545,7 +594,8 @@ def build_forecast_stoplight(cur, site, forecast_hour):
             ltg_fcst = lightning_color(has_warning, has_watch)
 
         cats = {
-            'heat_stress':   heat_stress_color(row['heat_index_c'], row['tmp_c']),
+            'heat_stress':   wbgt_color(row['wbgt_c']) if row['wbgt_c'] is not None
+                             else heat_stress_color(row['heat_index_c'], row['tmp_c']),
             'cold_stress':   cold_stress_color(row['wind_chill_c'], row['tmp_c']),
             'lightning':     ltg_fcst,
             'surface_wind':  surface_wind_color(row['wind_speed_kts'], row['wind_gust_kts']),
@@ -567,6 +617,7 @@ def build_forecast_stoplight(cur, site, forecast_hour):
             'precip_rate_mmhr': row['precip_rate_mmhr'],
             'precip_type':      row['precip_type'],
             'wbgt_c':           row['wbgt_c'],
+            'wbgt_flag':        wbgt_flag(row['wbgt_c']),
             'cape_jkg':         row['cape_jkg'],
             'ceil_ft':          row['ceil_ft'],
         })
@@ -648,7 +699,7 @@ def get_current():
                     results.append(build_current_stoplight(cur, site))
                 except Exception as e:
                     log.error(f"Current stoplight site {site['id']}: {e}", exc_info=True)
-                    results.append(_no_data_result(site['id'], site['site_name']))
+                    results.append(_no_data_result(site['id'], site['site_name'], site.get('lat'), site.get('lon')))
         conn.close()
         return jsonify({
             'sites':     results,
@@ -684,7 +735,7 @@ def get_forecast():
                     results.append(build_forecast_stoplight(cur, site, hour))
                 except Exception as e:
                     log.error(f"Forecast stoplight site {site['id']}: {e}", exc_info=True)
-                    results.append(_no_data_result(site['id'], site['site_name']))
+                    results.append(_no_data_result(site['id'], site['site_name'], site.get('lat'), site.get('lon')))
         conn.close()
         return jsonify({
             'sites':         results,
@@ -723,3 +774,4 @@ def get_site_forecast(site_id):
     except Exception as e:
         log.error(f"/api/cadet_wx/site/{site_id}/forecast: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
+

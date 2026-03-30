@@ -65,12 +65,12 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 HRRR_BASE   = Path('/LDM/models/hrrr')
-LOCKFILE    = '/tmp/ingest_model_site_wx.lock'
+LOCKFILE    = '/var/lock/ingest_model_site_wx.lock'
 DB_DSN      = os.environ.get('DB_DSN',
                              'dbname=avwx_data user=avwx_user host=192.168.0.60')
 
 # Forecast hours to ingest (F00 = analysis, F01-F24 = forecast)
-FCST_HOURS  = list(range(0, 25))
+FCST_HOURS  = list(range(0, 19))   # F00-F18: HRRR hourly cycles go to F18
 
 # How many model cycles to look back when searching for latest
 CYCLE_LOOKBACK_HRS = 6
@@ -208,23 +208,38 @@ def parse_precip_type(grbs_by_shortname, idx):
 
 def find_latest_hrrr_cycle():
     """
-    Find the most recent HRRR cycle that has F00 available.
-    Searches HRRR_BASE/YYYYMMDD/HHz/ directories.
+    Find the most recent HRRR cycle that is complete — both F00 and the
+    last forecast hour (F18 for hourly cycles) are present and stable.
+    This prevents the planning map from showing a partial new cycle while
+    the previous complete cycle is still the best available data.
+
+    Searches HRRR_BASE/YYYYMMDD/HHz/ directories, newest first.
     Returns (cycle_dt, cycle_dir) or (None, None).
     """
-    now_utc = datetime.now(timezone.utc)
+    last_fhour = max(FCST_HOURS)          # 18 for hourly HRRR cycles
+    now_utc    = datetime.now(timezone.utc)
     for hours_back in range(CYCLE_LOOKBACK_HRS + 1):
         candidate = now_utc - timedelta(hours=hours_back)
         date_str  = candidate.strftime('%Y%m%d')
         hour_str  = candidate.strftime('%H')
         cycle_dir = HRRR_BASE / f'hrrr.{date_str}' / f'{hour_str}z'
         f00       = cycle_dir / f'hrrr.t{hour_str}z.wrfsfcf000.grib2'
-        if f00.exists() and f00.stat().st_size > 0:
-            age = now_utc.timestamp() - f00.stat().st_mtime
-            if age > FILE_STABILITY_SECS:
-                log.info(f"Latest HRRR cycle: hrrr.{date_str}/{hour_str}z")
-                return candidate.replace(minute=0, second=0, microsecond=0), cycle_dir
-    log.warning(f"No HRRR cycle found in last {CYCLE_LOOKBACK_HRS} hours")
+        flast     = cycle_dir / f'hrrr.t{hour_str}z.wrfsfcf{last_fhour:03d}.grib2'
+        if not (f00.exists() and f00.stat().st_size > 0):
+            continue
+        if not (flast.exists() and flast.stat().st_size > 0):
+            log.info(f"HRRR hrrr.{date_str}/{hour_str}z: F00 present but "
+                     f"F{last_fhour:02d} not yet complete — skipping, "
+                     f"trying previous cycle")
+            continue
+        age = now_utc.timestamp() - flast.stat().st_mtime
+        if age < FILE_STABILITY_SECS:
+            log.info(f"HRRR hrrr.{date_str}/{hour_str}z: F{last_fhour:02d} "
+                     f"too recent ({age:.0f}s) — waiting for stability")
+            continue
+        log.info(f"Latest complete HRRR cycle: hrrr.{date_str}/{hour_str}z")
+        return candidate.replace(minute=0, second=0, microsecond=0), cycle_dir
+    log.warning(f"No complete HRRR cycle found in last {CYCLE_LOOKBACK_HRS} hours")
     return None, None
 
 
@@ -587,3 +602,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

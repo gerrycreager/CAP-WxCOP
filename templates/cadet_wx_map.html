@@ -173,30 +173,7 @@
         <em>Marker uses more recent of the two</em>
       </div>
     </div>
-    <div class="sidebar-section">
-      <h3>Overlays</h3>
-      <label style="display:flex;align-items:center;gap:8px;font-size:0.8rem;cursor:pointer;margin-bottom:8px;">
-        <input type="checkbox" id="mrmsToggle"> MRMS Radar
-      </label>
-      <div id="mrmsStatus" style="font-size:0.68rem;color:#8af;margin-left:20px;margin-bottom:8px;"></div>
-      <label style="display:flex;align-items:center;gap:8px;font-size:0.8rem;cursor:pointer;margin-bottom:4px;">
-        <input type="checkbox" id="glmToggle"> GLM Lightning
-      </label>
-      <div id="glmSubControls" style="display:none;margin-left:20px;margin-bottom:4px;">
-        <select id="glmMinutes" style="width:100%;font-size:0.72rem;padding:2px;
-                background:#1a2a4a;color:#e0e0e0;border:1px solid #0f3460;border-radius:3px;">
-          <option value="15" selected>Last 15 min</option>
-          <option value="30">Last 30 min</option>
-          <option value="60">Last 60 min</option>
-        </select>
-        <div id="glmStatus" style="font-size:0.68rem;color:#8af;margin-top:3px;"></div>
-        <div style="margin-top:4px;font-size:0.68rem;line-height:1.8;">
-          <span style="color:#ff2222;">●</span> &lt;5 min &nbsp;
-          <span style="color:#ffcc00;">●</span> 5–15 min &nbsp;
-          <span style="color:#00cc44;">●</span> &gt;15 min
-        </div>
-      </div>
-    </div>
+  </div>
 
   <!-- Map -->
   <div id="map"></div>
@@ -226,10 +203,25 @@ const map = L.map('map', {
   zoom: 4,
   zoomControl: true,
 });
-L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-  attribution: '© OpenStreetMap contributors © CARTO',
-  maxZoom: 18,
-}).addTo(map);
+// Base layers
+const baseLayers = {
+  'Streets': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+    attribution: 'Tiles © Esri — Source: Esri, HERE, DeLorme, USGS, Intermap, NRCAN, METI, TomTom',
+    maxZoom: 19
+  }),
+  'Topo': L.tileLayer('https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}', {
+    attribution: 'Tiles © USGS National Map',
+    maxZoom: 16
+  }),
+  'Dark': L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '© OpenStreetMap contributors © CARTO',
+    maxZoom: 19
+  }),
+};
+baseLayers['Streets'].addTo(map);
+L.control.layers(baseLayers, {}, {position: 'topright'}).addTo(map);
+
+
 
 // ---------------------------------------------------------------------------
 // State
@@ -423,134 +415,6 @@ function fmtWind(spd, gust) {
 // ---------------------------------------------------------------------------
 loadData();
 setInterval(loadData, 5 * 60 * 1000);
-
-// ---------------------------------------------------------------------------
-// MRMS radar — latest frame only, composite reflectivity
-// ---------------------------------------------------------------------------
-var mrmsLayer   = null;
-var mrmsPollTimer = null;
-const MRMS_BASE = '/CAP_WxCOP_DEV/static/mrms_tiles/composite';
-
-function getMrmsSector() {
-  if (!map) return 'CONUS';
-  var c = map.getCenter();
-  if (c.lat > 50) return 'CONUS';
-  if (c.lng < -130) return 'CONUS';
-  if (c.lat > 50 && c.lng < -130) return 'AK';
-  if (c.lat < 25 && c.lng < -90) return 'HI';
-  return 'CONUS';
-}
-
-function fetchMrmsLatest() {
-  if (!document.getElementById('mrmsToggle').checked) return;
-  var sector = getMrmsSector();
-  fetch(MRMS_BASE + '/' + sector + '/index.json?_=' + Date.now())
-    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
-    .then(data => {
-      var frames = (data.frames || []).sort((a,b) => a.timestamp < b.timestamp ? 1 : -1);
-      if (!frames.length) {
-        document.getElementById('mrmsStatus').textContent = 'No radar frames available';
-        return;
-      }
-      var latest = frames[0];
-      var t = latest.valid_time ? new Date(latest.valid_time) : null;
-      var label = t ? t.toUTCString().slice(17,22) + 'Z' : 'latest';
-      document.getElementById('mrmsStatus').textContent = sector + ' · ' + label;
-      if (mrmsLayer) map.removeLayer(mrmsLayer);
-      mrmsLayer = L.tileLayer(latest.tile_url, {
-        opacity: 0.65,
-        zIndex:  300,
-      });
-      mrmsLayer.addTo(map);
-      mrmsLayer.bringToBack();
-    })
-    .catch(e => {
-      document.getElementById('mrmsStatus').textContent = 'Radar unavailable';
-    });
-}
-
-document.getElementById('mrmsToggle').addEventListener('change', function() {
-  if (this.checked) {
-    fetchMrmsLatest();
-    mrmsPollTimer = setInterval(fetchMrmsLatest, 30 * 1000);
-  } else {
-    if (mrmsLayer)    { map.removeLayer(mrmsLayer); mrmsLayer = null; }
-    if (mrmsPollTimer){ clearInterval(mrmsPollTimer); mrmsPollTimer = null; }
-    document.getElementById('mrmsStatus').textContent = '';
-  }
-});
-
-map.on('moveend', function() {
-  if (document.getElementById('mrmsToggle').checked) fetchMrmsLatest();
-});
-
-// ---------------------------------------------------------------------------
-// GLM lightning flashes
-// ---------------------------------------------------------------------------
-var glmLayer    = null;
-var glmPollTimer = null;
-const GLM_COLORS = ['#ff2222', '#ffcc00', '#00cc44'];
-
-function fetchGlmFlashes() {
-  if (!document.getElementById('glmToggle').checked) return;
-  var minutes = document.getElementById('glmMinutes').value;
-  var bounds  = map.getBounds();
-  var url = '/CAP_WxCOP_DEV/api/weather-enhanced/glm/flashes'
-    + '?minutes=' + minutes
-    + '&min_lat=' + bounds.getSouth().toFixed(3)
-    + '&max_lat=' + bounds.getNorth().toFixed(3)
-    + '&min_lon=' + bounds.getWest().toFixed(3)
-    + '&max_lon=' + bounds.getEast().toFixed(3);
-
-  fetch(url)
-    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
-    .then(data => {
-      if (glmLayer) { map.removeLayer(glmLayer); glmLayer = null; }
-      glmLayer = L.geoJSON(data, {
-        pointToLayer: function(feature, latlng) {
-          var bucket  = feature.properties.age_bucket || 0;
-          var opacity = [0.95, 0.75, 0.55][bucket] || 0.55;
-          var radius  = [4, 3, 2][bucket] || 2;
-          return L.circleMarker(latlng, {
-            radius:      radius,
-            fillColor:   GLM_COLORS[bucket] || GLM_COLORS[2],
-            color:       'rgba(0,0,0,0.3)',
-            weight:      0.5,
-            fillOpacity: opacity,
-            opacity:     opacity,
-            interactive: false,
-          });
-        }
-      });
-      glmLayer.addTo(map);
-      if (mrmsLayer) mrmsLayer.bringToBack();
-      document.getElementById('glmStatus').textContent =
-        (data.count || 0) + ' flashes / last ' + minutes + ' min';
-    })
-    .catch(e => {
-      document.getElementById('glmStatus').textContent = 'GLM unavailable';
-    });
-}
-
-document.getElementById('glmToggle').addEventListener('change', function() {
-  var sub = document.getElementById('glmSubControls');
-  if (this.checked) {
-    sub.style.display = 'block';
-    fetchGlmFlashes();
-    glmPollTimer = setInterval(fetchGlmFlashes, 60 * 1000);
-  } else {
-    sub.style.display = 'none';
-    if (glmLayer)    { map.removeLayer(glmLayer); glmLayer = null; }
-    if (glmPollTimer){ clearInterval(glmPollTimer); glmPollTimer = null; }
-    document.getElementById('glmStatus').textContent = '';
-  }
-});
-
-document.getElementById('glmMinutes').addEventListener('change', fetchGlmFlashes);
-
-map.on('moveend', function() {
-  if (document.getElementById('glmToggle').checked) fetchGlmFlashes();
-});
 </script>
 </body>
 </html>
