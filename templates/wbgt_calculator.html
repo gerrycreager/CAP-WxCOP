@@ -1,0 +1,1064 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CAP WxCOP — WBGT Calculator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow:ital,wght@0,400;0,600;0,700;1,400&family=Barlow+Condensed:wght@600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --navy:    #0a1628;
+      --navy2:   #0f2044;
+      --blue:    #1a3a6b;
+      --accent:  #4fc3f7;
+      --border:  rgba(79,195,247,0.15);
+      --text:    #e0e8f0;
+      --muted:   #7a9abf;
+
+      /* DAFI flag colors */
+      --flag-white:  #e8f4ff;
+      --flag-green:  #00cc44;
+      --flag-yellow: #e6b800;
+      --flag-red:    #ff4422;
+      --flag-black:  #ff1100;
+      --flag-none:   #4a6080;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Barlow', sans-serif;
+      background: var(--navy);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* ---- Header ---- */
+    header {
+      background: linear-gradient(180deg, #060e1c 0%, var(--navy) 100%);
+      border-bottom: 1px solid var(--border);
+      padding: 10px 20px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .brand {
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 1.1rem; font-weight: 700; color: #fff;
+    }
+    .brand span { color: var(--accent); }
+    .header-title {
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 1rem; color: var(--muted);
+      letter-spacing: 0.05em;
+    }
+    .header-nav { display: flex; gap: 16px; }
+    .header-nav a {
+      color: var(--accent); font-size: 0.82rem;
+      text-decoration: none; opacity: 0.8;
+    }
+    .header-nav a:hover { opacity: 1; }
+
+    /* ---- Main layout ---- */
+    .main {
+      max-width: 1100px; margin: 0 auto;
+      padding: 2rem 1.5rem;
+      display: grid;
+      grid-template-columns: 1fr 380px;
+      gap: 1.5rem;
+      align-items: start;
+    }
+
+    /* ---- Card ---- */
+    .card {
+      background: var(--navy2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1.4rem;
+    }
+    .card-title {
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 0.75rem; font-weight: 700;
+      color: var(--accent); letter-spacing: 0.15em;
+      text-transform: uppercase; margin-bottom: 1rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    /* ---- Input grid ---- */
+    .input-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+    }
+    .input-group { display: flex; flex-direction: column; gap: 5px; }
+    .input-group.full { grid-column: 1 / -1; }
+    label {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.65rem; color: var(--muted);
+      letter-spacing: 0.1em; text-transform: uppercase;
+    }
+    .input-row { display: flex; gap: 6px; align-items: stretch; }
+    input[type="number"], select {
+      flex: 1;
+      background: rgba(10,22,40,0.8);
+      border: 1px solid rgba(79,195,247,0.2);
+      border-radius: 4px;
+      color: var(--text);
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.9rem;
+      padding: 8px 10px;
+      transition: border-color 0.2s;
+      width: 100%;
+    }
+    input[type="number"]:focus, select:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    select option { background: #0f2044; }
+    .unit-btn {
+      background: rgba(79,195,247,0.1);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--accent);
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.7rem;
+      padding: 0 10px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.15s;
+    }
+    .unit-btn:hover { background: rgba(79,195,247,0.2); }
+    .unit-btn.active {
+      background: rgba(79,195,247,0.25);
+      border-color: var(--accent);
+    }
+
+    /* ---- Sun exposure buttons ---- */
+    .sun-btns { display: flex; gap: 6px; }
+    .sun-btn {
+      flex: 1; padding: 8px 4px;
+      background: rgba(10,22,40,0.8);
+      border: 1px solid rgba(79,195,247,0.2);
+      border-radius: 4px;
+      color: var(--muted);
+      font-family: 'Barlow', sans-serif;
+      font-size: 0.78rem; font-weight: 600;
+      cursor: pointer; text-align: center;
+      transition: all 0.15s;
+    }
+    .sun-btn:hover { border-color: var(--accent); color: var(--text); }
+    .sun-btn.active {
+      background: rgba(79,195,247,0.15);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .sun-icon { font-size: 1.1rem; display: block; margin-bottom: 2px; }
+
+    /* ---- Site selector ---- */
+    .site-section {
+      margin-top: 1rem; padding-top: 1rem;
+      border-top: 1px solid var(--border);
+    }
+    .site-section-label {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.65rem; color: var(--muted);
+      letter-spacing: 0.1em; text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+    .site-row { display: flex; gap: 6px; }
+    .site-row select { flex: 1; }
+    .btn-secondary {
+      background: rgba(79,195,247,0.1);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--accent);
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.7rem; padding: 0 12px;
+      cursor: pointer; white-space: nowrap;
+      transition: background 0.15s;
+    }
+    .btn-secondary:hover { background: rgba(79,195,247,0.2); }
+
+    /* ---- Calculate button ---- */
+    .calc-btn {
+      width: 100%; margin-top: 1.2rem;
+      padding: 12px;
+      background: linear-gradient(135deg, #1a3a6b, #0f2044);
+      border: 1px solid var(--accent);
+      border-radius: 4px;
+      color: var(--accent);
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 1rem; font-weight: 700;
+      letter-spacing: 0.1em; text-transform: uppercase;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .calc-btn:hover {
+      background: linear-gradient(135deg, #2a4a8b, #1a3060);
+      box-shadow: 0 0 12px rgba(79,195,247,0.3);
+    }
+
+    /* ---- Results panel ---- */
+    .results { position: sticky; top: 1rem; }
+
+    /* ---- WBGT display ---- */
+    .wbgt-display {
+      text-align: center;
+      padding: 1.5rem 1rem;
+      border-radius: 6px;
+      border: 2px solid var(--border);
+      margin-bottom: 1rem;
+      transition: all 0.4s;
+      position: relative;
+      overflow: hidden;
+    }
+    .wbgt-display::before {
+      content: '';
+      position: absolute; inset: 0;
+      opacity: 0.07;
+      background: repeating-linear-gradient(
+        45deg, transparent, transparent 10px,
+        currentColor 10px, currentColor 11px
+      );
+    }
+    .wbgt-flag-label {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.65rem; letter-spacing: 0.2em;
+      text-transform: uppercase; opacity: 0.8;
+      margin-bottom: 4px;
+    }
+    .wbgt-value {
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 4rem; font-weight: 800;
+      line-height: 1; margin: 4px 0;
+    }
+    .wbgt-unit {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.75rem; opacity: 0.7;
+    }
+    .wbgt-flag-name {
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 1.4rem; font-weight: 700;
+      margin-top: 6px; letter-spacing: 0.05em;
+    }
+
+    /* Flag color themes */
+    .flag-NONE    { color: var(--muted); border-color: var(--border); }
+    .flag-BELOW   { color: #7af0a0; border-color: rgba(122,240,160,0.3); }
+    .flag-WHITE   { color: var(--flag-white); border-color: rgba(232,244,255,0.4); }
+    .flag-GREEN   { color: var(--flag-green); border-color: rgba(0,204,68,0.4); }
+    .flag-YELLOW  { color: var(--flag-yellow); border-color: rgba(230,184,0,0.4); }
+    .flag-RED     { color: var(--flag-red); border-color: rgba(255,68,34,0.4); }
+    .flag-BLACK   { color: var(--flag-black); border-color: rgba(255,17,0,0.5); }
+
+    /* ---- Activity table ---- */
+    .activity-table {
+      width: 100%; border-collapse: collapse;
+      font-size: 0.82rem; margin-bottom: 1rem;
+    }
+    .activity-table th {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.6rem; letter-spacing: 0.1em;
+      color: var(--muted); text-transform: uppercase;
+      padding: 6px 8px; text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+    .activity-table td {
+      padding: 7px 8px;
+      border-bottom: 1px solid rgba(79,195,247,0.06);
+      vertical-align: middle;
+    }
+    .activity-table tr.current-flag td {
+      background: rgba(79,195,247,0.07);
+    }
+    .flag-dot {
+      display: inline-block;
+      width: 10px; height: 10px; border-radius: 50%;
+      margin-right: 6px; vertical-align: middle;
+      flex-shrink: 0;
+    }
+    .limit-ok    { color: #7af0a0; }
+    .limit-warn  { color: var(--flag-yellow); font-weight: 600; }
+    .limit-stop  { color: var(--flag-red); font-weight: 700; }
+
+    /* ---- Secondary outputs ---- */
+    .secondary-grid {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 8px; margin-top: 1rem;
+    }
+    .secondary-item {
+      background: rgba(10,22,40,0.5);
+      border: 1px solid var(--border);
+      border-radius: 4px; padding: 8px 10px;
+    }
+    .secondary-label {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.58rem; color: var(--muted);
+      letter-spacing: 0.1em; text-transform: uppercase;
+      margin-bottom: 3px;
+    }
+    .secondary-value {
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 1.2rem; font-weight: 700; color: var(--text);
+    }
+
+    /* ---- Reference note ---- */
+    .ref-note {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.6rem; color: var(--muted);
+      text-align: center; margin-top: 1rem;
+      line-height: 1.6;
+    }
+
+    /* ---- Wet bulb method toggle ---- */
+    .method-note {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.6rem; color: var(--muted);
+      margin-top: 4px; line-height: 1.4;
+    }
+
+    @media (max-width: 750px) {
+      .main { grid-template-columns: 1fr; }
+      .results { position: static; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="brand">CAP <span>Wx</span>COP</div>
+  </div>
+  <div class="header-title">WBGT CALCULATOR</div>
+  <nav class="header-nav">
+    <a href="/CAP_WxCOP_DEV/cadet-wx">← Cadet COP</a>
+    <a href="/CAP_WxCOP_DEV/">← Home</a>
+  </nav>
+</header>
+
+<div class="main">
+
+  <!-- ── LEFT: Inputs ── -->
+  <div>
+    <div class="card">
+      <div class="card-title">Environmental Inputs</div>
+
+      <div class="input-grid">
+
+        <!-- Temperature -->
+        <div class="input-group">
+          <label>Temperature</label>
+          <div class="input-row">
+            <input type="number" id="temp-val" value="85" step="0.1" min="-40" max="130">
+            <button class="unit-btn active" id="temp-f-btn" onclick="setTempUnit('F')">°F</button>
+            <button class="unit-btn" id="temp-c-btn" onclick="setTempUnit('C')">°C</button>
+          </div>
+        </div>
+
+        <!-- Moisture input -->
+        <div class="input-group">
+          <label id="moisture-label">Dewpoint</label>
+          <div class="input-row">
+            <input type="number" id="moisture-val" value="65" step="0.1" min="-40" max="100">
+            <button class="unit-btn active" id="dew-btn" onclick="setMoistureMode('dew')">Td</button>
+            <button class="unit-btn" id="rh-btn" onclick="setMoistureMode('rh')">RH%</button>
+          </div>
+          <div class="method-note" id="moisture-hint">Dewpoint in °F (same unit as temp)</div>
+        </div>
+
+        <!-- Wind speed -->
+        <div class="input-group">
+          <label>Wind Speed</label>
+          <div class="input-row">
+            <input type="number" id="wind-val" value="5" step="0.5" min="0" max="100">
+            <button class="unit-btn active" id="wind-kts-btn" onclick="setWindUnit('kts')">kts</button>
+            <button class="unit-btn" id="wind-mph-btn" onclick="setWindUnit('mph')">mph</button>
+          </div>
+        </div>
+
+        <!-- Pressure (optional) -->
+        <div class="input-group">
+          <label>Station Pressure <span style="opacity:0.5">(optional)</span></label>
+          <div class="input-row">
+            <input type="number" id="pres-val" placeholder="1013" step="1" min="700" max="1100">
+            <span style="font-family:'Share Tech Mono',monospace;font-size:0.7rem;color:var(--muted);padding:0 8px;display:flex;align-items:center;">hPa</span>
+          </div>
+        </div>
+
+        <!-- Location -->
+        <div class="input-group">
+          <label>Latitude</label>
+          <div class="input-row">
+            <input type="number" id="lat-val" placeholder="38.97" step="0.0001" min="-90" max="90">
+          </div>
+        </div>
+
+        <div class="input-group">
+          <label>Longitude</label>
+          <div class="input-row">
+            <input type="number" id="lon-val" placeholder="-104.82" step="0.0001" min="-180" max="180">
+          </div>
+        </div>
+
+        <!-- Date/Time -->
+        <div class="input-group">
+          <label>Date (UTC)</label>
+          <input type="date" id="date-val" style="background:rgba(10,22,40,0.8);border:1px solid rgba(79,195,247,0.2);border-radius:4px;color:var(--text);font-family:'Share Tech Mono',monospace;font-size:0.85rem;padding:8px 10px;">
+        </div>
+
+        <div class="input-group">
+          <label>Time (UTC)</label>
+          <div class="input-row">
+            <input type="number" id="hour-val" placeholder="18" min="0" max="23" step="1">
+            <span style="font-family:'Share Tech Mono',monospace;font-size:0.7rem;color:var(--muted);padding:0 8px;display:flex;align-items:center;">UTC</span>
+            <button class="unit-btn" onclick="setNow()" style="white-space:nowrap">Now</button>
+          </div>
+        </div>
+
+        <!-- Cloud cover -->
+        <div class="input-group full">
+          <label>Sky Condition</label>
+          <div class="sun-btns">
+            <button class="sun-btn" id="sun-shade" onclick="setSun('shade')">
+              <span class="sun-icon">☁️</span>Overcast / Shade
+            </button>
+            <button class="sun-btn" id="sun-partial" onclick="setSun('partial')">
+              <span class="sun-icon">⛅</span>Partly Cloudy
+            </button>
+            <button class="sun-btn active" id="sun-full" onclick="setSun('full')">
+              <span class="sun-icon">☀️</span>Clear / Full Sun
+            </button>
+          </div>
+          <div class="method-note" id="solar-info" style="margin-top:6px;">Enter location and time to compute solar elevation.</div>
+        </div>
+
+      </div><!-- end input-grid -->
+
+      <!-- Source selectors -->
+      <div class="site-section">
+        <div class="site-section-label">Load from Cadet Site</div>
+        <div class="site-row">
+          <select id="site-select">
+            <option value="">— select a site —</option>
+          </select>
+          <button class="btn-secondary" onclick="loadSiteConditions()">Load Wx</button>
+        </div>
+      </div>
+
+      <div class="site-section" style="margin-top:0.8rem;">
+        <div class="site-section-label">Load from Nearest METAR Airport</div>
+        <div class="site-row">
+          <button class="btn-secondary" onclick="loadNearestMetar()" style="flex:1;">
+            Use Current Lat/Lon → Find Nearest Station
+          </button>
+        </div>
+        <div id="nearest-status" class="method-note" style="margin-top:5px;"></div>
+        <div id="nearest-list" style="margin-top:6px;display:none;">
+          <select id="nearest-select" style="width:100%;background:rgba(10,22,40,0.8);border:1px solid rgba(79,195,247,0.2);border-radius:4px;color:var(--text);font-family:'Share Tech Mono',monospace;font-size:0.82rem;padding:8px 10px;">
+          </select>
+          <button class="btn-secondary" onclick="loadNearestConditions()" style="width:100%;margin-top:6px;padding:7px;">Load Conditions from Selected Station</button>
+        </div>
+      </div>
+
+      <button class="calc-btn" onclick="calculate()">▶ Calculate WBGT</button>
+    </div>
+
+    <!-- Method note -->
+    <div style="margin-top:0.8rem;padding:0.8rem 1rem;background:rgba(10,22,40,0.4);border:1px solid var(--border);border-radius:4px;">
+      <div style="font-family:'Share Tech Mono',monospace;font-size:0.6rem;color:var(--muted);line-height:1.7;">
+        <strong style="color:var(--accent)">Method:</strong> Liljegren outdoor WBGT (USARIEM standard) · Stull wet bulb approximation<br>
+        Solar DSWRF: Spencer (1971) declination · hour angle → elevation → clear-sky × cloud fraction<br>
+        Globe temp: radiation + wind correction · WBGT = 0.7·T<sub>w</sub> + 0.2·T<sub>g</sub> + 0.1·T<sub>a</sub><br>
+        <strong style="color:var(--accent)">Authority:</strong> CAPR 60-2 (governing) · DAFI 48-151 Ch.4 Table 4.1 (WBGT flag thresholds)
+      </div>
+    </div>
+  </div>
+
+  <!-- ── RIGHT: Results ── -->
+  <div class="results">
+
+    <!-- WBGT display -->
+    <div class="wbgt-display flag-NONE" id="wbgt-display">
+      <div class="wbgt-flag-label">WBGT</div>
+      <div class="wbgt-value" id="wbgt-value">—</div>
+      <div class="wbgt-unit">°F  (Outdoor Liljegren)</div>
+      <div class="wbgt-flag-name" id="wbgt-flag-name">Enter values and calculate</div>
+    </div>
+
+    <!-- Activity guidance table -->
+    <div class="card">
+      <div class="card-title">DAFI 48-151 Ch.4 Table 4.1 — Activity Guidance</div>
+      <table class="activity-table" id="activity-table">
+        <thead>
+          <tr>
+            <th>Flag</th>
+            <th>WBGT °F</th>
+            <th>Easy</th>
+            <th>Moderate</th>
+            <th>Hard / PT</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr id="row-below">
+            <td><span class="flag-dot" style="background:#7af0a0"></span>—</td>
+            <td>&lt;78</td>
+            <td class="limit-ok">No limit</td>
+            <td class="limit-ok">No limit</td>
+            <td class="limit-ok">No limit</td>
+          </tr>
+          <tr id="row-WHITE">
+            <td><span class="flag-dot" style="background:#e8f4ff;border:1px solid #aaa"></span>White</td>
+            <td>78–81.9</td>
+            <td class="limit-ok">No limit</td>
+            <td class="limit-ok">No limit</td>
+            <td class="limit-warn">40 min/hr</td>
+          </tr>
+          <tr id="row-GREEN">
+            <td><span class="flag-dot" style="background:#00cc44"></span>Green</td>
+            <td>82–84.9</td>
+            <td class="limit-ok">No limit</td>
+            <td class="limit-ok">No limit</td>
+            <td class="limit-warn">30 min/hr</td>
+          </tr>
+          <tr id="row-YELLOW">
+            <td><span class="flag-dot" style="background:#e6b800"></span>Yellow</td>
+            <td>85–87.9</td>
+            <td class="limit-ok">No limit</td>
+            <td class="limit-warn">40 min/hr</td>
+            <td class="limit-warn">20 min/hr</td>
+          </tr>
+          <tr id="row-RED">
+            <td><span class="flag-dot" style="background:#ff4422"></span>Red</td>
+            <td>88–89.9</td>
+            <td class="limit-ok">No limit</td>
+            <td class="limit-warn">30 min/hr</td>
+            <td class="limit-stop">10 min/hr</td>
+          </tr>
+          <tr id="row-BLACK">
+            <td><span class="flag-dot" style="background:#ff1100"></span>Black</td>
+            <td>≥90</td>
+            <td class="limit-ok">No limit</td>
+            <td class="limit-warn">20 min/hr</td>
+            <td class="limit-stop">Rest only</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <!-- Secondary outputs -->
+      <div class="secondary-grid" id="secondary-grid">
+        <div class="secondary-item">
+          <div class="secondary-label">Wet Bulb Temp</div>
+          <div class="secondary-value" id="out-wb">—</div>
+        </div>
+        <div class="secondary-item">
+          <div class="secondary-label">Globe Temp</div>
+          <div class="secondary-value" id="out-tg">—</div>
+        </div>
+        <div class="secondary-item" style="opacity:0.7">
+          <div class="secondary-label">Heat Index</div>
+          <div class="secondary-value" id="out-hi">—</div>
+        </div>
+        <div class="secondary-item" style="opacity:0.7">
+          <div class="secondary-label">Wind Chill</div>
+          <div class="secondary-value" id="out-wc">—</div>
+        </div>
+      </div>
+
+      <div class="ref-note">
+        Heat index and wind chill shown for reference only.<br>
+        WBGT is the authoritative metric for heat stress assessment.<br>
+        Rest periods include adequate water intake per CAPR 60-2.
+      </div>
+    </div>
+
+  </div><!-- end results -->
+
+</div><!-- end main -->
+
+<script>
+// ── Unit state ──────────────────────────────────────────────────────────────
+let tempUnit     = 'F';   // 'F' or 'C'
+let moistureMode = 'dew'; // 'dew' or 'rh'
+let windUnit     = 'kts'; // 'kts' or 'mph'
+let sunMode      = 'full';
+let currentLat   = null;
+let currentLon   = null;
+
+// ── Solar geometry — compute DSWRF from lat, date, time, cloud cover ─────────
+// Spencer (1971) solar declination, hour angle → elevation → clear-sky DSWRF
+function solarElevation(lat_deg, lon_deg, year, month, day, hour_utc) {
+  // Day of year
+  const doy = dayOfYear(year, month, day);
+
+  // Solar declination (Spencer 1971)
+  const B   = (2 * Math.PI / 365) * (doy - 1);
+  const dec = 0.006918 - 0.399912*Math.cos(B) + 0.070257*Math.sin(B)
+            - 0.006758*Math.cos(2*B) + 0.000907*Math.sin(2*B)
+            - 0.002697*Math.cos(3*B) + 0.00148*Math.sin(3*B);
+
+  // Equation of time (minutes)
+  const eot = 229.18 * (0.000075 + 0.001868*Math.cos(B) - 0.032077*Math.sin(B)
+            - 0.014615*Math.cos(2*B) - 0.04089*Math.sin(2*B));
+
+  // Solar noon correction
+  const lstm  = Math.round(lon_deg / 15) * 15;           // standard meridian
+  const tc    = 4 * (lon_deg - lstm) + eot;              // minutes
+  const solar_hour = hour_utc + tc / 60;                 // local solar time
+  const ha    = (solar_hour - 12) * 15 * Math.PI / 180;  // hour angle (rad)
+
+  const lat   = lat_deg * Math.PI / 180;
+  const sinEl = Math.sin(lat)*Math.sin(dec) + Math.cos(lat)*Math.cos(dec)*Math.cos(ha);
+  return Math.max(0, Math.asin(sinEl));  // elevation in radians, ≥0
+}
+
+function dayOfYear(year, month, day) {
+  const start = new Date(year, 0, 0);
+  const date  = new Date(year, month - 1, day);
+  return Math.floor((date - start) / 86400000);
+}
+
+function computeDswrf(lat_deg, lon_deg, year, month, day, hour_utc, cloudMode) {
+  const elev_rad = solarElevation(lat_deg, lon_deg, year, month, day, hour_utc);
+  const elev_deg = elev_rad * 180 / Math.PI;
+
+  if (elev_deg < 3) {
+    // Sun below/near horizon — negligible direct radiation
+    updateSolarInfo(elev_deg, 0);
+    return cloudMode === 'shade' ? 30 : 50;
+  }
+
+  // Clear-sky DSWRF: solar constant × sin(elevation) × atmospheric transmittance
+  const I0    = 1361;   // W/m² solar constant
+  const tau   = 0.75;   // clear-sky transmittance (typical)
+  const clearDswrf = I0 * Math.sin(elev_rad) * tau;
+
+  // Cloud fraction reduction
+  const cloudFactor = { shade: 0.05, partial: 0.45, full: 1.0 }[cloudMode] || 1.0;
+  const dswrf = clearDswrf * cloudFactor;
+
+  updateSolarInfo(elev_deg, dswrf);
+  return dswrf;
+}
+
+function updateSolarInfo(elev_deg, dswrf) {
+  const el = document.getElementById('solar-info');
+  if (!el) return;
+  if (elev_deg < 3) {
+    el.textContent = `Solar elevation: ${elev_deg.toFixed(1)}° (near/below horizon) — negligible radiation`;
+  } else {
+    el.textContent = `Solar elevation: ${elev_deg.toFixed(1)}° · Est. DSWRF: ${Math.round(dswrf)} W/m²`;
+  }
+}
+
+function setNow() {
+  const now = new Date();
+  document.getElementById('date-val').value =
+    `${now.getUTCFullYear()}-${String(now.getUTCMonth()+1).padStart(2,'0')}-${String(now.getUTCDate()).padStart(2,'0')}`;
+  document.getElementById('hour-val').value = now.getUTCHours();
+}
+
+// ── Unit toggles ─────────────────────────────────────────────────────────────
+function setTempUnit(u) {
+  const v = parseFloat(document.getElementById('temp-val').value);
+  const m = parseFloat(document.getElementById('moisture-val').value);
+  if (!isNaN(v) && tempUnit !== u) {
+    document.getElementById('temp-val').value =
+      u === 'C' ? ((v - 32) * 5/9).toFixed(1) : (v * 9/5 + 32).toFixed(1);
+    if (moistureMode === 'dew' && !isNaN(m)) {
+      document.getElementById('moisture-val').value =
+        u === 'C' ? ((m - 32) * 5/9).toFixed(1) : (m * 9/5 + 32).toFixed(1);
+    }
+  }
+  tempUnit = u;
+  document.getElementById('temp-f-btn').classList.toggle('active', u === 'F');
+  document.getElementById('temp-c-btn').classList.toggle('active', u === 'C');
+  updateMoistureHint();
+}
+
+function setMoistureMode(mode) {
+  moistureMode = mode;
+  document.getElementById('moisture-label').textContent =
+    mode === 'dew' ? 'Dewpoint' : 'Relative Humidity';
+  document.getElementById('dew-btn').classList.toggle('active', mode === 'dew');
+  document.getElementById('rh-btn').classList.toggle('active', mode === 'rh');
+  if (mode === 'rh') {
+    document.getElementById('moisture-val').value = '60';
+    document.getElementById('moisture-val').min = '1';
+    document.getElementById('moisture-val').max = '100';
+  } else {
+    document.getElementById('moisture-val').value = tempUnit === 'F' ? '65' : '18';
+    document.getElementById('moisture-val').min = '-40';
+    document.getElementById('moisture-val').max = '100';
+  }
+  updateMoistureHint();
+}
+
+function setWindUnit(u) {
+  const v = parseFloat(document.getElementById('wind-val').value);
+  if (!isNaN(v) && windUnit !== u) {
+    document.getElementById('wind-val').value =
+      u === 'mph' ? (v * 1.15078).toFixed(1) : (v / 1.15078).toFixed(1);
+  }
+  windUnit = u;
+  document.getElementById('wind-kts-btn').classList.toggle('active', u === 'kts');
+  document.getElementById('wind-mph-btn').classList.toggle('active', u === 'mph');
+}
+
+function setSun(mode) {
+  sunMode = mode;
+  ['shade','partial','full'].forEach(s => {
+    document.getElementById('sun-' + s).classList.toggle('active', s === mode);
+  });
+  // Recompute solar info if we have a location
+  const lat = parseFloat(document.getElementById('lat-val').value);
+  const lon = parseFloat(document.getElementById('lon-val').value);
+  const dateVal = document.getElementById('date-val').value;
+  const hour = parseInt(document.getElementById('hour-val').value);
+  if (!isNaN(lat) && !isNaN(lon) && dateVal && !isNaN(hour)) {
+    const [y,m,d] = dateVal.split('-').map(Number);
+    computeDswrf(lat, lon, y, m, d, hour, sunMode);
+  }
+}
+
+function updateMoistureHint() {
+  const hint = document.getElementById('moisture-hint');
+  if (moistureMode === 'rh') {
+    hint.textContent = 'Relative humidity (%)';
+  } else {
+    hint.textContent = `Dewpoint in °${tempUnit}`;
+  }
+}
+
+// ── Conversions ───────────────────────────────────────────────────────────────
+function toC(val, unit) { return unit === 'F' ? (val - 32) * 5/9 : val; }
+function toF(c)         { return c * 9/5 + 32; }
+function toMs(spd, unit) { return unit === 'kts' ? spd * 0.514444 : spd * 0.44704; }
+
+// ── Psychrometric: RH from Td and Ta (August-Roche-Magnus) ───────────────────
+function rhFromTdTa(td_c, ta_c) {
+  const alpha = (17.625 * td_c) / (243.04 + td_c);
+  const beta  = (17.625 * ta_c) / (243.04 + ta_c);
+  return Math.min(Math.max(Math.exp(alpha - beta), 0), 1);
+}
+
+// ── Dewpoint from RH and Ta ───────────────────────────────────────────────────
+function tdFromRhTa(rh_frac, ta_c) {
+  const lnrh = Math.log(rh_frac);
+  return (243.04 * (lnrh + (17.625 * ta_c) / (243.04 + ta_c))) /
+         (17.625 - lnrh - (17.625 * ta_c) / (243.04 + ta_c));
+}
+
+// ── Stull wet bulb (accurate within 1°C) ─────────────────────────────────────
+function wetBulb(ta_c, rh_frac) {
+  const rh = rh_frac * 100;
+  return ta_c * Math.atan(0.151977 * Math.pow(rh + 8.313659, 0.5))
+       + Math.atan(ta_c + rh)
+       - Math.atan(rh - 1.676331)
+       + 0.00391838 * Math.pow(rh, 1.5) * Math.atan(0.023101 * rh)
+       - 4.686035;
+}
+
+// ── Globe temperature ─────────────────────────────────────────────────────────
+function globeTemp(ta_c, dswrf, wind_ms) {
+  if (!dswrf || dswrf <= 0) return ta_c;
+  let windFactor = 1.0;
+  if (wind_ms > 0.5) windFactor = Math.max(0.5, 1.0 - 0.02 * wind_ms);
+  return ta_c + (dswrf / 500.0) * 10.0 * windFactor;
+}
+
+// ── NWS Heat Index (Rothfusz) ─────────────────────────────────────────────────
+function heatIndex(ta_c, td_c) {
+  if (ta_c < 27) return null;
+  const rh = rhFromTdTa(td_c, ta_c) * 100;
+  const tf = toF(ta_c);
+  const hi = -42.379 + 2.04901523*tf + 10.14333127*rh
+             - 0.22475541*tf*rh - 0.00683783*tf*tf
+             - 0.05481717*rh*rh + 0.00122874*tf*tf*rh
+             + 0.00085282*tf*rh*rh - 0.00000199*tf*tf*rh*rh;
+  return (hi - 32) * 5/9;
+}
+
+// ── NWS Wind Chill ────────────────────────────────────────────────────────────
+function windChill(ta_c, wind_kts) {
+  if (ta_c > 10) return null;
+  const mph = wind_kts * 1.15078;
+  if (mph < 5) return null;
+  const tf = toF(ta_c);
+  const wc = 35.74 + 0.6215*tf - 35.75*Math.pow(mph,0.16) + 0.4275*tf*Math.pow(mph,0.16);
+  return (wc - 32) * 5/9;
+}
+
+// ── DAFI 48-151 Ch.4 WBGT flag ───────────────────────────────────────────────
+function wbgtFlag(wbgt_f) {
+  if (wbgt_f < 78)  return 'BELOW';
+  if (wbgt_f < 82)  return 'WHITE';
+  if (wbgt_f < 85)  return 'GREEN';
+  if (wbgt_f < 88)  return 'YELLOW';
+  if (wbgt_f < 90)  return 'RED';
+  return 'BLACK';
+}
+
+const FLAG_LABELS = {
+  BELOW:  'Below White Flag — No Restrictions',
+  WHITE:  '⬜ White Flag',
+  GREEN:  '🟢 Green Flag',
+  YELLOW: '🟡 Yellow Flag',
+  RED:    '🔴 Red Flag',
+  BLACK:  '⛔ Black Flag — Suspend PT',
+};
+
+// ── Main calculation ──────────────────────────────────────────────────────────
+function calculate() {
+  const tempRaw  = parseFloat(document.getElementById('temp-val').value);
+  const moistRaw = parseFloat(document.getElementById('moisture-val').value);
+  const windRaw  = parseFloat(document.getElementById('wind-val').value);
+
+  if (isNaN(tempRaw) || isNaN(moistRaw) || isNaN(windRaw)) {
+    alert('Please enter valid temperature, moisture, and wind values.');
+    return;
+  }
+
+  // ── Solar DSWRF — use location+time if provided, else fallback estimates ──
+  const lat      = parseFloat(document.getElementById('lat-val').value);
+  const lon      = parseFloat(document.getElementById('lon-val').value);
+  const dateVal  = document.getElementById('date-val').value;
+  const hourVal  = parseInt(document.getElementById('hour-val').value);
+  let dswrf;
+
+  if (!isNaN(lat) && !isNaN(lon) && dateVal && !isNaN(hourVal)) {
+    const [y, m, d] = dateVal.split('-').map(Number);
+    dswrf = computeDswrf(lat, lon, y, m, d, hourVal, sunMode);
+  } else {
+    // Fallback when no location/time provided
+    dswrf = { shade: 50, partial: 400, full: 800 }[sunMode];
+    document.getElementById('solar-info').textContent =
+      'Enter location and UTC time for solar elevation-based DSWRF.';
+  }
+
+  // Convert to SI
+  const ta_c    = toC(tempRaw, tempUnit);
+  const wind_ms = toMs(windRaw, windUnit);
+  const wind_kts = windUnit === 'kts' ? windRaw : windRaw / 1.15078;
+
+  // Dewpoint in °C
+  let td_c;
+  if (moistureMode === 'rh') {
+    td_c = tdFromRhTa(moistRaw / 100, ta_c);
+  } else {
+    td_c = toC(moistRaw, tempUnit);
+  }
+  td_c = Math.min(td_c, ta_c);  // dewpoint can't exceed air temp
+
+  const rh     = rhFromTdTa(td_c, ta_c);
+  const tw_c   = wetBulb(ta_c, rh);
+  const tg_c   = globeTemp(ta_c, dswrf, wind_ms);
+  const wbgt_c = 0.7 * tw_c + 0.2 * tg_c + 0.1 * ta_c;
+  const wbgt_f = toF(wbgt_c);
+
+  const hi_c = heatIndex(ta_c, td_c);
+  const wc_c = windChill(ta_c, wind_kts);
+  const flag  = wbgtFlag(wbgt_f);
+
+  // ── Update WBGT display ──
+  const display = document.getElementById('wbgt-display');
+  display.className = `wbgt-display flag-${flag}`;
+  document.getElementById('wbgt-value').textContent = wbgt_f.toFixed(1);
+  document.getElementById('wbgt-flag-name').textContent = FLAG_LABELS[flag];
+
+  // ── Highlight current row in activity table ──
+  ['below','WHITE','GREEN','YELLOW','RED','BLACK'].forEach(f => {
+    const row = document.getElementById('row-' + f);
+    if (row) row.classList.toggle('current-flag',
+      f === flag || (f === 'below' && flag === 'BELOW'));
+  });
+
+  // ── Secondary outputs ──
+  document.getElementById('out-wb').textContent = `${toF(tw_c).toFixed(1)}°F`;
+  document.getElementById('out-tg').textContent = `${toF(tg_c).toFixed(1)}°F`;
+  document.getElementById('out-hi').textContent = hi_c != null ? `${toF(hi_c).toFixed(1)}°F` : 'N/A';
+  document.getElementById('out-wc').textContent = wc_c != null ? `${toF(wc_c).toFixed(1)}°F` : 'N/A';
+}
+
+// ── Nearest METAR airport ─────────────────────────────────────────────────────
+let nearestStations = [];
+
+async function loadNearestMetar() {
+  const lat = parseFloat(document.getElementById('lat-val').value);
+  const lon = parseFloat(document.getElementById('lon-val').value);
+  if (isNaN(lat) || isNaN(lon)) {
+    document.getElementById('nearest-status').textContent =
+      'Enter latitude and longitude first.';
+    return;
+  }
+  document.getElementById('nearest-status').textContent = 'Searching…';
+  document.getElementById('nearest-list').style.display = 'none';
+
+  try {
+    const resp = await fetch(
+      `/CAP_WxCOP_DEV/api/cadet_wx/nearest_metar?lat=${lat}&lon=${lon}&limit=5`);
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    nearestStations = data.stations || [];
+
+    if (!nearestStations.length) {
+      document.getElementById('nearest-status').textContent =
+        'No reporting stations found nearby.';
+      return;
+    }
+
+    // Populate select
+    const sel = document.getElementById('nearest-select');
+    sel.innerHTML = '';
+    nearestStations.forEach((s, i) => {
+      const opt  = document.createElement('option');
+      opt.value  = i;
+      const hasObs = s.temp_c != null;
+      const obsStr = hasObs
+        ? ` — ${toF(s.temp_c).toFixed(0)}°F`
+        : ' — no recent obs';
+      opt.textContent = `${s.station_id}  ${s.dist_nm}nm  ${s.name}${obsStr}`;
+      sel.appendChild(opt);
+    });
+
+    document.getElementById('nearest-status').textContent =
+      `Found ${nearestStations.length} reporting stations.`;
+    document.getElementById('nearest-list').style.display = 'block';
+
+  } catch(e) {
+    document.getElementById('nearest-status').textContent =
+      'Error: ' + e.message;
+  }
+}
+
+function loadNearestConditions() {
+  const idx = parseInt(document.getElementById('nearest-select').value);
+  const s   = nearestStations[idx];
+  if (!s) return;
+
+  // Set lat/lon to airport location
+  document.getElementById('lat-val').value = parseFloat(s.lat).toFixed(4);
+  document.getElementById('lon-val').value = parseFloat(s.lon).toFixed(4);
+  setNow();
+
+  if (s.temp_c == null) {
+    document.getElementById('nearest-status').textContent =
+      `${s.station_id}: no recent observations available.`;
+    return;
+  }
+
+  // Set temperature
+  tempUnit = 'F';
+  document.getElementById('temp-f-btn').classList.add('active');
+  document.getElementById('temp-c-btn').classList.remove('active');
+  document.getElementById('temp-val').value = toF(s.temp_c).toFixed(1);
+
+  // Set dewpoint
+  if (s.dewpoint_c != null) {
+    moistureMode = 'dew';
+    document.getElementById('dew-btn').classList.add('active');
+    document.getElementById('rh-btn').classList.remove('active');
+    document.getElementById('moisture-label').textContent = 'Dewpoint';
+    document.getElementById('moisture-val').value = toF(s.dewpoint_c).toFixed(1);
+    updateMoistureHint();
+  }
+
+  // Set wind
+  if (s.wind_speed_kts != null) {
+    windUnit = 'kts';
+    document.getElementById('wind-kts-btn').classList.add('active');
+    document.getElementById('wind-mph-btn').classList.remove('active');
+    document.getElementById('wind-val').value = s.wind_speed_kts.toFixed(1);
+  }
+
+  document.getElementById('nearest-status').textContent =
+    `Loaded ${s.station_id} (${s.dist_nm}nm away)`;
+
+  calculate();
+}
+
+// ── Load site list ─────────────────────────────────────────────────────────────
+async function loadSites() {
+  try {
+    const resp = await fetch('/CAP_WxCOP_DEV/api/cadet_wx/sites');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const sel  = document.getElementById('site-select');
+    (data.sites || []).forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s.site_id;
+      opt.textContent = `${s.name} (${s.cap_region || '—'})`;
+      opt.dataset.lat = s.lat;
+      opt.dataset.lon = s.lon;
+      opt.dataset.icao = s.nearest_icao || '';
+      sel.appendChild(opt);
+    });
+  } catch(e) { /* silent — sites are optional */ }
+}
+
+// ── Load current conditions from a cadet site ─────────────────────────────────
+async function loadSiteConditions() {
+  const sel    = document.getElementById('site-select');
+  const siteId = sel.value;
+  if (!siteId) { alert('Select a site first.'); return; }
+
+  // Set lat/lon from site option data
+  const opt = sel.options[sel.selectedIndex];
+  if (opt.dataset.lat && opt.dataset.lon) {
+    document.getElementById('lat-val').value = parseFloat(opt.dataset.lat).toFixed(4);
+    document.getElementById('lon-val').value = parseFloat(opt.dataset.lon).toFixed(4);
+  }
+
+  // Set current UTC date/time
+  setNow();
+
+  try {
+    const resp = await fetch('/CAP_WxCOP_DEV/api/cadet_wx/current');
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    const site = (data.sites || []).find(s => s.site_id == siteId);
+    if (!site || !site.conditions) {
+      alert('No current conditions available for this site.');
+      return;
+    }
+    const c = site.conditions;
+
+    // Set temperature
+    if (c.tmp_c != null) {
+      tempUnit = 'F';
+      document.getElementById('temp-f-btn').classList.add('active');
+      document.getElementById('temp-c-btn').classList.remove('active');
+      document.getElementById('temp-val').value = toF(c.tmp_c).toFixed(1);
+    }
+
+    // Set dewpoint
+    if (c.dpt_c != null) {
+      moistureMode = 'dew';
+      document.getElementById('dew-btn').classList.add('active');
+      document.getElementById('rh-btn').classList.remove('active');
+      document.getElementById('moisture-label').textContent = 'Dewpoint';
+      document.getElementById('moisture-val').value = toF(c.dpt_c).toFixed(1);
+      updateMoistureHint();
+    }
+
+    // Set wind
+    if (c.wind_speed_kts != null) {
+      windUnit = 'kts';
+      document.getElementById('wind-kts-btn').classList.add('active');
+      document.getElementById('wind-mph-btn').classList.remove('active');
+      document.getElementById('wind-val').value = c.wind_speed_kts.toFixed(1);
+    }
+
+    // Auto-calculate
+    calculate();
+
+  } catch(e) {
+    alert('Error loading site conditions: ' + e.message);
+  }
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+setNow();
+loadSites();
+calculate();
+</script>
+</body>
+</html>
+

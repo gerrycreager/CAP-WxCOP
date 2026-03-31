@@ -38,7 +38,7 @@ cadet_wx_bp = Blueprint('cadet_wx', __name__)
 # ---------------------------------------------------------------------------
 
 def heat_stress_color(heat_index_c, tmp_c):
-    """CAPR 60-2 §2.6.13 Table 2.2 — Heat Stress (heat index fallback)."""
+    """CAPR 60-2 §2.6.13 Table 2.2 — Heat Stress."""
     hi_f = None
     if heat_index_c is not None:
         hi_f = heat_index_c * 9/5 + 32
@@ -52,54 +52,6 @@ def heat_stress_color(heat_index_c, tmp_c):
         return 'YELLOW'  # Moderate
     else:
         return 'RED'     # High / Extreme (>103°F)
-
-
-def wbgt_flag(wbgt_c):
-    """
-    DAFI 48-151 Ch.4 Table 4.1 — WBGT Flag Color for cadet training.
-    Returns one of: 'WHITE', 'GREEN', 'YELLOW', 'RED', 'BLACK', 'UNKNOWN'
-
-    Flag  WBGT (°F)   Meaning
-    ----  ---------   -------
-    White  78–81.9    Caution — fluid intake every 30 min
-    Green  82–84.9    Caution — fluid intake every 20 min
-    Yellow 85–87.9    Caution — limit strenuous activity for unacclimatized
-    Red    88–89.9    Caution — limit intense exercise >1hr for acclimatized
-    Black  ≥90        Suspend PT/strenuous outdoor training
-    """
-    if wbgt_c is None:
-        return 'UNKNOWN'
-    wbgt_f = wbgt_c * 9/5 + 32
-    if wbgt_f < 78:
-        return 'GREEN'    # Below White flag — no restriction
-    elif wbgt_f < 82:
-        return 'WHITE'
-    elif wbgt_f < 85:
-        return 'GREEN'
-    elif wbgt_f < 88:
-        return 'YELLOW'
-    elif wbgt_f < 90:
-        return 'RED'
-    else:
-        return 'BLACK'
-
-
-# DAFI flag → 3-color stoplight mapping
-_DAFI_FLAG_TO_STOPLIGHT = {
-    'GREEN':   'GREEN',
-    'WHITE':   'GREEN',   # Caution but no restriction
-    'YELLOW':  'YELLOW',
-    'RED':     'YELLOW',  # Limit but not suspend
-    'BLACK':   'RED',     # Suspend PT
-    'UNKNOWN': 'UNKNOWN',
-}
-
-def wbgt_color(wbgt_c):
-    """
-    DAFI 48-151 Ch.4 — WBGT stoplight for 3-color display.
-    Uses wbgt_flag() and maps to GREEN/YELLOW/RED.
-    """
-    return _DAFI_FLAG_TO_STOPLIGHT.get(wbgt_flag(wbgt_c), 'UNKNOWN')
 
 
 def cold_stress_color(wind_chill_c, tmp_c):
@@ -520,7 +472,6 @@ def build_current_stoplight(cur, site):
             'precip_rate_mmhr': use_data.get('precip_rate_mmhr'),
             'precip_type':      use_data.get('precip_type'),
             'wbgt_c':           use_data.get('wbgt_c'),
-            'wbgt_flag':        wbgt_flag(use_data.get('wbgt_c')),
             'cape_jkg':         use_data.get('cape_jkg'),
             'ceil_ft':          use_data.get('ceil_ft'),
         },
@@ -594,8 +545,7 @@ def build_forecast_stoplight(cur, site, forecast_hour):
             ltg_fcst = lightning_color(has_warning, has_watch)
 
         cats = {
-            'heat_stress':   wbgt_color(row['wbgt_c']) if row['wbgt_c'] is not None
-                             else heat_stress_color(row['heat_index_c'], row['tmp_c']),
+            'heat_stress':   heat_stress_color(row['heat_index_c'], row['tmp_c']),
             'cold_stress':   cold_stress_color(row['wind_chill_c'], row['tmp_c']),
             'lightning':     ltg_fcst,
             'surface_wind':  surface_wind_color(row['wind_speed_kts'], row['wind_gust_kts']),
@@ -617,7 +567,6 @@ def build_forecast_stoplight(cur, site, forecast_hour):
             'precip_rate_mmhr': row['precip_rate_mmhr'],
             'precip_type':      row['precip_type'],
             'wbgt_c':           row['wbgt_c'],
-            'wbgt_flag':        wbgt_flag(row['wbgt_c']),
             'cape_jkg':         row['cape_jkg'],
             'ceil_ft':          row['ceil_ft'],
         })
@@ -658,7 +607,26 @@ def build_forecast_stoplight(cur, site, forecast_hour):
 # Flask endpoints
 # ---------------------------------------------------------------------------
 
-@cadet_wx_bp.route('/api/cadet_wx/sites')
+def _site_to_dict(row: dict) -> dict:
+    """Map DB column names to template-friendly field names."""
+    return {
+        'site_id':       row['id'],
+        'name':          row['site_name'],
+        'short_name':    row.get('unit'),
+        'cap_region':    row.get('cap_region'),
+        'nearest_icao':  (row.get('wx_station_override') or
+                          row.get('station_id') or '').strip() or None,
+        'station_id':    (row.get('station_id') or '').strip() or None,
+        'lat':           row.get('lat'),
+        'lon':           row.get('lon'),
+        'elevation_ft':  row.get('elevation_ft'),
+        'activity_type': row.get('site_type'),
+        'description':   row.get('description'),
+        'is_active':     row.get('is_active', True),
+    }
+
+
+@cadet_wx_bp.route('/api/cadet_wx/sites', methods=['GET'])
 def get_sites():
     try:
         conn = _open_db()
@@ -671,11 +639,83 @@ def get_sites():
                 WHERE is_active = TRUE
                 ORDER BY cap_region, site_name
             """)
-            sites = [dict(r) for r in cur.fetchall()]
+            sites = [_site_to_dict(dict(r)) for r in cur.fetchall()]
         conn.close()
         return jsonify({'sites': sites, 'count': len(sites)})
     except Exception as e:
-        log.error(f"/api/cadet_wx/sites: {e}", exc_info=True)
+        log.error(f"GET /api/cadet_wx/sites: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@cadet_wx_bp.route('/api/cadet_wx/nearest_metar')
+def nearest_metar():
+    """
+    Find nearest reporting airport to a lat/lon.
+    Query params: lat, lon, limit (default 5)
+    Returns list of nearest airports with current METAR conditions.
+    """
+    try:
+        lat   = request.args.get('lat', type=float)
+        lon   = request.args.get('lon', type=float)
+        limit = request.args.get('limit', default=5, type=int)
+        if lat is None or lon is None:
+            return jsonify({'error': 'lat and lon required'}), 400
+        limit = min(max(limit, 1), 10)
+
+        conn = _open_db()
+        with _cursor(conn) as cur:
+            # PostGIS nearest-neighbor using <-> distance operator with GiST index
+            cur.execute("""
+                SELECT
+                    a.station_id,
+                    a.name,
+                    ST_Y(a.location::geometry) AS lat,
+                    ST_X(a.location::geometry) AS lon,
+                    a.elevation_ft,
+                    a.is_military,
+                    ROUND(
+                        ST_Distance(
+                            a.location::geography,
+                            ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geography
+                        ) / 1852.0
+                    ) AS dist_nm,
+                    m.temp_c,
+                    m.dewpoint_c,
+                    m.wind_speed_kts,
+                    m.wind_gust_kts,
+                    m.wind_dir,
+                    m.observation_time
+                FROM observations.airports a
+                LEFT JOIN LATERAL (
+                    SELECT temp_c, dewpoint_c, wind_speed_kts,
+                           wind_gust_kts, wind_dir, observation_time
+                    FROM observations.metar
+                    WHERE station_id = a.station_id
+                      AND observation_time > NOW() - INTERVAL '2 hours'
+                    ORDER BY observation_time DESC
+                    LIMIT 1
+                ) m ON TRUE
+                WHERE EXISTS (
+                    SELECT 1 FROM observations.metar m2
+                    WHERE m2.station_id = a.station_id
+                      AND m2.observation_time > NOW() - INTERVAL '2 hours'
+                )
+                ORDER BY a.location::geography <->
+                         ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geography
+                LIMIT %s
+            """, (lon, lat, lon, lat, limit))
+            rows = [dict(r) for r in cur.fetchall()]
+        conn.close()
+
+        # Serialize datetime
+        for r in rows:
+            if r.get('observation_time'):
+                r['observation_time'] = r['observation_time'].isoformat()
+
+        return jsonify({'stations': rows, 'count': len(rows),
+                        'query': {'lat': lat, 'lon': lon}})
+    except Exception as e:
+        log.error(f"/api/cadet_wx/nearest_metar: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 

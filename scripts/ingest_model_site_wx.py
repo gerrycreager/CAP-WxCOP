@@ -66,6 +66,22 @@ log = logging.getLogger(__name__)
 
 HRRR_BASE   = Path('/LDM/models/hrrr')
 LOCKFILE    = '/var/lock/ingest_model_site_wx.lock'
+
+# HRRR CONUS domain bounds (approximate)
+HRRR_LAT_MIN, HRRR_LAT_MAX =  21.0,  53.0
+HRRR_LON_MIN, HRRR_LON_MAX = -134.0, -60.0
+
+def in_hrrr_domain(lat, lon):
+    """Return True if site is within HRRR CONUS domain."""
+    return (HRRR_LAT_MIN <= lat <= HRRR_LAT_MAX and
+            HRRR_LON_MIN <= lon <= HRRR_LON_MAX)
+
+# AIGFS — AI Global Forecast System (OCONUS model of record)
+# Single sfc file per cycle containing all forecast hours at 6-hr steps
+# File: /LDM/models/AIGFS/AIGFS_YYYYMMDD_HH00_sfc.grib2
+AIGFS_BASE       = Path('/LDM/models/AIGFS')
+AIGFS_FCST_HOURS = list(range(0, 49, 6))    # F000-F048 at 6-hr steps (48hr buffer)
+AIGFS_LOOKBACK   = 4                          # look back up to 4 cycles (24 hrs)
 DB_DSN      = os.environ.get('DB_DSN',
                              'dbname=avwx_data user=avwx_user host=192.168.0.60')
 
@@ -247,6 +263,174 @@ def hrrr_file(cycle_dir, cycle_hour_str, fhour):
     """Return path to HRRR sfc grib2 file for a given forecast hour."""
     fname = f'hrrr.t{cycle_hour_str}z.wrfsfcf{fhour:03d}.grib2'
     return cycle_dir / fname
+
+
+# ---------------------------------------------------------------------------
+# AIGFS file discovery and field loading
+# ---------------------------------------------------------------------------
+
+# AIGFS sfc fields available (subset of HRRR — no dewpoint, CAPE, DSWRF, ceil)
+AIGFS_FIELD_SPECS = [
+    ('2t',  'heightAboveGround', 2,  'TMP 2m'),
+    ('10u', 'heightAboveGround', 10, 'UGRD 10m'),
+    ('10v', 'heightAboveGround', 10, 'VGRD 10m'),
+    ('tp',  'surface',           0,  'APCP surface'),
+]
+
+
+def find_latest_aigfs_cycle():
+    """
+    Find the most recent complete AIGFS cycle.
+    AIGFS cycles run at 00/06/12/18Z. Each cycle produces a single sfc grib2
+    file containing all forecast hours (F000-F384 at 6-hr steps).
+    We require F000 and F120 both present and stable before using the cycle.
+
+    Returns (cycle_dt, aigfs_path) or (None, None).
+    """
+    now_utc    = datetime.now(timezone.utc)
+    # AIGFS runs at 00/06/12/18Z — check last AIGFS_LOOKBACK cycles
+    for hours_back in range(0, AIGFS_LOOKBACK * 6 + 1, 6):
+        candidate = now_utc - timedelta(hours=hours_back)
+        # Round down to nearest 6-hour cycle
+        cycle_hour = (candidate.hour // 6) * 6
+        cycle_dt   = candidate.replace(hour=cycle_hour, minute=0,
+                                       second=0, microsecond=0)
+        date_str   = cycle_dt.strftime('%Y%m%d')
+        hour_str   = cycle_dt.strftime('%H')
+        fpath      = AIGFS_BASE / f'AIGFS_{date_str}_{hour_str}00_sfc.grib2'
+        if not (fpath.exists() and fpath.stat().st_size > 0):
+            continue
+        age = now_utc.timestamp() - fpath.stat().st_mtime
+        if age < FILE_STABILITY_SECS:
+            log.info(f"AIGFS {fpath.name}: too recent ({age:.0f}s) — waiting")
+            continue
+        log.info(f"Latest complete AIGFS cycle: {fpath.name}")
+        return cycle_dt, fpath
+    log.warning(f"No complete AIGFS cycle found in last {AIGFS_LOOKBACK*6} hours")
+    return None, None
+
+
+def load_aigfs_fields_for_hour(grib_path, fhour):
+    """
+    Load AIGFS sfc fields for a specific forecast hour from the multi-hour file.
+    Returns dict: shortName -> grib message (or None).
+    """
+    fields = {}
+    try:
+        grbs = pygrib.open(str(grib_path))
+        for shortname, level_type, level, desc in AIGFS_FIELD_SPECS:
+            try:
+                msgs = grbs.select(shortName=shortname,
+                                   typeOfLevel=level_type,
+                                   level=level,
+                                   endStep=fhour)
+                fields[shortname] = msgs[0] if msgs else None
+            except Exception:
+                fields[shortname] = None
+        grbs.close()
+    except Exception as e:
+        log.error(f"Failed to open AIGFS {grib_path}: {e}")
+    return fields
+
+
+def ingest_aigfs_cycle(conn, cycle_dt, aigfs_path, sites, verbose=False):
+    """
+    Ingest AIGFS forecast hours for OCONUS sites.
+    AIGFS is the model of record for all OCONUS sites (AK, HI, PR, GU).
+    Single file contains all forecast hours at 6-hr steps.
+    Available fields: tmp, wind (u/v), precip — no dewpoint/CAPE/DSWRF/ceil.
+    """
+    model_name  = 'AIGFS'
+    now_utc     = datetime.now(timezone.utc)
+    total_inserted = 0
+
+    # Build grid tree from F000
+    log.info(f"Building AIGFS grid tree from {aigfs_path.name}")
+    f000_fields = load_aigfs_fields_for_hour(aigfs_path, 0)
+    ref_msg = next((v for v in f000_fields.values() if v is not None), None)
+    if ref_msg is None:
+        log.error("No usable fields in AIGFS F000")
+        return 0
+
+    tree, grid_shape = build_kdtree(ref_msg)
+
+    # Pre-compute grid indices for all OCONUS sites
+    site_indices = {}
+    for site in sites:
+        idx = site_grid_index(tree, grid_shape, site['lat'], site['lon'])
+        site_indices[site['id']] = idx
+        if verbose:
+            log.info(f"  AIGFS site {site['site_name']}: grid index {idx}")
+
+    # Process each 6-hour forecast step
+    for fhour in AIGFS_FCST_HOURS:
+        valid_time = cycle_dt + timedelta(hours=fhour)
+        fields     = load_aigfs_fields_for_hour(aigfs_path, fhour)
+
+        if not any(v is not None for v in fields.values()):
+            if verbose:
+                log.info(f"  AIGFS F{fhour:03d}: no fields available, skipping")
+            continue
+
+        records = []
+        for site in sites:
+            idx = site_indices[site['id']]
+
+            def val(key, scale=1.0, offset=0.0):
+                msg = fields.get(key)
+                if msg is None:
+                    return None
+                try:
+                    v = float(msg.values.flat[idx])
+                    if v > 9e20:
+                        return None
+                    return v * scale + offset
+                except Exception:
+                    return None
+
+            tmp_k  = val('2t')
+            u_ms   = val('10u')
+            v_ms   = val('10v')
+            apcp_m = val('tp')
+
+            tmp_c_val     = kelvin_to_c(tmp_k)
+            wspd_kts, wdir = uv_to_speed_dir(u_ms, v_ms)
+            wc_c          = wind_chill_c(tmp_c_val, wspd_kts)
+            precip_mm_val = round(apcp_m * 1000.0, 2) if apcp_m is not None else None
+
+            records.append({
+                'site_id':          site['id'],
+                'model_name':       model_name,
+                'model_run':        cycle_dt,
+                'valid_time':       valid_time,
+                'forecast_hour':    fhour,
+                'wind_dir':         wdir,
+                'wind_speed_kts':   wspd_kts,
+                'wind_gust_kts':    None,       # not in AIGFS sfc
+                'tmp_c':            tmp_c_val,
+                'dpt_c':            None,       # not in AIGFS sfc
+                'heat_index_c':     None,
+                'wind_chill_c':     wc_c,
+                'precip_mm':        precip_mm_val,
+                'precip_rate_mmhr': None,       # AIGFS has accumulated tp only
+                'precip_type':      None,
+                'dswrf_wm2':        None,
+                'wbgt_c':           None,       # requires dewpoint
+                'cape_jkg':         None,
+                'ceil_ft':          None,
+                'ingested_at':      now_utc,
+            })
+
+        n = upsert_site_wx(conn, records)
+        total_inserted += n
+        if verbose:
+            log.info(f"  AIGFS F{fhour:03d}: {n} site records upserted "
+                     f"(valid {valid_time.strftime('%Y-%m-%d %H:%MZ')})")
+
+    log.info(f"AIGFS cycle {cycle_dt.strftime('%Y-%m-%d %HZ')}: "
+             f"{total_inserted} total records upserted across "
+             f"{len(sites)} OCONUS sites")
+    return total_inserted
 
 
 # ---------------------------------------------------------------------------
@@ -545,9 +729,11 @@ def ingest_cycle(conn, cycle_dt, cycle_dir, sites, verbose=False):
 # ---------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description='Ingest HRRR data for cadet sites')
+    parser = argparse.ArgumentParser(
+        description='Ingest HRRR (CONUS) and AIGFS (OCONUS) data for cadet sites')
     parser.add_argument('-v', '--verbose', action='store_true')
-    parser.add_argument('--cycle', help='Force specific cycle YYYYMMDD_HH (e.g. 20260327_18)')
+    parser.add_argument('--cycle', help='Force HRRR cycle YYYYMMDD_HH (e.g. 20260327_18)')
+    parser.add_argument('--aigfs-cycle', help='Force AIGFS cycle YYYYMMDD_HH (e.g. 20260327_18)')
     args = parser.parse_args()
 
     # Lockfile — prevent concurrent cron runs
@@ -559,35 +745,69 @@ def main():
         return
 
     log.info("=" * 60)
-    log.info(f"HRRR cadet site ingest started: "
+    log.info(f"Model site wx ingest started: "
              f"{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%SZ')}")
 
     conn = None
     try:
         conn = psycopg2.connect(DB_DSN)
 
-        sites = get_active_sites(conn)
-        log.info(f"Active cadet sites: {len(sites)}")
-        if not sites:
+        all_sites = get_active_sites(conn)
+        log.info(f"Active cadet sites: {len(all_sites)}")
+        if not all_sites:
             log.warning("No active cadet sites found — nothing to ingest")
             return
 
-        if args.cycle:
-            # Manual override
-            dt = datetime.strptime(args.cycle, '%Y%m%d_%H').replace(tzinfo=timezone.utc)
-            date_str = dt.strftime('%Y%m%d')
-            hour_str = dt.strftime('%H')
-            cycle_dir = HRRR_BASE / f'hrrr.{date_str}' / f'{hour_str}z'
-            if not cycle_dir.exists():
-                log.error(f"Cycle directory not found: {cycle_dir}")
-                return
-            ingest_cycle(conn, dt, cycle_dir, sites, verbose=args.verbose)
-        else:
-            cycle_dt, cycle_dir = find_latest_hrrr_cycle()
-            if cycle_dt is None:
-                log.error("No HRRR cycle available")
-                return
-            ingest_cycle(conn, cycle_dt, cycle_dir, sites, verbose=args.verbose)
+        # Split sites by model domain
+        conus_sites  = [s for s in all_sites if in_hrrr_domain(s['lat'], s['lon'])]
+        oconus_sites = [s for s in all_sites if not in_hrrr_domain(s['lat'], s['lon'])]
+
+        log.info(f"  CONUS (HRRR): {len(conus_sites)} sites — "
+                 f"{[s['site_name'] for s in conus_sites]}")
+        log.info(f"  OCONUS (AIGFS): {len(oconus_sites)} sites — "
+                 f"{[s['site_name'] for s in oconus_sites]}")
+
+        # ── HRRR ingest for CONUS sites ───────────────────────────────────────
+        if conus_sites:
+            if args.cycle:
+                dt = datetime.strptime(args.cycle, '%Y%m%d_%H').replace(
+                    tzinfo=timezone.utc)
+                date_str  = dt.strftime('%Y%m%d')
+                hour_str  = dt.strftime('%H')
+                cycle_dir = HRRR_BASE / f'hrrr.{date_str}' / f'{hour_str}z'
+                if not cycle_dir.exists():
+                    log.error(f"HRRR cycle directory not found: {cycle_dir}")
+                else:
+                    ingest_cycle(conn, dt, cycle_dir, conus_sites,
+                                 verbose=args.verbose)
+            else:
+                cycle_dt, cycle_dir = find_latest_hrrr_cycle()
+                if cycle_dt is None:
+                    log.error("No complete HRRR cycle available")
+                else:
+                    ingest_cycle(conn, cycle_dt, cycle_dir, conus_sites,
+                                 verbose=args.verbose)
+
+        # ── AIGFS ingest for OCONUS sites ─────────────────────────────────────
+        if oconus_sites:
+            if args.aigfs_cycle:
+                dt = datetime.strptime(args.aigfs_cycle, '%Y%m%d_%H').replace(
+                    tzinfo=timezone.utc)
+                date_str  = dt.strftime('%Y%m%d')
+                hour_str  = dt.strftime('%H')
+                fpath     = AIGFS_BASE / f'AIGFS_{date_str}_{hour_str}00_sfc.grib2'
+                if not fpath.exists():
+                    log.error(f"AIGFS file not found: {fpath}")
+                else:
+                    ingest_aigfs_cycle(conn, dt, fpath, oconus_sites,
+                                       verbose=args.verbose)
+            else:
+                aigfs_dt, aigfs_path = find_latest_aigfs_cycle()
+                if aigfs_dt is None:
+                    log.error("No complete AIGFS cycle available")
+                else:
+                    ingest_aigfs_cycle(conn, aigfs_dt, aigfs_path, oconus_sites,
+                                       verbose=args.verbose)
 
     except Exception as e:
         log.error(f"Ingest failed: {e}", exc_info=True)
@@ -602,4 +822,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

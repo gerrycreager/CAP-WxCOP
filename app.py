@@ -136,6 +136,10 @@ def mrms_radar():
     """MRMS composite reflectivity / MESH / lightning / azshear animated radar"""
     return render_template('radar_map.html')
 
+@app.route('/wbgt')
+def wbgt_calculator():
+    return render_template('wbgt_calculator.html')
+
 # ============================================================================
 # LEGACY ROUTES - Maintain compatibility
 # ============================================================================
