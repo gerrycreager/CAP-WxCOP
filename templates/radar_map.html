@@ -25,11 +25,25 @@
         #map { position: fixed; top: 44px; left: 0; right: 0; bottom: 110px; }
 
         .controls {
-            position: absolute; top: 10px; right: 10px;
+            position: absolute; top: 54px; right: 10px;
             background: white; padding: 12px 14px; border-radius: 8px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.3); z-index: 1000; min-width: 215px;
+            transition: min-width 0.2s, padding 0.2s;
         }
-        .controls h3 { margin-bottom: 8px; font-size: 14px; color: #2c3e50; }
+        .controls.collapsed { min-width: 0; padding: 6px 8px; }
+        .controls.collapsed .controls-body { display: none; }
+        .controls-header {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 8px;
+        }
+        .controls.collapsed .controls-header { margin-bottom: 0; }
+        .controls h3 { margin: 0; font-size: 14px; color: #2c3e50; }
+        .collapse-btn {
+            background: none; border: 1px solid #ccc; border-radius: 4px;
+            cursor: pointer; font-size: 13px; padding: 1px 6px; color: #666;
+            line-height: 1.4; margin-left: 8px; flex-shrink: 0;
+        }
+        .collapse-btn:hover { background: #f0f0f0; }
         .layer-selector { width: 100%; padding: 6px 8px; margin-bottom: 8px; border: 1px solid #ddd; border-radius: 4px; background: white; font-size: 13px; }
         .checkbox-label { display: flex; align-items: center; font-size: 13px; cursor: pointer; margin: 4px 0; }
         input[type="checkbox"] { margin-right: 7px; cursor: pointer; }
@@ -110,8 +124,13 @@
     <div id="map"></div>
     <div id="loading">Loading radar data...</div>
 
-    <div class="controls">
-        <h3>Base Map</h3>
+    <div class="controls" id="ctrlPanel">
+        <div class="controls-header">
+            <h3>⚙ Controls</h3>
+            <button class="collapse-btn" id="collapseBtn" onclick="toggleControls()" title="Collapse/expand">◀</button>
+        </div>
+        <div class="controls-body">
+        <h3 style="font-size:12px;color:#555;margin-bottom:6px;">Base Map</h3>
         <select id="layerSelector" class="layer-selector">
             <option value="street">Street Map</option>
             <option value="sectional">VFR Sectional (zoom 5+)</option>
@@ -154,6 +173,7 @@
         <div class="legend-item"><div class="leg-sym" style="width:10px;height:10px;background:rgba(25,80,200,0.9);"></div>Major Hub sym z4+, lbl z6+</div>
         <div class="legend-item"><div class="leg-sym" style="width:8px;height:8px;background:rgba(80,80,80,0.85);"></div>Regional sym z6+, lbl z7+</div>
         <div class="legend-item"><div class="leg-sym" style="width:7px;height:7px;background:rgba(255,255,255,0.9);border-color:#666;"></div>Paved &gt;2500ft sym z7+</div>
+        </div><!-- end controls-body -->
     </div>
 
     <div id="colorbarWrap">
@@ -336,6 +356,9 @@
         setupControls();
         loadAirports();
         fetchIndex(currentProduct);
+        fetchIndex('mesh');
+        fetchIndex('azshear');
+
 
         map.on('zoomend moveend', updateAirports);
 
@@ -739,6 +762,15 @@
     window.addEventListener('error', function(e) {
         if (e.message && e.message.includes('message channel closed')) return true;
     });
+
+    // ── Collapsible controls panel ───────────────────────────────────────────
+    function toggleControls() {
+        const panel = document.getElementById('ctrlPanel');
+        const btn   = document.getElementById('collapseBtn');
+        const collapsed = panel.classList.toggle('collapsed');
+        btn.textContent = collapsed ? '▶' : '◀';
+        btn.title = collapsed ? 'Expand controls' : 'Collapse controls';
+    }
     </script>
 </body>
 </html>
