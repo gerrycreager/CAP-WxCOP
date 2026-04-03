@@ -1,184 +1,211 @@
-#!/home/ldm/venv/bin/python3
 """
-Radar Status API Endpoint
-Location: /var/www/cap_winds_app/api/radar_status.py
+radar_status_api.py — Radar Status API Blueprint
+Location: /var/www/cap_winds_app/radar_status_api.py  (r815)
 
-Flask API to serve radar operational status
+Registered in app.py:
+    from radar_status_api import radar_status_bp
+    app.register_blueprint(radar_status_bp)
+
+Endpoints:
+    GET /CAP_WxCOP/api/radar/sites          — all sites with current status
+    GET /CAP_WxCOP/api/radar/status/<site>  — single site status + history
 """
 
-from flask import Flask, jsonify, request
-import sqlite3
-from datetime import datetime, timedelta
+import logging
+from datetime import datetime, timezone, timedelta
 
-app = Flask(__name__)
+import psycopg2
+import psycopg2.extras
+from flask import Blueprint, jsonify, request
 
-DB_PATH = "/var/www/cap_winds_app/data/radar_status.db"
+log = logging.getLogger(__name__)
+
+radar_status_bp = Blueprint('radar_status', __name__)
+
+DB_DSN = 'host=192.168.0.60 port=5432 dbname=avwx_data user=avwx_user'
+
+# A site is considered STALE if no FTM received in this many hours.
+# Most sites issue at least one FTM per 12-hour period.
+STALE_HOURS = 12
 
 
-def get_db():
-    """Get database connection"""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+def get_conn():
+    return psycopg2.connect(DB_DSN)
 
 
-@app.route('/api/radar/status/<site_id>', methods=['GET'])
-def get_radar_status(site_id):
-    """Get current status for specific radar site"""
+def _status_color(status, last_update):
+    """
+    Derive marker color from status and data age.
+    green   — OPERATIONAL and current
+    yellow  — MAINTENANCE or TEST
+    red     — FAILED
+    gray    — no status data or stale (> STALE_HOURS since last FTM)
+    """
+    if last_update is None:
+        return 'gray'
+    age = datetime.now(timezone.utc) - last_update
+    if age > timedelta(hours=STALE_HOURS):
+        return 'gray'
+    mapping = {
+        'OPERATIONAL': 'green',
+        'MAINTENANCE':  'yellow',
+        'TEST':         'yellow',
+        'FAILED':       'red',
+        'UNKNOWN':      'gray',
+    }
+    return mapping.get(status, 'gray')
+
+
+def _age_str(last_update):
+    """Human-readable age string for popup display."""
+    if last_update is None:
+        return 'Never'
+    age = datetime.now(timezone.utc) - last_update
+    mins  = int(age.total_seconds() / 60)
+    hours = mins // 60
+    if mins < 2:
+        return 'Just now'
+    if mins < 60:
+        return f'{mins}m ago'
+    if hours < 24:
+        return f'{hours}h {mins % 60}m ago'
+    return f'{age.days}d ago'
+
+
+@radar_status_bp.route('/sites')
+def get_all_sites():
+    """
+    Return all radar sites with geometry and current status.
+    Sites with no status record are included (status=None, color=gray).
+    Used by the frontend to build the map overlay.
+    """
     try:
-        conn = get_db()
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT site_id, status, vcp_mode, vcp_description, 
-                   operation_mode, last_update, message
-            FROM radar_status
-            WHERE site_id = ?
-        ''', (site_id.upper(),))
-        
-        row = cursor.fetchone()
-        conn.close()
-        
-        if not row:
-            return jsonify({
-                'site_id': site_id,
-                'status': 'UNKNOWN',
-                'operational': False,
-                'message': 'No status data available'
-            }), 404
-        
-        return jsonify({
-            'site_id': row['site_id'],
-            'status': row['status'],
-            'operational': row['status'] == 'OPERATIONAL',
-            'vcp_mode': row['vcp_mode'],
-            'vcp_description': row['vcp_description'],
-            'operation_mode': row['operation_mode'],
-            'last_update': row['last_update'],
-            'display_status': get_display_status(row['status']),
-            'icon_color': get_icon_color(row['status'])
-        })
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        conn = get_conn()
+        cur  = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
+        cur.execute("""
+            SELECT
+                s.site_id,
+                s.name,
+                s.state,
+                s.lat,
+                s.lon,
+                s.elevation_m,
+                r.status,
+                r.vcp_mode,
+                r.vcp_description,
+                r.operation_mode,
+                r.last_update,
+                r.message
+            FROM radar.radar_sites s
+            LEFT JOIN radar.radar_status r USING (site_id)
+            ORDER BY s.site_id
+        """)
 
-@app.route('/api/radar/status', methods=['GET'])
-def get_all_radar_status():
-    """Get status for all radar sites"""
-    try:
-        # Optional: filter by region
-        region = request.args.get('region')
-        
-        # Optional: only failed/non-operational
-        failed_only = request.args.get('failed_only', 'false').lower() == 'true'
-        
-        conn = get_db()
-        cursor = conn.cursor()
-        
-        query = 'SELECT * FROM radar_status'
-        params = []
-        
-        if failed_only:
-            query += ' WHERE status != ?'
-            params.append('OPERATIONAL')
-        
-        query += ' ORDER BY site_id'
-        
-        cursor.execute(query, params)
-        rows = cursor.fetchall()
+        rows = cur.fetchall()
+        cur.close()
         conn.close()
-        
+
         sites = []
         for row in rows:
+            lu = row['last_update']
             sites.append({
-                'site_id': row['site_id'],
-                'status': row['status'],
-                'operational': row['status'] == 'OPERATIONAL',
-                'vcp_mode': row['vcp_mode'],
+                'site_id':         row['site_id'],
+                'name':            row['name'],
+                'state':           row['state'],
+                'lat':             row['lat'],
+                'lon':             row['lon'],
+                'elevation_m':     row['elevation_m'],
+                'status':          row['status'] or 'UNKNOWN',
+                'vcp_mode':        row['vcp_mode'],
                 'vcp_description': row['vcp_description'],
-                'operation_mode': row['operation_mode'],
-                'last_update': row['last_update'],
-                'display_status': get_display_status(row['status']),
-                'icon_color': get_icon_color(row['status'])
+                'operation_mode':  row['operation_mode'],
+                'last_update':     lu.isoformat() if lu else None,
+                'age_str':         _age_str(lu),
+                'color':           _status_color(row['status'], lu),
+                'message':         row['message'],
             })
-        
-        return jsonify({
-            'count': len(sites),
-            'sites': sites
-        })
-        
+
+        return jsonify({'count': len(sites), 'sites': sites})
+
     except Exception as e:
+        log.exception('radar/sites failed')
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/radar/status/<site_id>/history', methods=['GET'])
-def get_radar_status_history(site_id):
-    """Get status history for a site"""
+@radar_status_bp.route('/status/<site_id>')
+def get_site_status(site_id):
+    """
+    Return current status + recent history for one site.
+    site_id is 3-char (MPX, VWX, TLX).
+    Optional query param: ?history=N  (default 20, max 100)
+    """
+    site_id = site_id.upper()
+    limit   = min(int(request.args.get('history', 20)), 100)
+
     try:
-        # Optional: limit number of records
-        limit = int(request.args.get('limit', 100))
-        
-        conn = get_db()
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT site_id, status, vcp_mode, operation_mode, timestamp, message
-            FROM status_history
-            WHERE site_id = ?
-            ORDER BY timestamp DESC
-            LIMIT ?
-        ''', (site_id.upper(), limit))
-        
-        rows = cursor.fetchall()
-        conn.close()
-        
+        conn = get_conn()
+        cur  = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+        # Current status joined to site geometry
+        cur.execute("""
+            SELECT
+                s.site_id, s.name, s.state, s.lat, s.lon, s.elevation_m,
+                r.status, r.vcp_mode, r.vcp_description,
+                r.operation_mode, r.last_update, r.message
+            FROM radar.radar_sites s
+            LEFT JOIN radar.radar_status r USING (site_id)
+            WHERE s.site_id = %s
+        """, (site_id,))
+
+        row = cur.fetchone()
+        if not row:
+            cur.close()
+            conn.close()
+            return jsonify({'error': f'Unknown site: {site_id}'}), 404
+
+        lu = row['last_update']
+        result = {
+            'site_id':         row['site_id'],
+            'name':            row['name'],
+            'state':           row['state'],
+            'lat':             row['lat'],
+            'lon':             row['lon'],
+            'elevation_m':     row['elevation_m'],
+            'status':          row['status'] or 'UNKNOWN',
+            'vcp_mode':        row['vcp_mode'],
+            'vcp_description': row['vcp_description'],
+            'operation_mode':  row['operation_mode'],
+            'last_update':     lu.isoformat() if lu else None,
+            'age_str':         _age_str(lu),
+            'color':           _status_color(row['status'], lu),
+            'message':         row['message'],
+        }
+
+        # Recent history
+        cur.execute("""
+            SELECT site_id, status, vcp_mode, operation_mode, ts, message
+            FROM radar.status_history
+            WHERE site_id = %s
+            ORDER BY ts DESC
+            LIMIT %s
+        """, (site_id, limit))
+
         history = []
-        for row in rows:
+        for h in cur.fetchall():
             history.append({
-                'site_id': row['site_id'],
-                'status': row['status'],
-                'vcp_mode': row['vcp_mode'],
-                'operation_mode': row['operation_mode'],
-                'timestamp': row['timestamp'],
-                'message': row['message']
+                'status':         h['status'],
+                'vcp_mode':       h['vcp_mode'],
+                'operation_mode': h['operation_mode'],
+                'ts':             h['ts'].isoformat() if h['ts'] else None,
+                'message':        h['message'],
             })
-        
-        return jsonify({
-            'site_id': site_id,
-            'count': len(history),
-            'history': history
-        })
-        
+
+        result['history'] = history
+        cur.close()
+        conn.close()
+        return jsonify(result)
+
     except Exception as e:
+        log.exception('radar/status/%s failed', site_id)
         return jsonify({'error': str(e)}), 500
-
-
-def get_display_status(status):
-    """Convert status to display string"""
-    display_map = {
-        'OPERATIONAL': 'Operational',
-        'FAILED': 'Failed',
-        'MAINTENANCE': 'Maintenance',
-        'TEST': 'Test Mode',
-        'OFFLINE': 'Offline',
-        'UNKNOWN': 'Unknown'
-    }
-    return display_map.get(status, status)
-
-
-def get_icon_color(status):
-    """Get icon color for status"""
-    color_map = {
-        'OPERATIONAL': 'green',
-        'FAILED': 'red',
-        'MAINTENANCE': 'orange',
-        'TEST': 'yellow',
-        'OFFLINE': 'gray',
-        'UNKNOWN': 'gray'
-    }
-    return color_map.get(status, 'gray')
-
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5001, debug=True)

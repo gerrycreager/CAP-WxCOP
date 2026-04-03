@@ -81,6 +81,18 @@
         .legend-item { display: flex; align-items: center; margin: 3px 0; font-size: 11px; color: #444; }
         .leg-sym { flex-shrink: 0; margin-right: 7px; border-radius: 50%; border: 1.5px solid rgba(0,0,0,0.45); }
 
+        /* NEXRAD status overlay */
+        .radar-site-popup { font-family: 'Courier New', monospace; font-size: 12px; min-width: 220px; }
+        .radar-site-popup .rsp-header { font-size: 14px; font-weight: 700; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }
+        .radar-site-popup .rsp-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; border: 1.5px solid rgba(0,0,0,0.3); }
+        .radar-site-popup .rsp-row { margin: 2px 0; }
+        .radar-site-popup .rsp-label { color: #666; }
+        .radar-site-popup .rsp-msg { margin-top: 6px; padding: 4px 6px; background: #f5f5f5; border-radius: 3px; font-size: 11px; color: #444; white-space: pre-wrap; max-height: 80px; overflow-y: auto; }
+        .radar-site-popup .rsp-status-green  { color: #1a7f1a; font-weight: 700; }
+        .radar-site-popup .rsp-status-yellow { color: #a06000; font-weight: 700; }
+        .radar-site-popup .rsp-status-red    { color: #c00000; font-weight: 700; }
+        .radar-site-popup .rsp-status-gray   { color: #666;    font-weight: 700; }
+
         #colorbarWrap { position: absolute; bottom: 120px; left: 10px; z-index: 1000; display: none; }
         .colorbar-panel { background: rgba(255,255,255,0.93); border-radius: 6px; padding: 6px 8px; box-shadow: 0 1px 6px rgba(0,0,0,0.3); font-size: 10px; font-family: 'Courier New', monospace; }
         .colorbar-title { font-weight: 700; font-size: 11px; margin-bottom: 4px; color: #222; }
@@ -168,11 +180,21 @@
         <div id="aptSearchMsg"></div>
 
         <div class="divider"></div>
+        <div class="ctrl-section">NEXRAD Status</div>
+        <label class="checkbox-label">
+            <input type="checkbox" id="radarSiteToggle" checked> Show radar sites
+        </label>
+
+        <div class="divider"></div>
         <div class="ctrl-section">Legend</div>
         <div class="legend-item"><div class="leg-sym" style="width:12px;height:12px;background:rgba(200,30,30,0.9);"></div>Military sym z2+, lbl z5+</div>
         <div class="legend-item"><div class="leg-sym" style="width:10px;height:10px;background:rgba(25,80,200,0.9);"></div>Major Hub sym z4+, lbl z6+</div>
         <div class="legend-item"><div class="leg-sym" style="width:8px;height:8px;background:rgba(80,80,80,0.85);"></div>Regional sym z6+, lbl z7+</div>
         <div class="legend-item"><div class="leg-sym" style="width:7px;height:7px;background:rgba(255,255,255,0.9);border-color:#666;"></div>Paved &gt;2500ft sym z7+</div>
+        <div class="legend-item"><div class="leg-sym" style="width:10px;height:10px;background:#1a7f1a;"></div>WSR-88D Operational</div>
+        <div class="legend-item"><div class="leg-sym" style="width:10px;height:10px;background:#e6a800;"></div>WSR-88D Maint/Test</div>
+        <div class="legend-item"><div class="leg-sym" style="width:10px;height:10px;background:#c00000;"></div>WSR-88D Failed</div>
+        <div class="legend-item"><div class="leg-sym" style="width:10px;height:10px;background:#888888;"></div>WSR-88D No data/Stale</div>
         </div><!-- end controls-body -->
     </div>
 
@@ -328,6 +350,8 @@
     var playing = false, rockDir = 1, playTimer = null;
     var pollTimer = null, dragging = false;
     var lastPollTime = null;
+    var radarSitesLayer = null;
+    var radarSitesData  = [];
 
     // ── Map init ───────────────────────────────────────────────────────────
     function initMap() {
@@ -358,7 +382,8 @@
         fetchIndex(currentProduct);
         fetchIndex('mesh');
         fetchIndex('azshear');
-
+        loadRadarSites();
+        startRadarSitesPoll();
 
         map.on('zoomend moveend', updateAirports);
 
@@ -409,6 +434,7 @@
             labelsLayer.clearLayers();
             if (this.checked && document.getElementById('symbolToggle').checked) updateAirports();
         });
+        document.getElementById('radarSiteToggle').addEventListener('change', renderRadarSites);
 
         // Airport search
         document.getElementById('aptSearchInput').addEventListener('keydown', function(e) {
@@ -737,6 +763,87 @@
     function setStatus(msg) {
         document.getElementById('statusMsg').textContent = msg;
         setTimeout(function(){ document.getElementById('statusMsg').textContent=''; }, 4000);
+    }
+
+    // ── NEXRAD status overlay ──────────────────────────────────────────────
+    var SITE_COLORS = {
+        green:  { fill: '#1a7f1a', border: '#0d3d0d' },
+        yellow: { fill: '#e6a800', border: '#7a5800' },
+        red:    { fill: '#c00000', border: '#600000' },
+        gray:   { fill: '#888888', border: '#444444' },
+    };
+
+    function buildPopupHtml(site) {
+        var c   = site.color || 'gray';
+        var col = SITE_COLORS[c] || SITE_COLORS.gray;
+        var vcp = site.vcp_mode
+                ? ('VCP ' + site.vcp_mode + (site.vcp_description ? ' — ' + site.vcp_description : ''))
+                : '—';
+        var msg = site.message
+                ? '<div class="rsp-msg">' + (site.message + '').replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</div>'
+                : '';
+        return '<div class="radar-site-popup">' +
+            '<div class="rsp-header">' +
+                '<div class="rsp-dot" style="background:' + col.fill + ';border-color:' + col.border + ';"></div>' +
+                '<span>' + site.site_id + ' — ' + (site.name || '') + (site.state ? ', ' + site.state : '') + '</span>' +
+            '</div>' +
+            '<div class="rsp-row"><span class="rsp-label">Status: </span>' +
+                '<span class="rsp-status-' + c + '">' + (site.status || 'UNKNOWN') + '</span>' +
+            '</div>' +
+            '<div class="rsp-row"><span class="rsp-label">VCP: </span>' + vcp + '</div>' +
+            '<div class="rsp-row"><span class="rsp-label">Updated: </span>' + (site.age_str || '—') + '</div>' +
+            msg +
+        '</div>';
+    }
+
+    function loadRadarSites() {
+        fetch('api/radar/sites')
+            .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+            .then(function(data) {
+                radarSitesData = data.sites || [];
+                renderRadarSites();
+            })
+            .catch(function(e) { console.warn('Radar sites load failed:', e); });
+    }
+
+    function renderRadarSites() {
+        if (radarSitesLayer) { map.removeLayer(radarSitesLayer); radarSitesLayer = null; }
+        if (!document.getElementById('radarSiteToggle').checked) return;
+
+        radarSitesLayer = L.featureGroup();
+        var sz = 9;
+
+        radarSitesData.forEach(function(site) {
+            var c   = site.color || 'gray';
+            var col = SITE_COLORS[c] || SITE_COLORS.gray;
+
+            var marker = L.marker([site.lat, site.lon], {
+                icon: L.divIcon({
+                    className: '',
+                    html: '<div style="width:' + sz + 'px;height:' + sz + 'px;' +
+                          'background:' + col.fill + ';' +
+                          'border:1.5px solid ' + col.border + ';' +
+                          'border-radius:50%;' +
+                          'box-shadow:0 1px 3px rgba(0,0,0,0.5);' +
+                          'transform:translateX(-50%) translateY(-50%);"></div>',
+                    iconSize: [sz, sz],
+                    iconAnchor: [sz/2, sz/2]
+                }),
+                zIndexOffset: 200
+            });
+
+            marker.bindPopup(buildPopupHtml(site), { maxWidth: 300 });
+            marker.addTo(radarSitesLayer);
+        });
+
+        radarSitesLayer.addTo(map);
+        if (symbolsLayer)   symbolsLayer.bringToFront();
+        if (labelsLayer)    labelsLayer.bringToFront();
+        if (highlightLayer) highlightLayer.bringToFront();
+    }
+
+    function startRadarSitesPoll() {
+        setInterval(loadRadarSites, 10 * 60 * 1000);
     }
 
     // ── UTC clock ──────────────────────────────────────────────────────────

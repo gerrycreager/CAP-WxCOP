@@ -110,6 +110,15 @@ try:
 except Exception as e:
     print(f"⚠ Could not load GLM API: {e}")
 
+# Radar Status API - NEXRAD operational status from FTM products
+try:
+    from radar_status_api import radar_status_bp
+#    app.register_blueprint(radar_status_bp)
+    app.register_blueprint(radar_status_bp, url_prefix='/api/radar')
+    print("✓ Radar Status API registered at /CAP_WxCOP/api/radar/sites")
+except Exception as e:
+    print(f"⚠ Could not load Radar Status API: {e}")
+
 print("CAP Weather COP initialization complete.\n")
 
 # ============================================================================
