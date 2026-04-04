@@ -135,6 +135,13 @@ try:
 except Exception as e:
     print(f"⚠ Could not load AIRMET/SIGMET API: {e}")
 
+    try:
+        from radar_status_api import radar_status_bp
+        app.register_blueprint(radar_status_bp, url_prefix='/api/radar')
+        print('✓ radar_status_api registered')
+    except Exception as e:
+        print(f'⚠ radar_status_api failed: {e}')
+
 print("CAP Weather COP initialization complete.\n")
 
 # ============================================================================
