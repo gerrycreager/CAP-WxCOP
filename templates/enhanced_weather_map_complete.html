@@ -27,6 +27,7 @@
             background: white; padding: 15px; border-radius: 8px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.3);
             z-index: 1000; max-width: 285px;
+            max-height: calc(100vh - 74px); overflow-y: auto;
             transition: transform 0.25s ease, opacity 0.25s ease;
         }
         .controls.collapsed {
@@ -217,10 +218,47 @@
             border-radius: 4px; padding: 2px 5px; font-size: 11px; cursor: pointer;
         }
 
-        /* Colorbar */
-        #mrmsColorbar {
-            display: none; position: fixed; bottom: 100px; left: 10px; z-index: 1000;
+        /* ── Fixed bottom-left legend panel ─────────────────── */
+        #fixedLegend {
+            position: fixed;
+            bottom: 10px;
+            left: 10px;
+            z-index: 1000;
+            background: rgba(255,255,255,0.93);
+            border-radius: 6px;
+            padding: 7px 10px;
+            box-shadow: 0 1px 6px rgba(0,0,0,0.3);
+            font-size: 11px;
+            pointer-events: none;
+            transition: bottom 0.2s;
         }
+        body.radar-open #fixedLegend { bottom: 100px; }
+        #fixedLegend .leg-section-title {
+            font-size: 10px; font-weight: 700; color: #555;
+            text-transform: uppercase; letter-spacing: 0.04em;
+            margin-bottom: 3px; margin-top: 5px;
+        }
+        #fixedLegend .leg-section-title:first-child { margin-top: 0; }
+        #fixedLegend .leg-row {
+            display: flex; align-items: center; margin: 2px 0; gap: 5px;
+        }
+        #fixedLegend .leg-dot {
+            width: 11px; height: 11px; border-radius: 50%;
+            border: 1.5px solid #000; flex-shrink: 0;
+        }
+        #fixedLegend .leg-tag {
+            min-width: 30px; height: 13px; border-radius: 2px;
+            font-size: 8px; font-weight: 700;
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0;
+        }
+        #fixedLegend .leg-label { color: #333; white-space: nowrap; }
+
+        /* Colorbar — sits above the fixed legend */
+        #mrmsColorbar {
+            display: none; position: fixed; bottom: 215px; left: 10px; z-index: 1001;
+        }
+        body.radar-open #mrmsColorbar { bottom: 305px; }
         #mrmsColorbar .cb-panel {
             background: rgba(255,255,255,0.93); border-radius: 6px;
             padding: 5px 8px; box-shadow: 0 1px 6px rgba(0,0,0,0.3);
@@ -296,6 +334,22 @@
 
     <div id="loading">Loading weather data...</div>
 
+    <!-- ── Fixed bottom-left legend ─────────────────────────────────────── -->
+    <div id="fixedLegend">
+        <div class="leg-section-title">Flight Category</div>
+        <div class="leg-row"><div class="leg-dot" style="background:#00b300;border-color:#005500;"></div><span class="leg-label">VFR</span></div>
+        <div class="leg-row"><div class="leg-dot" style="background:#0099ff;border-color:#004488;"></div><span class="leg-label">MVFR</span></div>
+        <div class="leg-row"><div class="leg-dot" style="background:#cc0000;border-color:#660000;"></div><span class="leg-label">IFR</span></div>
+        <div class="leg-row"><div class="leg-dot" style="background:#ff00ff;border-color:#880088;"></div><span class="leg-label">LIFR</span></div>
+        <div class="leg-section-title">Airport Class</div>
+        <div class="leg-row"><div class="leg-tag" style="background:rgba(200,30,30,0.9);color:white;">MIL</div><span class="leg-label">Military</span></div>
+        <div class="leg-row"><div class="leg-tag" style="background:rgba(25,80,200,0.9);color:white;">HUB</div><span class="leg-label">Major Hub</span></div>
+        <div class="leg-row"><div class="leg-tag" style="background:rgba(180,180,180,0.9);color:#111;">RGNL</div><span class="leg-label">Regional &ge;7000 ft</span></div>
+        <div class="leg-row"><div class="leg-tag" style="background:rgba(150,200,150,0.9);color:#111;">LOCL</div><span class="leg-label">Local 5000&ndash;6999 ft</span></div>
+        <div class="leg-row"><div class="leg-tag" style="background:rgba(200,200,255,0.9);color:#333;">SML</div><span class="leg-label">Small 2500&ndash;4999 ft</span></div>
+        <div class="leg-row"><div style="width:11px;height:11px;border-radius:50%;border:1.5px solid #555;background:white;flex-shrink:0;"></div><span class="leg-label">Paved &gt;2500 ft (no METAR)</span></div>
+    </div>
+
     <button id="panelToggle" onclick="togglePanel()" title="Show controls">☰</button>
 
     <div class="controls" id="controlsPanel">
@@ -366,25 +420,6 @@
                 <span style="color:#ffcc00;">●</span> 5–15 min &nbsp;
                 <span style="color:#00cc44;">●</span> &gt;15 min
             </div>
-        </div>
-
-        <div class="divider"></div>
-        <h3>Flight Categories</h3>
-        <div class="legend-item"><div class="legend-dot" style="background:#00b300;"></div>VFR</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#0099ff;"></div>MVFR</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#cc0000;"></div>IFR</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#ff00ff;"></div>LIFR</div>
-
-        <div class="divider"></div>
-        <div class="legend-item"><div class="legend-tag" style="background:rgba(200,30,30,0.9);color:white;">MIL</div>Military</div>
-        <div class="legend-item"><div class="legend-tag" style="background:rgba(25,80,200,0.9);color:white;">HUB</div>Major Hub</div>
-        <div class="legend-item"><div class="legend-tag" style="background:rgba(180,180,180,0.9);color:#111;">RGNL</div>Regional (&ge;7000 ft, z6+)</div>
-        <div class="legend-item"><div class="legend-tag" style="background:rgba(150,200,150,0.9);color:#111;">LOCL</div>Local (5000&ndash;6999 ft, z8+)</div>
-        <div class="legend-item"><div class="legend-tag" style="background:rgba(200,200,255,0.9);color:#333;">SML</div>Small (2500&ndash;4999 ft, z10+)</div>
-        <div class="legend-item">
-            <div style="width:12px;height:12px;border-radius:50%;border:2px solid #555;
-                        background:white;flex-shrink:0;margin-right:8px;"></div>
-            Paved &gt;2500 ft (no METAR)
         </div>
 
         <div class="divider"></div>
@@ -564,7 +599,7 @@
         }
 
         function initMap() {
-            map = L.map('map', { center: [39.0, -98.0], zoom: 5, zoomControl: true });
+            map = L.map('map', { center: [38.0, -96.0], zoom: 4, zoomControl: true });
 
             baseLayers = {
                 'street':    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
@@ -958,7 +993,7 @@
                           }).join(', ')
                         : 'Clear';
                     var tafText  = (taf && taf.raw_text)
-                        ? '<hr><h4>TAF</h4><div style="background:#f5f5f5;padding:8px;border-radius:4px;font-size:12px;font-family:monospace;white-space:pre-wrap;line-height:1.6;">' + formatTAF(taf.raw_text) + '</div>'
+                        ? '<hr><h4>TAF</h4><div style="background:#f5f5f5;padding:8px;border-radius:4px;font-size:12px;font-family:monospace;white-space:pre-wrap;line-height:1.6;max-height:200px;overflow-y:auto;">' + formatTAF(taf.raw_text) + '</div>'
                         : '';
                     L.popup()
                         .setLatLng([metar.latitude, metar.longitude])
@@ -1388,7 +1423,8 @@
                 idx=Math.max(0,Math.min(mrmsFrames.length-1,idx));
                 mrmsIdx=idx;
                 var f         = mrmsFrames[idx];
-                var opacity   = document.getElementById('mrmsOpacity').value/100;
+                var _opVal = parseFloat(document.getElementById('mrmsOpacity').value);
+                var opacity = (isNaN(_opVal) || _opVal <= 0) ? 0.7 : _opVal / 100;
                 var prevLayer = mrmsLayer;
                 var nextLayer = ensureMrmsLayer(f);
 
@@ -1407,9 +1443,10 @@
                     if (prevLayer && prevLayer !== nextLayer && map.hasLayer(prevLayer)) {
                         map.removeLayer(prevLayer);
                     }
-                }, 600);
+                }, 2000);
 
                 mrmsLayer = nextLayer;
+                nextLayer.bringToFront();
                 if (typeof labelsLayer !== 'undefined') labelsLayer.bringToFront();
 
                 mrmsPreloadAdjacent(idx);
@@ -1492,7 +1529,12 @@
                         bar.classList.add('active');
                         document.body.classList.add('radar-open');
                         cb.style.display='block';
-                        fetchMrmsIndex();
+                        if(mrmsIndexData&&mrmsFrames.length){
+                            // Fast restore from cache
+                            mrmsGoTo(mrmsFrames.length-1);
+                        } else {
+                            fetchMrmsIndex();
+                        }
                         mrmsPollTimer=setInterval(fetchMrmsIndex,30000);
                     } else {
                         sub.style.display='none';
@@ -1500,8 +1542,10 @@
                         document.body.classList.remove('radar-open');
                         cb.style.display='none';
                         if(mrmsLayer&&map.hasLayer(mrmsLayer)) map.removeLayer(mrmsLayer);
+                        mrmsLayer=null;
                         mrmsStop();
                         if(mrmsPollTimer){clearInterval(mrmsPollTimer);mrmsPollTimer=null;}
+                        // Keep mrmsLayers cache and mrmsIndexData so re-enable is fast
                     }
                 });
 
@@ -1610,7 +1654,7 @@
             document.getElementById('glmMinutes').addEventListener('change', fetchGlmFlashes);
 
             // Refresh GLM on map move if active
-            map.on('moveend', function() {
+            if (map) map.on('moveend', function() {
                 if (document.getElementById('glmToggle').checked) {
                     fetchGlmFlashes();
                 }
