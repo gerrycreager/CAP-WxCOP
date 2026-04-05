@@ -81,18 +81,6 @@
         .legend-item { display: flex; align-items: center; margin: 3px 0; font-size: 11px; color: #444; }
         .leg-sym { flex-shrink: 0; margin-right: 7px; border-radius: 50%; border: 1.5px solid rgba(0,0,0,0.45); }
 
-        /* NEXRAD status overlay */
-        .radar-site-popup { font-family: 'Courier New', monospace; font-size: 12px; min-width: 220px; }
-        .radar-site-popup .rsp-header { font-size: 14px; font-weight: 700; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }
-        .radar-site-popup .rsp-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; border: 1.5px solid rgba(0,0,0,0.3); }
-        .radar-site-popup .rsp-row { margin: 2px 0; }
-        .radar-site-popup .rsp-label { color: #666; }
-        .radar-site-popup .rsp-msg { margin-top: 6px; padding: 4px 6px; background: #f5f5f5; border-radius: 3px; font-size: 11px; color: #444; white-space: pre-wrap; max-height: 80px; overflow-y: auto; }
-        .radar-site-popup .rsp-status-green  { color: #1a7f1a; font-weight: 700; }
-        .radar-site-popup .rsp-status-yellow { color: #a06000; font-weight: 700; }
-        .radar-site-popup .rsp-status-red    { color: #c00000; font-weight: 700; }
-        .radar-site-popup .rsp-status-gray   { color: #666;    font-weight: 700; }
-
         #colorbarWrap { position: absolute; bottom: 120px; left: 10px; z-index: 1000; display: none; }
         .colorbar-panel { background: rgba(255,255,255,0.93); border-radius: 6px; padding: 6px 8px; box-shadow: 0 1px 6px rgba(0,0,0,0.3); font-size: 10px; font-family: 'Courier New', monospace; }
         .colorbar-title { font-weight: 700; font-size: 11px; margin-bottom: 4px; color: #222; }
@@ -129,7 +117,7 @@
 <body>
     <div id="titleBar">
         <a href="/" class="tb-home" title="Home">&#127968;</a>
-        <span class="tb-title">MRMS Radar</span>
+        <span class="tb-title">NEXRAD Radar — Iowa Environmental Mesonet</span>
         <span class="tb-utc" id="tbUtc"></span>
     </div>
 
@@ -154,10 +142,11 @@
         <div class="divider"></div>
         <div class="ctrl-section">Radar Product</div>
         <div class="radar-btns">
-            <div class="radar-btn active"    data-product="composite" title="Composite Reflectivity">Refl</div>
-            <div class="radar-btn disabled"  data-product="mesh"      title="MESH Hail Size">MESH</div>
-            <div class="radar-btn disabled"  data-product="lightning" title="Lightning Probability 60min">Ltng</div>
-            <div class="radar-btn disabled"  data-product="azshear"   title="Azimuthal Shear 0-2km AGL">AzShr</div>
+            <div class="radar-btn active"    data-product="n0q"  title="Base Reflectivity (N0Q)">N0Q</div>
+            <div class="radar-btn"           data-product="n0r"  title="Base Reflectivity (N0R — legacy)">N0R</div>
+        </div>
+        <div style="font-size:10px;color:#888;margin-top:3px;">
+            NEXRAD via IEM (~5 min latency)
         </div>
 
         <div class="divider"></div>
@@ -180,67 +169,35 @@
         <div id="aptSearchMsg"></div>
 
         <div class="divider"></div>
-        <div class="ctrl-section">NEXRAD Status</div>
-        <label class="checkbox-label">
-            <input type="checkbox" id="radarSiteToggle" checked> Show radar sites
-        </label>
-
-        <div class="divider"></div>
         <div class="ctrl-section">Legend</div>
         <div class="legend-item"><div class="leg-sym" style="width:12px;height:12px;background:rgba(200,30,30,0.9);"></div>Military sym z2+, lbl z5+</div>
         <div class="legend-item"><div class="leg-sym" style="width:10px;height:10px;background:rgba(25,80,200,0.9);"></div>Major Hub sym z4+, lbl z6+</div>
         <div class="legend-item"><div class="leg-sym" style="width:8px;height:8px;background:rgba(80,80,80,0.85);"></div>Regional sym z6+, lbl z7+</div>
         <div class="legend-item"><div class="leg-sym" style="width:7px;height:7px;background:rgba(255,255,255,0.9);border-color:#666;"></div>Paved &gt;2500ft sym z7+</div>
-        <div class="legend-item"><div class="leg-sym" style="width:10px;height:10px;background:#1a7f1a;"></div>WSR-88D Operational</div>
-        <div class="legend-item"><div class="leg-sym" style="width:10px;height:10px;background:#e6a800;"></div>WSR-88D Maint/Test</div>
-        <div class="legend-item"><div class="leg-sym" style="width:10px;height:10px;background:#c00000;"></div>WSR-88D Failed</div>
-        <div class="legend-item"><div class="leg-sym" style="width:10px;height:10px;background:#888888;"></div>WSR-88D No data/Stale</div>
         </div><!-- end controls-body -->
     </div>
 
     <div id="colorbarWrap">
         <div class="colorbar-panel">
-            <div class="colorbar-title" id="colorbarTitle">Composite Reflectivity (dBZ)</div>
+            <div class="colorbar-title" id="colorbarTitle">Base Reflectivity (dBZ) — NEXRAD N0Q</div>
             <canvas class="colorbar-strip" id="colorbarCanvas" width="200" height="14"></canvas>
             <div class="colorbar-labels" id="colorbarLabels"></div>
         </div>
     </div>
 
     <div id="playerBar">
-        <div id="timeline">
-            <div id="timelineTrack"><div id="timelineFill"></div></div>
-            <div id="timelineThumb"></div>
-            <div id="timelineLabel"></div>
-        </div>
-        <div id="playerControls">
-            <button class="pb-btn" id="btnFirst" title="First frame">&#9198;</button>
-            <button class="pb-btn" id="btnPrev"  title="Previous frame">&#9664;</button>
-            <button class="pb-btn" id="btnPlay"  title="Play/Pause">&#9654;</button>
-            <button class="pb-btn" id="btnNext"  title="Next frame">&#9654;&#x7C;</button>
-            <button class="pb-btn" id="btnLast"  title="Latest frame">&#9197;</button>
-            <div id="frameDisplay">— / —</div>
-            <div id="validTimeDisplay">No data</div>
-            <span class="speed-label">Speed:</span>
-            <select id="speedSelect">
-                <option value="800">Slow</option>
-                <option value="500" selected>Normal</option>
-                <option value="250">Fast</option>
-                <option value="100">Fastest</option>
-            </select>
-            <span class="speed-label">Range:</span>
-            <select id="rangeSelect">
-                <option value="15">15 min</option>
-                <option value="30">30 min</option>
-                <option value="60" selected>1 hr</option>
-                <option value="120">All</option>
-            </select>
-            <span class="speed-label">Loop:</span>
-            <select id="loopSelect">
-                <option value="loop">Loop</option>
-                <option value="rock">Rock</option>
-            </select>
-            <span id="pollStatus"></span>
-            <span id="statusMsg"></span>
+        <div id="playerControls" style="justify-content:space-between;align-items:center;height:100%;padding:0 8px;">
+            <div style="display:flex;align-items:center;gap:16px;">
+                <div id="frameDisplay" style="font-family:monospace;font-size:14px;color:#4a9c6f;font-weight:700;">LIVE</div>
+                <div id="validTimeDisplay" style="font-family:monospace;font-size:12px;color:#8bc4a8;">
+                    NEXRAD Base Reflectivity — Iowa Environmental Mesonet
+                </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px;">
+                <span id="pollStatus" style="font-size:11px;color:#666;"></span>
+                <button class="pb-btn" id="btnRefresh" title="Refresh radar now"
+                    onclick="showIemRadar()" style="font-size:14px;">&#8635; Refresh</button>
+            </div>
         </div>
     </div>
 
@@ -345,13 +302,66 @@
     var map, symbolsLayer, labelsLayer, highlightLayer, baseLayers = {};
     var currentLayerName = 'street';
     var airports = [];
-    var radarLayer = null, radarLayers = {}, indexData = {};
-    var frames = [], currentFrame = -1, currentProduct = 'composite';
-    var playing = false, rockDir = 1, playTimer = null;
+    var radarLayer = null;
+    var currentProduct = 'n0q';
     var pollTimer = null, dragging = false;
     var lastPollTime = null;
-    var radarSitesLayer = null;
-    var radarSitesData  = [];
+
+    // ── IEM WMS config ────────────────────────────────────────────────────────
+    var IEM_WMS_URL = 'https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0q.cgi';
+    var IEM_LAYERS = {
+        'n0q': 'nexrad-n0q-900913-conus',
+        'n0r': 'nexrad-n0q-900913-conus',
+    };
+    var OCONUS_BOXES = [
+        { name: 'ak', latMin: 50.0, latMax: 72.0,  lonMin: -180.0, lonMax: -129.0 },
+        { name: 'hi', latMin: 17.0, latMax: 23.5,  lonMin: -161.0, lonMax: -154.0 },
+        { name: 'gu', latMin:  9.0, latMax: 22.0,  lonMin:  139.0, lonMax:  148.0 },
+        { name: 'pr', latMin: 16.0, latMax: 19.5,  lonMin:  -68.0, lonMax:  -64.0 },
+    ];
+    // Full layer names for OCONUS reference:
+    // nexrad-n0q-900913-ak, nexrad-n0q-900913-hi, nexrad-n0q-900913-pr, nexrad-n0q-900913-gu
+
+    function getIemLayer() {
+        if (!map) return IEM_LAYERS[currentProduct] || IEM_LAYERS['n0q'];
+        var c   = map.getCenter();
+        var lat = c.lat;
+        var lon = ((c.lng + 180) % 360 + 360) % 360 - 180;
+        for (var i = 0; i < OCONUS_BOXES.length; i++) {
+            var s = OCONUS_BOXES[i];
+            if (lat >= s.latMin && lat <= s.latMax &&
+                lon >= s.lonMin && lon <= s.lonMax) {
+                return 'nexrad-n0q-900913-' + s.name;
+            }
+        }
+        return IEM_LAYERS[currentProduct] || IEM_LAYERS['n0q'];
+    }
+
+    function showIemRadar() {
+        var layerName = getIemLayer();
+        var opacity   = document.getElementById('opacitySlider').value / 100;
+        if (radarLayer && map.hasLayer(radarLayer)) map.removeLayer(radarLayer);
+        radarLayer = L.tileLayer.wms(IEM_WMS_URL, {
+            layers:      layerName,
+            format:      'image/png',
+            transparent: true,
+            opacity:     opacity,
+            attribution: 'NEXRAD &copy; <a href="https://mesonet.agron.iastate.edu/">IEM</a>',
+            zIndex:      400,
+            version:     '1.1.1',
+        });
+        radarLayer.addTo(map);
+        symbolsLayer.bringToFront();
+        labelsLayer.bringToFront();
+        highlightLayer.bringToFront();
+        document.getElementById('validTimeDisplay').textContent =
+            'NEXRAD via IEM (~5 min latency)';
+        document.getElementById('frameDisplay').textContent = 'LIVE';
+        lastPollTime = new Date();
+        document.getElementById('pollStatus').textContent =
+            'Updated ' + lastPollTime.getUTCHours().toString().padStart(2,'0') + ':' +
+            lastPollTime.getUTCMinutes().toString().padStart(2,'0') + 'Z';
+    }
 
     // ── Map init ───────────────────────────────────────────────────────────
     function initMap() {
@@ -359,7 +369,7 @@
             center: [39.0, -98.0], zoom: 5,
             zoomControl: true,
             minZoom: 3,
-            maxZoom: 8     // Phase 1 limit; z8 = ~10km/tile for 1km MRMS data
+            maxZoom: 18    // base map limit; MRMS tiles upscale via maxNativeZoom
         });
 
         baseLayers = {
@@ -379,28 +389,16 @@
 
         setupControls();
         loadAirports();
-        fetchIndex(currentProduct);
-        fetchIndex('mesh');
-        fetchIndex('azshear');
-        loadRadarSites();
-        startRadarSitesPoll();
+        showIemRadar();
 
-        map.on('zoomend moveend', updateAirports);
+        map.on('zoomend moveend', function() {
+            updateAirports();
+            // Switch OCONUS sector when panning
+            showIemRadar();
+        });
 
-        // Poll every 4 minutes for new frames
-        pollTimer = setInterval(pollAllProducts, 4 * 60 * 1000);
-    }
-
-    // ── Poll all active products ────────────────────────────────────────────
-    function pollAllProducts() {
-        lastPollTime = new Date();
-        document.getElementById('pollStatus').textContent =
-            'Updated ' + lastPollTime.getUTCHours().toString().padStart(2,'0') + ':' +
-            lastPollTime.getUTCMinutes().toString().padStart(2,'0') + 'Z';
-        // Fetch index for all products that have data (not just current)
-        Object.keys(indexData).forEach(function(p) { fetchIndex(p); });
-        // Also fetch current product even if not yet in indexData
-        if (!indexData[currentProduct]) fetchIndex(currentProduct);
+        // Refresh IEM tiles every 5 minutes
+        pollTimer = setInterval(showIemRadar, 5 * 60 * 1000);
     }
 
     // ── Controls ───────────────────────────────────────────────────────────
@@ -418,10 +416,11 @@
 
         document.querySelectorAll('.radar-btn').forEach(function(btn) {
             btn.addEventListener('click', function() {
-                if (this.classList.contains('disabled')) return;
                 document.querySelectorAll('.radar-btn').forEach(function(b){ b.classList.remove('active'); });
                 this.classList.add('active');
-                switchProduct(this.dataset.product);
+                currentProduct = this.dataset.product;
+                drawColorbar('composite');  // N0Q uses composite colormap
+                showIemRadar();
             });
         });
 
@@ -434,7 +433,6 @@
             labelsLayer.clearLayers();
             if (this.checked && document.getElementById('symbolToggle').checked) updateAirports();
         });
-        document.getElementById('radarSiteToggle').addEventListener('change', renderRadarSites);
 
         // Airport search
         document.getElementById('aptSearchInput').addEventListener('keydown', function(e) {
@@ -443,42 +441,11 @@
         document.getElementById('aptSearchBtn').addEventListener('click', searchAirport);
         document.getElementById('aptClearBtn').addEventListener('click', clearHighlight);
 
-        document.getElementById('btnPlay').addEventListener('click', togglePlay);
-        document.getElementById('btnFirst').addEventListener('click', function(){ goToFrame(0); });
-        document.getElementById('btnLast').addEventListener('click',  function(){ goToFrame(frames.length-1); });
-        document.getElementById('btnPrev').addEventListener('click', function(){ stopPlay(); goToFrame(Math.max(0, currentFrame-1)); });
-        document.getElementById('btnNext').addEventListener('click', function(){ stopPlay(); goToFrame(Math.min(frames.length-1, currentFrame+1)); });
+        // Frame nav buttons removed — IEM WMS is live
 
-        document.getElementById('speedSelect').addEventListener('change', function() { if (playing) { stopPlay(); startPlay(); } });
-        document.getElementById('rangeSelect').addEventListener('change', rebuildFrameList);
-        document.getElementById('loopSelect').addEventListener('change', function() { rockDir = 1; });
-
-        var tl = document.getElementById('timeline');
-        tl.addEventListener('mousedown', function(e){ dragging=true; stopPlay(); scrubToMouse(e); });
-        document.addEventListener('mousemove', function(e){ if (!dragging) return; scrubToMouse(e); showTimelineLabel(e); });
-        document.addEventListener('mouseup', function(){ dragging=false; hideTimelineLabel(); });
-        tl.addEventListener('touchstart', function(e){ dragging=true; stopPlay(); scrubToMouse(e.touches[0]); }, {passive:true});
-        document.addEventListener('touchmove', function(e){ if (!dragging) return; scrubToMouse(e.touches[0]); }, {passive:true});
-        document.addEventListener('touchend', function(){ dragging=false; });
+        // Timeline scrub removed — IEM WMS is live, no frame scrubbing
     }
 
-    function scrubToMouse(e) {
-        if (!frames.length) return;
-        var rect = document.getElementById('timeline').getBoundingClientRect();
-        var pct  = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-        goToFrame(Math.round(pct * (frames.length - 1)));
-    }
-    function showTimelineLabel(e) {
-        if (!frames.length) return;
-        var rect = document.getElementById('timeline').getBoundingClientRect();
-        var pct  = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-        var idx  = Math.round(pct * (frames.length - 1));
-        var lbl  = document.getElementById('timelineLabel');
-        lbl.textContent = frames[idx] ? fmtTime(frames[idx].valid_time) : '';
-        lbl.style.left  = (pct * 100) + '%';
-        lbl.style.display = 'block';
-    }
-    function hideTimelineLabel() { document.getElementById('timelineLabel').style.display = 'none'; }
 
     // ── Airport search / highlight ─────────────────────────────────────────
     function searchAirport() {
@@ -581,174 +548,8 @@
         highlightLayer.bringToFront();
     }
 
-    // ── Radar product switching ────────────────────────────────────────────
-    function switchProduct(product) {
-        currentProduct = product;
-        drawColorbar(product);
-        document.getElementById('colorbarWrap').style.display = 'block';
-        if (indexData[product]) rebuildFrameList();
-        else fetchIndex(product);
-    }
-
-    // ── Index fetch ────────────────────────────────────────────────────────
-    function fetchIndex(product) {
-        var url = '/CAP_WxCOP/static/mrms_tiles/'+product+'/CONUS/index.json?_='+Date.now();
-        fetch(url)
-            .then(function(r){ if (!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
-            .then(function(data) {
-                var wasEmpty = !indexData[product] || !indexData[product].frames.length;
-                indexData[product] = data;
-                document.querySelectorAll('.radar-btn').forEach(function(btn){
-                    if (btn.dataset.product === product) btn.classList.remove('disabled');
-                });
-                if (product === currentProduct) rebuildFrameList(wasEmpty);
-            })
-            .catch(function(err) {
-                if (product === currentProduct) setStatus('No '+product+' data');
-                console.warn('fetchIndex '+product+':', err);
-            });
-    }
-
-    function rebuildFrameList(jumpToLatest) {
-        var data = indexData[currentProduct];
-        if (!data || !data.frames.length) { frames=[]; updatePlayer(); return; }
-
-        var rangeMin = parseInt(document.getElementById('rangeSelect').value, 10);
-        var cutoff   = new Date(Date.now() - rangeMin*60000).toISOString();
-
-        // "All" option (120) shows everything in index regardless of age
-        if (rangeMin >= 120) {
-            frames = data.frames.slice();
-        } else {
-            frames = data.frames.filter(function(f){ return f.valid_time >= cutoff; });
-        }
-        frames.sort(function(a,b){ return a.timestamp < b.timestamp ? -1 : 1; });
-
-        buildTimeline();
-
-        var newIdx = frames.length-1;
-        if (!jumpToLatest && currentFrame >= 0 && currentFrame < frames.length) newIdx = currentFrame;
-        goToFrame(newIdx);
-    }
-
-    // ── Timeline ───────────────────────────────────────────────────────────
-    function buildTimeline() {
-        var track = document.getElementById('timelineTrack');
-        Array.from(track.querySelectorAll('.frame-tick')).forEach(function(t){ t.remove(); });
-        if (!frames.length) return;
-        frames.forEach(function(f, i) {
-            var tick = document.createElement('div');
-            tick.className = 'frame-tick';
-            tick.style.left = (i / Math.max(frames.length-1, 1) * 100) + '%';
-            track.appendChild(tick);
-        });
-    }
-
-    // ── Crossfade frame swap with preload ──────────────────────────────────
-    function ensureLayer(f) {
-        if (!radarLayers[f.tile_url]) {
-            radarLayers[f.tile_url] = L.tileLayer(f.tile_url, {
-                opacity: 0,
-                maxZoom: indexData[currentProduct].zoom_max,
-                minZoom: indexData[currentProduct].zoom_min,
-                errorTileUrl: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
-            });
-        }
-        return radarLayers[f.tile_url];
-    }
-
-    function preloadAdjacent(idx) {
-        [-1, 1, 2].forEach(function(offset) {
-            var ni = idx + offset;
-            if (ni < 0 || ni >= frames.length) return;
-            var layer = ensureLayer(frames[ni]);
-            if (!map.hasLayer(layer)) {
-                layer.setOpacity(0);
-                layer.addTo(map);
-                if (radarLayer) radarLayer.bringToFront();
-            }
-        });
-    }
-
-    function goToFrame(idx) {
-        if (!frames.length) return;
-        idx = Math.max(0, Math.min(frames.length-1, idx));
-        currentFrame = idx;
-
-        var f         = frames[idx];
-        var opacity   = document.getElementById('opacitySlider').value / 100;
-        var prevLayer = radarLayer;
-        var nextLayer = ensureLayer(f);
-
-        nextLayer.setOpacity(opacity);
-        if (!map.hasLayer(nextLayer)) nextLayer.addTo(map);
-
-        function onLoad() {
-            nextLayer.off('load', onLoad);
-            if (prevLayer && prevLayer !== nextLayer && map.hasLayer(prevLayer)) map.removeLayer(prevLayer);
-        }
-        nextLayer.on('load', onLoad);
-        setTimeout(function() {
-            nextLayer.off('load', onLoad);
-            if (prevLayer && prevLayer !== nextLayer && map.hasLayer(prevLayer)) map.removeLayer(prevLayer);
-        }, 600);
-
-        radarLayer = nextLayer;
-        symbolsLayer.bringToFront();
-        labelsLayer.bringToFront();
-        highlightLayer.bringToFront();
-
-        preloadAdjacent(idx);
-        updatePlayer();
-    }
-
-    function updatePlayer() {
-        var pct = frames.length > 1 ? (currentFrame / (frames.length-1) * 100) : 0;
-        document.getElementById('timelineFill').style.width = pct + '%';
-        document.getElementById('timelineThumb').style.left = pct + '%';
-        document.getElementById('frameDisplay').textContent =
-            frames.length ? (currentFrame+1)+' / '+frames.length : '— / —';
-        document.getElementById('validTimeDisplay').textContent =
-            frames.length ? fmtTime(frames[currentFrame].valid_time) : 'No data';
-        document.getElementById('btnFirst').disabled = currentFrame === 0;
-        document.getElementById('btnPrev').disabled  = currentFrame === 0;
-        document.getElementById('btnNext').disabled  = currentFrame === frames.length-1;
-        document.getElementById('btnLast').disabled  = currentFrame === frames.length-1;
-    }
-
-    // ── Playback ───────────────────────────────────────────────────────────
-    function togglePlay() { if (playing) stopPlay(); else startPlay(); }
-    function startPlay() {
-        if (!frames.length) return;
-        playing = true;
-        document.getElementById('btnPlay').textContent = '⏸';
-        rockDir = 1; scheduleNext();
-    }
-    function stopPlay() {
-        playing = false;
-        document.getElementById('btnPlay').textContent = '▶';
-        if (playTimer) { clearTimeout(playTimer); playTimer = null; }
-    }
-    function scheduleNext() {
-        if (!playing) return;
-        var ms = parseInt(document.getElementById('speedSelect').value, 10);
-        var isEdge = (rockDir>0 && currentFrame===frames.length-1) ||
-                     (rockDir<0 && currentFrame===0);
-        playTimer = setTimeout(advanceFrame, isEdge ? ms*2 : ms);
-    }
-    function advanceFrame() {
-        if (!playing || !frames.length) return;
-        var mode = document.getElementById('loopSelect').value;
-        if (mode === 'rock') {
-            var next = currentFrame + rockDir;
-            if (next >= frames.length) { rockDir=-1; next=frames.length-2; }
-            else if (next < 0)         { rockDir=1;  next=1; }
-            goToFrame(Math.max(0, Math.min(frames.length-1, next)));
-        } else {
-            goToFrame((currentFrame+1) % frames.length);
-        }
-        scheduleNext();
-    }
+    // ── Radar refresh button ──────────────────────────────────────────────
+    function manualRefresh() { showIemRadar(); }
 
     // ── Utilities ──────────────────────────────────────────────────────────
     function fmtTime(iso) {
@@ -763,87 +564,6 @@
     function setStatus(msg) {
         document.getElementById('statusMsg').textContent = msg;
         setTimeout(function(){ document.getElementById('statusMsg').textContent=''; }, 4000);
-    }
-
-    // ── NEXRAD status overlay ──────────────────────────────────────────────
-    var SITE_COLORS = {
-        green:  { fill: '#1a7f1a', border: '#0d3d0d' },
-        yellow: { fill: '#e6a800', border: '#7a5800' },
-        red:    { fill: '#c00000', border: '#600000' },
-        gray:   { fill: '#888888', border: '#444444' },
-    };
-
-    function buildPopupHtml(site) {
-        var c   = site.color || 'gray';
-        var col = SITE_COLORS[c] || SITE_COLORS.gray;
-        var vcp = site.vcp_mode
-                ? ('VCP ' + site.vcp_mode + (site.vcp_description ? ' — ' + site.vcp_description : ''))
-                : '—';
-        var msg = site.message
-                ? '<div class="rsp-msg">' + (site.message + '').replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</div>'
-                : '';
-        return '<div class="radar-site-popup">' +
-            '<div class="rsp-header">' +
-                '<div class="rsp-dot" style="background:' + col.fill + ';border-color:' + col.border + ';"></div>' +
-                '<span>' + site.site_id + ' — ' + (site.name || '') + (site.state ? ', ' + site.state : '') + '</span>' +
-            '</div>' +
-            '<div class="rsp-row"><span class="rsp-label">Status: </span>' +
-                '<span class="rsp-status-' + c + '">' + (site.status || 'UNKNOWN') + '</span>' +
-            '</div>' +
-            '<div class="rsp-row"><span class="rsp-label">VCP: </span>' + vcp + '</div>' +
-            '<div class="rsp-row"><span class="rsp-label">Updated: </span>' + (site.age_str || '—') + '</div>' +
-            msg +
-        '</div>';
-    }
-
-    function loadRadarSites() {
-        fetch('api/radar/sites')
-            .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
-            .then(function(data) {
-                radarSitesData = data.sites || [];
-                renderRadarSites();
-            })
-            .catch(function(e) { console.warn('Radar sites load failed:', e); });
-    }
-
-    function renderRadarSites() {
-        if (radarSitesLayer) { map.removeLayer(radarSitesLayer); radarSitesLayer = null; }
-        if (!document.getElementById('radarSiteToggle').checked) return;
-
-        radarSitesLayer = L.featureGroup();
-        var sz = 9;
-
-        radarSitesData.forEach(function(site) {
-            var c   = site.color || 'gray';
-            var col = SITE_COLORS[c] || SITE_COLORS.gray;
-
-            var marker = L.marker([site.lat, site.lon], {
-                icon: L.divIcon({
-                    className: '',
-                    html: '<div style="width:' + sz + 'px;height:' + sz + 'px;' +
-                          'background:' + col.fill + ';' +
-                          'border:1.5px solid ' + col.border + ';' +
-                          'border-radius:50%;' +
-                          'box-shadow:0 1px 3px rgba(0,0,0,0.5);' +
-                          'transform:translateX(-50%) translateY(-50%);"></div>',
-                    iconSize: [sz, sz],
-                    iconAnchor: [sz/2, sz/2]
-                }),
-                zIndexOffset: 200
-            });
-
-            marker.bindPopup(buildPopupHtml(site), { maxWidth: 300 });
-            marker.addTo(radarSitesLayer);
-        });
-
-        radarSitesLayer.addTo(map);
-        if (symbolsLayer)   symbolsLayer.bringToFront();
-        if (labelsLayer)    labelsLayer.bringToFront();
-        if (highlightLayer) highlightLayer.bringToFront();
-    }
-
-    function startRadarSitesPoll() {
-        setInterval(loadRadarSites, 10 * 60 * 1000);
     }
 
     // ── UTC clock ──────────────────────────────────────────────────────────
@@ -865,6 +585,7 @@
         initMap();
         drawColorbar('composite');
         document.getElementById('colorbarWrap').style.display = 'block';
+        // Controls: remove timeline scrub listeners (no longer needed)
     });
     window.addEventListener('error', function(e) {
         if (e.message && e.message.includes('message channel closed')) return true;
@@ -881,4 +602,3 @@
     </script>
 </body>
 </html>
-
