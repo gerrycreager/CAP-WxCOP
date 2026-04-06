@@ -142,6 +142,15 @@ except Exception as e:
     except Exception as e:
         print(f'⚠ radar_status_api failed: {e}')
 
+
+# MRMS WMS proxy — MapServer tile loop for radar map
+try:
+    from mrms_wms_api import mrms_wms_bp
+    app.register_blueprint(mrms_wms_bp)
+    print('✓ MRMS WMS API registered at /CAP_WxCOP/api/mrms')
+except Exception as e:
+    print(f'⚠ Could not load MRMS WMS API: {e}')
+
 print("CAP Weather COP initialization complete.\n")
 
 # ============================================================================
