@@ -105,13 +105,36 @@
         .pb-btn { background: none; border: none; color: white; font-size: 20px; cursor: pointer; padding: 2px 6px; border-radius: 4px; transition: background 0.15s; line-height: 1; }
         .pb-btn:hover { background: rgba(255,255,255,0.15); }
         .pb-btn:disabled { opacity: 0.35; cursor: not-allowed; }
-        #frameDisplay { font-family: 'Courier New', monospace; font-size: 13px; color: #ccc; min-width: 60px; }
-        #validTimeDisplay { font-family: 'Courier New', monospace; font-size: 12px; color: #8bc4a8; flex: 1; }
-        #pollStatus { font-size: 10px; color: #666; white-space: nowrap; }
         .speed-label { font-size: 11px; color: #aaa; white-space: nowrap; }
         #speedSelect, #rangeSelect, #loopSelect { background: #2a2a3e; color: white; border: 1px solid #555; border-radius: 4px; padding: 3px 6px; font-size: 12px; cursor: pointer; }
         #statusMsg { font-size: 11px; color: #f0a500; white-space: nowrap; }
         #loading { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); background: white; padding: 20px 40px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); z-index: 2000; font-size: 18px; }
+
+        /* Lower-left legend */
+        #mapLegend { position: fixed; bottom: 118px; left: 10px; z-index: 1000;
+            background: rgba(255,255,255,0.93); border-radius: 6px;
+            padding: 7px 10px; box-shadow: 0 1px 6px rgba(0,0,0,0.3); font-size:11px; min-width:155px; }
+        #mapLegend .leg-title { font-weight:700; font-size:11px; color:#333; margin-bottom:3px; }
+        #mapLegend .legend-item { display:flex; align-items:center; margin:2px 0; font-size:11px; color:#444; }
+        #mapLegend .leg-sym { flex-shrink:0; margin-right:6px; border-radius:50%; border:1.5px solid rgba(0,0,0,0.4); }
+
+        /* Loop player bar */
+        #playerBar { position:fixed; bottom:0; left:0; right:0; height:110px;
+            background:#1a1a2e; color:white; z-index:1100;
+            display:flex; flex-direction:column; padding:6px 16px 8px;
+            box-shadow:0 -2px 10px rgba(0,0,0,0.5); }
+        #iem-timeline { position:relative; height:30px; margin-bottom:4px; cursor:pointer; user-select:none; }
+        #iem-track { position:absolute; top:50%; left:0; right:0; transform:translateY(-50%);
+            height:4px; background:#444; border-radius:2px; }
+        #iem-fill  { height:100%; background:#4a9c6f; border-radius:2px; width:100%; }
+        #iem-thumb { position:absolute; top:50%; width:14px; height:14px; background:white;
+            border-radius:50%; transform:translate(-50%,-50%);
+            box-shadow:0 0 4px rgba(0,0,0,0.6); pointer-events:none; left:100%; }
+        #iem-controls { display:flex; align-items:center; gap:8px; }
+        .iem-btn { background:none; border:none; color:white; font-size:20px;
+            cursor:pointer; padding:2px 5px; border-radius:4px; line-height:1; }
+        .iem-btn:hover { background:rgba(255,255,255,0.15); }
+        .iem-btn:disabled { opacity:0.35; cursor:not-allowed; }
     </style>
 </head>
 <body>
@@ -141,12 +164,18 @@
 
         <div class="divider"></div>
         <div class="ctrl-section">Radar Product</div>
+        <div style="font-size:10px;color:#888;margin-bottom:3px;">NEXRAD via IEM — loop</div>
         <div class="radar-btns">
-            <div class="radar-btn active"    data-product="n0q"  title="Base Reflectivity (N0Q)">N0Q</div>
-            <div class="radar-btn"           data-product="n0r"  title="Base Reflectivity (N0R — legacy)">N0R</div>
+            <div class="radar-btn active" data-product="n0q" data-source="iem" title="Base Reflectivity dual-pol (N0Q)">N0Q</div>
+            <div class="radar-btn"        data-product="n0r" data-source="iem" title="Base Reflectivity legacy (N0R)">N0R</div>
+            <div class="radar-btn"        data-product="n0s" data-source="iem" title="Storm-Relative Velocity (N0S)">N0S</div>
+            <div class="radar-btn"        data-product="n0u" data-source="iem" title="Base Velocity (N0U)">N0U</div>
         </div>
-        <div style="font-size:10px;color:#888;margin-top:3px;">
-            NEXRAD via IEM (~5 min latency)
+        <div style="font-size:10px;color:#888;margin-top:6px;margin-bottom:3px;">Local MRMS — loop</div>
+        <div class="radar-btns">
+            <div class="radar-btn" data-product="composite"   data-source="mrms" title="MRMS Composite Reflectivity">CMP</div>
+            <div class="radar-btn" data-product="azshear_low" data-source="mrms" title="AzShear 0-2km AGL">AZS</div>
+            <div class="radar-btn" data-product="mesh"        data-source="mrms" title="MESH Instantaneous Hail">MESH</div>
         </div>
 
         <div class="divider"></div>
@@ -168,13 +197,16 @@
         </div>
         <div id="aptSearchMsg"></div>
 
-        <div class="divider"></div>
-        <div class="ctrl-section">Legend</div>
-        <div class="legend-item"><div class="leg-sym" style="width:12px;height:12px;background:rgba(200,30,30,0.9);"></div>Military sym z2+, lbl z5+</div>
-        <div class="legend-item"><div class="leg-sym" style="width:10px;height:10px;background:rgba(25,80,200,0.9);"></div>Major Hub sym z4+, lbl z6+</div>
-        <div class="legend-item"><div class="leg-sym" style="width:8px;height:8px;background:rgba(80,80,80,0.85);"></div>Regional sym z6+, lbl z7+</div>
-        <div class="legend-item"><div class="leg-sym" style="width:7px;height:7px;background:rgba(255,255,255,0.9);border-color:#666;"></div>Paved &gt;2500ft sym z7+</div>
         </div><!-- end controls-body -->
+    </div>
+
+    <!-- Lower-left legend -->
+    <div id="mapLegend">
+        <div class="leg-title">Airfields</div>
+        <div class="legend-item"><div class="leg-sym" style="width:12px;height:12px;background:rgba(200,30,30,0.9);"></div>Military</div>
+        <div class="legend-item"><div class="leg-sym" style="width:10px;height:10px;background:rgba(25,80,200,0.9);"></div>Major Hub</div>
+        <div class="legend-item"><div class="leg-sym" style="width:8px;height:8px;background:rgba(80,80,80,0.85);"></div>Regional</div>
+        <div class="legend-item"><div class="leg-sym" style="width:7px;height:7px;background:rgba(255,255,255,0.9);border-color:#666;"></div>Paved &gt;2500ft</div>
     </div>
 
     <div id="colorbarWrap">
@@ -185,19 +217,39 @@
         </div>
     </div>
 
+    <!-- Unified loop player bar — IEM and MRMS -->
     <div id="playerBar">
-        <div id="playerControls" style="justify-content:space-between;align-items:center;height:100%;padding:0 8px;">
-            <div style="display:flex;align-items:center;gap:16px;">
-                <div id="frameDisplay" style="font-family:monospace;font-size:14px;color:#4a9c6f;font-weight:700;">LIVE</div>
-                <div id="validTimeDisplay" style="font-family:monospace;font-size:12px;color:#8bc4a8;">
-                    NEXRAD Base Reflectivity — Iowa Environmental Mesonet
-                </div>
-            </div>
-            <div style="display:flex;align-items:center;gap:12px;">
-                <span id="pollStatus" style="font-size:11px;color:#666;"></span>
-                <button class="pb-btn" id="btnRefresh" title="Refresh radar now"
-                    onclick="showIemRadar()" style="font-size:14px;">&#8635; Refresh</button>
-            </div>
+        <div id="iem-timeline">
+            <div id="iem-track"><div id="iem-fill"></div></div>
+            <div id="iem-thumb" style="left:100%;"></div>
+        </div>
+        <div id="iem-controls">
+            <button class="iem-btn" id="iem-first"  title="Oldest">&#9198;</button>
+            <button class="iem-btn" id="iem-prev"   title="Step back">&#9664;</button>
+            <button class="iem-btn" id="iem-play"   title="Play/Pause">&#9654;</button>
+            <button class="iem-btn" id="iem-next"   title="Step forward">&#9654;&#x7C;</button>
+            <button class="iem-btn" id="iem-last"   title="Latest">&#9197;</button>
+            <input type="range" id="iem-slider" min="0" max="12" value="12"
+                style="flex:1;margin:0 6px;accent-color:#4a9c6f;cursor:pointer;">
+            <span id="iem-frame" style="font-family:monospace;font-size:13px;color:#ccc;min-width:55px;">— / —</span>
+            <span id="iem-time"  style="font-family:monospace;font-size:13px;color:#8bc4a8;flex:1;">Loading…</span>
+            <select id="iem-duration" title="Playback duration"
+                style="background:#2a2a3e;color:#ccc;border:1px solid #555;border-radius:4px;padding:3px 5px;font-size:11px;">
+                <option value="1" selected>1 hr</option>
+                <option value="2">2 hr</option>
+                <option value="3">3 hr</option>
+            </select>
+            <select id="iem-speed" title="Playback speed"
+                style="background:#2a2a3e;color:#ccc;border:1px solid #555;border-radius:4px;padding:3px 5px;font-size:11px;">
+                <option value="2000">0.5 fps</option>
+                <option value="1000">1 fps</option>
+                <option value="500" selected>2 fps</option>
+                <option value="333">3 fps</option>
+                <option value="250">4 fps</option>
+                <option value="200">5 fps</option>
+            </select>
+            <span id="iem-status" style="font-size:10px;color:#666;white-space:nowrap;"></span>
+            <button class="iem-btn" id="iem-refresh" title="Refresh" style="font-size:14px;">&#8635;</button>
         </div>
     </div>
 
@@ -307,61 +359,207 @@
     var pollTimer = null, dragging = false;
     var lastPollTime = null;
 
-    // ── IEM WMS config ────────────────────────────────────────────────────────
-    var IEM_WMS_URL = 'https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0q.cgi';
-    var IEM_LAYERS = {
-        'n0q': 'nexrad-n0q-900913-conus',
-        'n0r': 'nexrad-n0q-900913-conus',
-    };
+    // ── Radar config ──────────────────────────────────────────────────────────
+    var IEM_BASE = 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/';
+    var MRMS_FRAMES_API = '/CAP_WxCOP/api/mrms/frames';
+    var MRMS_WMS_API    = '/CAP_WxCOP/api/mrms/wms';
+
+    var IEM_LAYERS = { 'n0q':'nexrad-n0q-900913', 'n0r':'nexrad-n0r-900913',
+                       'n0s':'nexrad-n0s-900913', 'n0u':'nexrad-n0u-900913' };
     var OCONUS_BOXES = [
-        { name: 'ak', latMin: 50.0, latMax: 72.0,  lonMin: -180.0, lonMax: -129.0 },
-        { name: 'hi', latMin: 17.0, latMax: 23.5,  lonMin: -161.0, lonMax: -154.0 },
-        { name: 'gu', latMin:  9.0, latMax: 22.0,  lonMin:  139.0, lonMax:  148.0 },
-        { name: 'pr', latMin: 16.0, latMax: 19.5,  lonMin:  -68.0, lonMax:  -64.0 },
+        { name:'ak', latMin:50.0, latMax:72.0,  lonMin:-180.0, lonMax:-129.0 },
+        { name:'hi', latMin:17.0, latMax:23.5,  lonMin:-161.0, lonMax:-154.0 },
+        { name:'gu', latMin: 9.0, latMax:22.0,  lonMin: 139.0, lonMax: 148.0 },
+        { name:'pr', latMin:16.0, latMax:19.5,  lonMin: -68.0, lonMax: -64.0 },
     ];
-    // Full layer names for OCONUS reference:
-    // nexrad-n0q-900913-ak, nexrad-n0q-900913-hi, nexrad-n0q-900913-pr, nexrad-n0q-900913-gu
+    var SECTOR_SUFFIX = { 'ak':'-ak','hi':'-hi','gu':'-gu','pr':'-pr' };
 
-    function getIemLayer() {
-        if (!map) return IEM_LAYERS[currentProduct] || IEM_LAYERS['n0q'];
-        var c   = map.getCenter();
-        var lat = c.lat;
-        var lon = ((c.lng + 180) % 360 + 360) % 360 - 180;
-        for (var i = 0; i < OCONUS_BOXES.length; i++) {
-            var s = OCONUS_BOXES[i];
-            if (lat >= s.latMin && lat <= s.latMax &&
-                lon >= s.lonMin && lon <= s.lonMax) {
-                return 'nexrad-n0q-900913-' + s.name;
-            }
+    // ── Unified loop player state ─────────────────────────────────────────────
+    var loopFrames=[], loopFrame=-1, loopPlaying=false;
+    var loopTimer=null, loopSpeed=500, loopSector='init';
+    var loopLayers={}, loopLayer=null;
+    var currentSource='iem';   // 'iem' or 'mrms'
+
+    function getOpacity() {
+        return parseInt(document.getElementById('opacitySlider').value)/100;
+    }
+    function getSector() {
+        if (!map) return '';
+        var c=map.getCenter(), lat=c.lat;
+        var lon=((c.lng+180)%360+360)%360-180;
+        for (var i=0;i<OCONUS_BOXES.length;i++){
+            var s=OCONUS_BOXES[i];
+            if(lat>=s.latMin&&lat<=s.latMax&&lon>=s.lonMin&&lon<=s.lonMax) return s.name;
         }
-        return IEM_LAYERS[currentProduct] || IEM_LAYERS['n0q'];
+        return '';
+    }
+    function bringOverlaysToFront(){
+        if(symbolsLayer)  symbolsLayer.bringToFront();
+        if(labelsLayer)   labelsLayer.bringToFront();
+        if(highlightLayer) highlightLayer.bringToFront();
     }
 
-    function showIemRadar() {
-        var layerName = getIemLayer();
-        var opacity   = document.getElementById('opacitySlider').value / 100;
-        if (radarLayer && map.hasLayer(radarLayer)) map.removeLayer(radarLayer);
-        radarLayer = L.tileLayer.wms(IEM_WMS_URL, {
-            layers:      layerName,
-            format:      'image/png',
-            transparent: true,
-            opacity:     opacity,
-            attribution: 'NEXRAD &copy; <a href="https://mesonet.agron.iastate.edu/">IEM</a>',
-            zIndex:      400,
-            version:     '1.1.1',
-        });
-        radarLayer.addTo(map);
-        symbolsLayer.bringToFront();
-        labelsLayer.bringToFront();
-        highlightLayer.bringToFront();
-        document.getElementById('validTimeDisplay').textContent =
-            'NEXRAD via IEM (~5 min latency)';
-        document.getElementById('frameDisplay').textContent = 'LIVE';
-        lastPollTime = new Date();
-        document.getElementById('pollStatus').textContent =
-            'Updated ' + lastPollTime.getUTCHours().toString().padStart(2,'0') + ':' +
-            lastPollTime.getUTCMinutes().toString().padStart(2,'0') + 'Z';
+    // ── IEM tile-cache frames ─────────────────────────────────────────────────
+    function iemBuildFrames() {
+        var hrs  = parseInt(document.getElementById('iem-duration').value)||1;
+        var mins = hrs * 60;
+        var sec  = getSector();
+        var suf  = SECTOR_SUFFIX[sec]||'-conus';
+        var base = IEM_LAYERS[currentProduct]||IEM_LAYERS['n0q'];
+        var frames=[];
+        for (var m=mins; m>=5; m-=5) {
+            var mm=String(m).padStart(2,'0');
+            frames.push({ key:'iem:'+base+'-m'+mm+'m'+suf,
+                          layer:base+'-m'+mm+'m'+suf, label:'-'+m+' min',
+                          source:'iem', ts:null });
+        }
+        frames.push({ key:'iem:'+base+suf, layer:base+suf,
+                      label:'LIVE', source:'iem', ts:null });
+        return frames;
     }
+
+    function iemMakeTileLayer(layerName) {
+        return L.tileLayer(IEM_BASE+layerName+'/{z}/{x}/{y}.png', {
+            opacity:0, zIndex:400, maxZoom:18,
+            attribution:'NEXRAD &copy; <a href="https://mesonet.agron.iastate.edu/">IEM</a>',
+            errorTileUrl:'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
+        });
+    }
+
+    // ── MRMS WMS proxy frames ─────────────────────────────────────────────────
+    function mrmsFetchFrames(callback) {
+        var hrs = parseInt(document.getElementById('iem-duration').value)||1;
+        fetch(MRMS_FRAMES_API+'?product='+currentProduct+'&hours='+hrs)
+            .then(function(r){ return r.json(); })
+            .then(function(data){
+                var frames = (data.frames||[]).map(function(f){
+                    return { key:'mrms:'+f.ts, layer:null,
+                             label:f.label, source:'mrms', ts:f.ts };
+                });
+                callback(frames);
+            })
+            .catch(function(e){
+                console.warn('MRMS frames fetch failed:', e);
+                callback([]);
+            });
+    }
+
+    function mrmsMakeTileLayer(ts) {
+        var url = MRMS_WMS_API+'?product='+currentProduct+'&ts='+(ts||'');
+        return L.tileLayer.wms(url, {
+            layers: currentProduct==='azshear_low' ? 'azshear_low' :
+                    currentProduct==='mesh' ? 'mesh' : 'composite',
+            format:'image/png', transparent:true,
+            opacity:0, zIndex:400, version:'1.1.1',
+            attribution:'MRMS &copy; NOAA/CIMSS'
+        });
+    }
+
+    // ── Unified loop player ───────────────────────────────────────────────────
+    function loopEnsureLayer(frame) {
+        if (!loopLayers[frame.key]) {
+            loopLayers[frame.key] = frame.source==='iem'
+                ? iemMakeTileLayer(frame.layer)
+                : mrmsMakeTileLayer(frame.ts);
+        }
+        return loopLayers[frame.key];
+    }
+
+    function loopGoTo(idx) {
+        if (!loopFrames.length) return;
+        idx = Math.max(0, Math.min(loopFrames.length-1, idx));
+        loopFrame = idx;
+        var next = loopEnsureLayer(loopFrames[idx]);
+        var prev = loopLayer;
+        next.setOpacity(getOpacity());
+        if (!map.hasLayer(next)) next.addTo(map);
+        if (prev && prev!==next) {
+            setTimeout(function(){ if(map.hasLayer(prev)) map.removeLayer(prev); }, 300);
+        }
+        loopLayer = next;
+        bringOverlaysToFront();
+        updatePlayerUI();
+    }
+
+    function loopStop() {
+        loopPlaying=false;
+        if(loopTimer){clearTimeout(loopTimer);loopTimer=null;}
+        updatePlayerUI();
+    }
+
+    function loopStart() {
+        if (!loopFrames.length) return;
+        loopPlaying=true;
+        updatePlayerUI();
+        (function tick(){
+            if(!loopPlaying) return;
+            loopGoTo(loopFrame+1 >= loopFrames.length ? 0 : loopFrame+1);
+            loopTimer=setTimeout(tick, loopSpeed);
+        })();
+    }
+
+    function loopRebuild() {
+        loopStop();
+        // Clear all cached tile layers
+        Object.values(loopLayers).forEach(function(l){
+            if(map.hasLayer(l)) map.removeLayer(l);
+        });
+        loopLayers={}; loopLayer=null;
+
+        var timeEl=document.getElementById('iem-time');
+        if(timeEl) timeEl.textContent='Loading…';
+
+        if (currentSource==='iem') {
+            var sec=getSector();
+            loopSector=sec;
+            loopFrames=iemBuildFrames();
+            var sl=document.getElementById('iem-slider');
+            if(sl) sl.max=loopFrames.length-1;
+            loopGoTo(loopFrames.length-1);
+        } else {
+            // MRMS — fetch frame list from API
+            mrmsFetchFrames(function(frames){
+                if (!frames.length) {
+                    var timeEl=document.getElementById('iem-time');
+                    if(timeEl) timeEl.textContent='No MRMS frames available';
+                    return;
+                }
+                loopFrames=frames;
+                var sl=document.getElementById('iem-slider');
+                if(sl) sl.max=loopFrames.length-1;
+                loopGoTo(loopFrames.length-1);
+            });
+        }
+    }
+
+    function updatePlayerUI() {
+        var n=loopFrames.length, f=loopFrame;
+        var frameEl=document.getElementById('iem-frame');
+        var timeEl =document.getElementById('iem-time');
+        var playEl =document.getElementById('iem-play');
+        var sl     =document.getElementById('iem-slider');
+        var fill   =document.getElementById('iem-fill');
+        var thumb  =document.getElementById('iem-thumb');
+        var stEl   =document.getElementById('iem-status');
+        if(frameEl) frameEl.textContent = n ? (f+1)+' / '+n : '— / —';
+        if(timeEl && n)  timeEl.textContent = loopFrames[f].label;
+        if(playEl)  playEl.textContent = loopPlaying ? '⏸' : '▶';
+        if(sl) sl.value=f;
+        var pct = n>1 ? (f/(n-1)*100) : 100;
+        if(fill)  fill.style.width=pct+'%';
+        if(thumb) thumb.style.left=pct+'%';
+        var d1=document.getElementById('iem-first'),d2=document.getElementById('iem-prev');
+        var d3=document.getElementById('iem-next'), d4=document.getElementById('iem-last');
+        if(d1) d1.disabled=f===0;      if(d2) d2.disabled=f===0;
+        if(d3) d3.disabled=f===n-1;    if(d4) d4.disabled=f===n-1;
+        if(stEl && lastPollTime){
+            var h=lastPollTime.getUTCHours(), m=lastPollTime.getUTCMinutes();
+            stEl.textContent='Upd '+String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+'Z';
+        }
+    }
+
+    // Legacy alias used by map moveend
+    function showIemRadar() { loopRebuild(); }
 
     // ── Map init ───────────────────────────────────────────────────────────
     function initMap() {
@@ -389,16 +587,16 @@
 
         setupControls();
         loadAirports();
-        showIemRadar();
+        currentSource = 'iem';
+        loopRebuild();
 
         map.on('zoomend moveend', function() {
             updateAirports();
-            // Switch OCONUS sector when panning
-            showIemRadar();
+            if (currentSource==='iem' && getSector()!==loopSector) loopRebuild();
         });
 
-        // Refresh IEM tiles every 5 minutes
-        pollTimer = setInterval(showIemRadar, 5 * 60 * 1000);
+        // Refresh every 5 min — rebuilds frame list to pick up new data
+        pollTimer = setInterval(loopRebuild, 5 * 60 * 1000);
     }
 
     // ── Controls ───────────────────────────────────────────────────────────
@@ -419,13 +617,29 @@
                 document.querySelectorAll('.radar-btn').forEach(function(b){ b.classList.remove('active'); });
                 this.classList.add('active');
                 currentProduct = this.dataset.product;
-                drawColorbar('composite');  // N0Q uses composite colormap
-                showIemRadar();
+                currentSource  = this.dataset.source;   // 'iem' or 'mrms'
+                // Colorbar
+                if (currentProduct==='azshear_low')  drawColorbar('azshear');
+                else if (currentProduct==='mesh')     drawColorbar('mesh');
+                else                                  drawColorbar('composite');
+                loopRebuild();
             });
         });
 
+        // Player controls
+        document.getElementById('iem-first').addEventListener('click',   function(){ loopStop(); loopGoTo(0); });
+        document.getElementById('iem-prev').addEventListener('click',    function(){ loopStop(); loopGoTo(loopFrame-1); });
+        document.getElementById('iem-play').addEventListener('click',    function(){ loopPlaying ? loopStop() : loopStart(); });
+        document.getElementById('iem-next').addEventListener('click',    function(){ loopStop(); loopGoTo(loopFrame+1); });
+        document.getElementById('iem-last').addEventListener('click',    function(){ loopStop(); loopGoTo(loopFrames.length-1); });
+        document.getElementById('iem-refresh').addEventListener('click', function(){ loopRebuild(); });
+        document.getElementById('iem-slider').addEventListener('input',  function(){ loopStop(); loopGoTo(parseInt(this.value)); });
+        document.getElementById('iem-speed').addEventListener('change',  function(){ loopSpeed=parseInt(this.value); });
+        document.getElementById('iem-duration').addEventListener('change', function(){ loopRebuild(); });
+
         document.getElementById('opacitySlider').addEventListener('input', function() {
-            if (radarLayer) radarLayer.setOpacity(this.value / 100);
+            var op = this.value/100;
+            if (loopLayer) loopLayer.setOpacity(op);
         });
 
         document.getElementById('symbolToggle').addEventListener('change', updateAirports);
@@ -441,9 +655,7 @@
         document.getElementById('aptSearchBtn').addEventListener('click', searchAirport);
         document.getElementById('aptClearBtn').addEventListener('click', clearHighlight);
 
-        // Frame nav buttons removed — IEM WMS is live
-
-        // Timeline scrub removed — IEM WMS is live, no frame scrubbing
+        // Player controls wired above in radar-btn click handler
     }
 
 
