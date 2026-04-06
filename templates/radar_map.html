@@ -368,10 +368,12 @@
                        'n0s':'nexrad-n0s-900913', 'n0u':'nexrad-n0u-900913' };
     var OCONUS_BOXES = [
         { name:'ak', latMin:50.0, latMax:72.0,  lonMin:-180.0, lonMax:-129.0 },
-        { name:'hi', latMin:17.0, latMax:23.5,  lonMin:-161.0, lonMax:-154.0 },
+        { name:'hi', latMin:17.0, latMax:23.5,  lonMin:-162.0, lonMax:-154.0 },
         { name:'gu', latMin: 9.0, latMax:22.0,  lonMin: 139.0, lonMax: 148.0 },
-        { name:'pr', latMin:16.0, latMax:19.5,  lonMin: -68.0, lonMax: -64.0 },
+        // PR sector covers PR, USVI, and broader Caribbean (IEM 'pr' layer)
+        { name:'pr', latMin: 8.0, latMax:22.0,  lonMin: -85.0, lonMax: -60.0 },
     ];
+    // IEM tile cache: nexrad-n0q-900913-{ak|hi|gu|pr}
     var SECTOR_SUFFIX = { 'ak':'-ak','hi':'-hi','gu':'-gu','pr':'-pr' };
 
     // ── Unified loop player state ─────────────────────────────────────────────
@@ -404,16 +406,22 @@
         var hrs  = parseInt(document.getElementById('iem-duration').value)||1;
         var mins = hrs * 60;
         var sec  = getSector();
-        var suf  = SECTOR_SUFFIX[sec]||'-conus';
         var base = IEM_LAYERS[currentProduct]||IEM_LAYERS['n0q'];
+        // IEM tile cache naming:
+        //   CONUS live:  nexrad-n0q-900913-conus
+        //   CONUS loop:  nexrad-n0q-900913-m05m  (no sector suffix)
+        //   AK live:     nexrad-n0q-900913-ak
+        //   AK loop:     nexrad-n0q-900913-ak-m05m
+        var liveName  = sec ? base+'-'+sec : base+'-conus';
+        var loopInfix = sec ? base+'-'+sec : base;
         var frames=[];
         for (var m=mins; m>=5; m-=5) {
             var mm=String(m).padStart(2,'0');
-            frames.push({ key:'iem:'+base+'-m'+mm+'m'+suf,
-                          layer:base+'-m'+mm+'m'+suf, label:'-'+m+' min',
-                          source:'iem', ts:null });
+            var layerName = loopInfix+'-m'+mm+'m';
+            frames.push({ key:'iem:'+layerName, layer:layerName,
+                          label:'-'+m+' min', source:'iem', ts:null });
         }
-        frames.push({ key:'iem:'+base+suf, layer:base+suf,
+        frames.push({ key:'iem:'+liveName, layer:liveName,
                       label:'LIVE', source:'iem', ts:null });
         return frames;
     }
@@ -444,13 +452,40 @@
             });
     }
 
+    // Pre-warm tile cache for MRMS frames in background
+    // Starts from latest and works backwards so recent frames are ready first
+    var prewarmTimer = null;
+    function prewarmMrmsFrames(frames) {
+        if (prewarmTimer) { clearTimeout(prewarmTimer); prewarmTimer=null; }
+        // Start from second-to-last (latest already loaded by loopGoTo)
+        var idx = frames.length - 2;
+        function next() {
+            if (idx < 0 || currentSource !== 'mrms') return;
+            var frame = frames[idx];
+            if (!loopLayers[frame.key]) {
+                // Create layer but don't add to map — just instantiate so tiles fetch
+                var l = mrmsMakeTileLayer(frame.ts);
+                loopLayers[frame.key] = l;
+                // Briefly add at opacity 0 to trigger tile load, then remove
+                l.setOpacity(0);
+                l.addTo(map);
+                setTimeout(function(){ if(map.hasLayer(l) && l!==loopLayer) map.removeLayer(l); }, 3000);
+            }
+            idx--;
+            prewarmTimer = setTimeout(next, 800); // stagger requests
+        }
+        prewarmTimer = setTimeout(next, 1000); // start after current frame renders
+    }
+
     function mrmsMakeTileLayer(ts) {
         var url = MRMS_WMS_API+'?product='+currentProduct+'&ts='+(ts||'');
+        var layerName = currentProduct==='azshear_low' ? 'azshear_low' :
+                        currentProduct==='mesh' ? 'mesh' : 'composite';
         return L.tileLayer.wms(url, {
-            layers: currentProduct==='azshear_low' ? 'azshear_low' :
-                    currentProduct==='mesh' ? 'mesh' : 'composite',
+            layers: layerName,
             format:'image/png', transparent:true,
             opacity:0, zIndex:400, version:'1.1.1',
+            srs: 'EPSG:4326',
             attribution:'MRMS &copy; NOAA/CIMSS'
         });
     }
@@ -528,6 +563,7 @@
                 var sl=document.getElementById('iem-slider');
                 if(sl) sl.max=loopFrames.length-1;
                 loopGoTo(loopFrames.length-1);
+                prewarmMrmsFrames(frames);
             });
         }
     }
@@ -595,8 +631,37 @@
             if (currentSource==='iem' && getSector()!==loopSector) loopRebuild();
         });
 
-        // Refresh every 5 min — rebuilds frame list to pick up new data
-        pollTimer = setInterval(loopRebuild, 5 * 60 * 1000);
+        // Auto-refresh every 2 min for MRMS, 5 min for IEM
+        // Advances to latest frame without interrupting active playback
+        function autoRefresh() {
+            if (currentSource === 'mrms') {
+                // Fetch new frame list, append new frames, stay at latest
+                var hrs = parseInt(document.getElementById('iem-duration').value)||1;
+                mrmsFetchFrames(function(frames) {
+                    if (!frames.length) return;
+                    loopFrames = frames;
+                    var sl=document.getElementById('iem-slider');
+                    if(sl) sl.max=loopFrames.length-1;
+                    if (!loopPlaying) loopGoTo(loopFrames.length-1);
+                    lastPollTime = new Date();
+                    updatePlayerUI();
+                });
+            } else {
+                // IEM — rebuild tile frame list and go to latest
+                var wasPlaying = loopPlaying;
+                var wasFrame   = loopFrame;
+                var oldLen     = loopFrames.length;
+                loopFrames = iemBuildFrames();
+                var sl=document.getElementById('iem-slider');
+                if(sl) sl.max=loopFrames.length-1;
+                if (!wasPlaying) {
+                    loopGoTo(loopFrames.length-1);
+                }
+                lastPollTime = new Date();
+                updatePlayerUI();
+            }
+        }
+        pollTimer = setInterval(autoRefresh, 2 * 60 * 1000);
     }
 
     // ── Controls ───────────────────────────────────────────────────────────
@@ -632,7 +697,7 @@
         document.getElementById('iem-play').addEventListener('click',    function(){ loopPlaying ? loopStop() : loopStart(); });
         document.getElementById('iem-next').addEventListener('click',    function(){ loopStop(); loopGoTo(loopFrame+1); });
         document.getElementById('iem-last').addEventListener('click',    function(){ loopStop(); loopGoTo(loopFrames.length-1); });
-        document.getElementById('iem-refresh').addEventListener('click', function(){ loopRebuild(); });
+        document.getElementById('iem-refresh').addEventListener('click', function(){ loopRebuild(); }); // full rebuild on manual refresh
         document.getElementById('iem-slider').addEventListener('input',  function(){ loopStop(); loopGoTo(parseInt(this.value)); });
         document.getElementById('iem-speed').addEventListener('change',  function(){ loopSpeed=parseInt(this.value); });
         document.getElementById('iem-duration').addEventListener('change', function(){ loopRebuild(); });
