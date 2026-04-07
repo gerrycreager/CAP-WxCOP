@@ -381,6 +381,40 @@
     var loopTimer=null, loopSpeed=500, loopSector='init';
     var loopLayers={}, loopLayer=null;
     var currentSource='iem';   // 'iem' or 'mrms'
+    var _lastEffectiveProduct = 'composite';
+
+    // MRMS product config — CONUS and OCONUS sector composites
+    var MAPSERVER_LAYERS = {
+        'composite':        { title: 'MRMS Composite Reflectivity' },
+        'azshear_low':      { title: 'MRMS AzShear 0-2km AGL' },
+        'mesh':             { title: 'MRMS MESH Instantaneous Hail' },
+        'composite_alaska': { title: 'MRMS Composite — Alaska' },
+        'composite_hawaii': { title: 'MRMS Composite — Hawaii' },
+        'composite_carib':  { title: 'MRMS Composite — Caribbean' },
+        'composite_guam':   { title: 'MRMS Composite — Guam' },
+    };
+
+    // Map sector name to OCONUS composite product key
+    var SECTOR_TO_COMPOSITE = {
+        'ak': 'composite_alaska',
+        'hi': 'composite_hawaii',
+        'pr': 'composite_carib',
+        'gu': 'composite_guam',
+    };
+
+    // Resolve effective MRMS product — auto-switch composite to sector variant
+    function getEffectiveProduct() {
+        var sec = getSector();
+        if (currentProduct === 'composite' && sec && SECTOR_TO_COMPOSITE[sec]) {
+            return SECTOR_TO_COMPOSITE[sec];
+        }
+        return currentProduct;
+    }
+
+    // Is currentProduct an MRMS product (routed to MapServer)?
+    function isMrmsProduct(prod) {
+        return prod in MAPSERVER_LAYERS;
+    }
 
     function getOpacity() {
         return parseInt(document.getElementById('opacitySlider').value)/100;
@@ -437,7 +471,8 @@
     // ── MRMS WMS proxy frames ─────────────────────────────────────────────────
     function mrmsFetchFrames(callback) {
         var hrs = parseInt(document.getElementById('iem-duration').value)||1;
-        fetch(MRMS_FRAMES_API+'?product='+currentProduct+'&hours='+hrs)
+        var _eff = getEffectiveProduct();
+        fetch(MRMS_FRAMES_API+'?product='+_eff+'&hours='+hrs)
             .then(function(r){ return r.json(); })
             .then(function(data){
                 var frames = (data.frames||[]).map(function(f){
@@ -478,9 +513,10 @@
     }
 
     function mrmsMakeTileLayer(ts) {
-        var url = MRMS_WMS_API+'?product='+currentProduct+'&ts='+(ts||'');
-        var layerName = currentProduct==='azshear_low' ? 'azshear_low' :
-                        currentProduct==='mesh' ? 'mesh' : 'composite';
+        var eff = getEffectiveProduct();
+        var url = MRMS_WMS_API+'?product='+eff+'&ts='+(ts||'');
+        // Layer name matches the product key (composite_alaska, azshear_low, etc.)
+        var layerName = eff;
         return L.tileLayer.wms(url, {
             layers: layerName,
             format:'image/png', transparent:true,
@@ -553,6 +589,8 @@
             loopGoTo(loopFrames.length-1);
         } else {
             // MRMS — fetch frame list from API
+            // Track effective product so autoRefresh can detect sector changes
+            _lastEffectiveProduct = getEffectiveProduct();
             mrmsFetchFrames(function(frames){
                 if (!frames.length) {
                     var timeEl=document.getElementById('iem-time');
@@ -629,13 +667,18 @@
         map.on('zoomend moveend', function() {
             updateAirports();
             if (currentSource==='iem' && getSector()!==loopSector) loopRebuild();
+            if (currentSource==='mrms' && currentProduct==='composite' &&
+                getEffectiveProduct()!==_lastEffectiveProduct) loopRebuild();
         });
 
         // Auto-refresh every 2 min for MRMS, 5 min for IEM
         // Advances to latest frame without interrupting active playback
         function autoRefresh() {
             if (currentSource === 'mrms') {
-                // Fetch new frame list, append new frames, stay at latest
+                // Rebuild if sector changed (e.g. user panned to Alaska)
+                if (getEffectiveProduct() !== _lastEffectiveProduct) {
+                    loopRebuild(); return;
+                }
                 var hrs = parseInt(document.getElementById('iem-duration').value)||1;
                 mrmsFetchFrames(function(frames) {
                     if (!frames.length) return;
