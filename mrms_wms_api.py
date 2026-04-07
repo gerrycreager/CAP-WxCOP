@@ -33,9 +33,15 @@ MAPSERV_BIN = '/usr/bin/mapserv'
 
 # Product → mapfile template and WMS layer name
 PRODUCT_CONFIG = {
-    'composite':   {'mapfile': 'mrms_composite.map',   'layer': 'composite'},
-    'azshear_low': {'mapfile': 'mrms_azshear_low.map', 'layer': 'azshear_low'},
-    'mesh':        {'mapfile': 'mrms_mesh.map',        'layer': 'mesh'},
+    # CONUS products
+    'composite':          {'mapfile': 'mrms_composite.map',          'layer': 'composite'},
+    'azshear_low':        {'mapfile': 'mrms_azshear_low.map',        'layer': 'azshear_low'},
+    'mesh':               {'mapfile': 'mrms_mesh.map',               'layer': 'mesh'},
+    # OCONUS composite sectors
+    'composite_alaska':   {'mapfile': 'mrms_composite_alaska.map',   'layer': 'composite_alaska'},
+    'composite_hawaii':   {'mapfile': 'mrms_composite_hawaii.map',   'layer': 'composite_hawaii'},
+    'composite_carib':    {'mapfile': 'mrms_composite_carib.map',    'layer': 'composite_carib'},
+    'composite_guam':     {'mapfile': 'mrms_composite_guam.map',     'layer': 'composite_guam'},
 }
 
 TS_RE = re.compile(r'^\d{8}-\d{6}$')
