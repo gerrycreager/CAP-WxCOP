@@ -82,6 +82,21 @@ def lightning_color(within_5nm, within_10nm):
     return 'GREEN'
 
 
+def wbgt_flag(wbgt_c):
+    """DAFI 48-151 Table 4.1 WBGT flag category."""
+    if wbgt_c is None:
+        return None
+    if wbgt_c < 25.6:
+        return 'WHITE'
+    if wbgt_c < 27.8:
+        return 'GREEN'
+    if wbgt_c < 29.4:
+        return 'YELLOW'
+    if wbgt_c < 31.1:
+        return 'RED'
+    return 'BLACK'
+
+
 def surface_wind_color(wind_speed_kts, wind_gust_kts):
     """Surface wind stoplight."""
     if wind_speed_kts is None:
@@ -472,6 +487,7 @@ def build_current_stoplight(cur, site):
             'precip_rate_mmhr': use_data.get('precip_rate_mmhr'),
             'precip_type':      use_data.get('precip_type'),
             'wbgt_c':           use_data.get('wbgt_c'),
+            'wbgt_flag':        wbgt_flag(use_data.get('wbgt_c')),
             'cape_jkg':         use_data.get('cape_jkg'),
             'ceil_ft':          use_data.get('ceil_ft'),
         },
@@ -514,14 +530,36 @@ def build_forecast_stoplight(cur, site, forecast_hour):
                dswrf_wm2, wbgt_c, cape_jkg, ceil_ft
         FROM observations.model_site_wx
         WHERE site_id = %s
-          AND forecast_hour BETWEEN 1 AND 24
+          AND forecast_hour BETWEEN 0 AND 48
+          AND model_name = (
+              SELECT CASE
+                  WHEN EXISTS (SELECT 1 FROM observations.model_site_wx
+                               WHERE site_id = %s AND model_name = 'GFS')
+                       THEN 'GFS'
+                  WHEN EXISTS (SELECT 1 FROM observations.model_site_wx
+                               WHERE site_id = %s AND model_name = 'HRRR')
+                       THEN 'HRRR'
+                  ELSE 'AIGFS'
+              END
+          )
           AND model_run = (
               SELECT MAX(model_run)
               FROM observations.model_site_wx
-              WHERE site_id = %s AND forecast_hour = 1
+              WHERE site_id = %s
+                AND model_name = (
+                    SELECT CASE
+                        WHEN EXISTS (SELECT 1 FROM observations.model_site_wx
+                                     WHERE site_id = %s AND model_name = 'GFS')
+                             THEN 'GFS'
+                        WHEN EXISTS (SELECT 1 FROM observations.model_site_wx
+                                     WHERE site_id = %s AND model_name = 'HRRR')
+                             THEN 'HRRR'
+                        ELSE 'AIGFS'
+                    END
+                )
           )
         ORDER BY forecast_hour
-    """, (site_id, site_id))
+    """, (site_id, site_id, site_id, site_id, site_id, site_id))
     all_hours = cur.fetchall()
 
     if not all_hours:
@@ -567,6 +605,7 @@ def build_forecast_stoplight(cur, site, forecast_hour):
             'precip_rate_mmhr': row['precip_rate_mmhr'],
             'precip_type':      row['precip_type'],
             'wbgt_c':           row['wbgt_c'],
+            'wbgt_flag':        wbgt_flag(row['wbgt_c']),
             'cape_jkg':         row['cape_jkg'],
             'ceil_ft':          row['ceil_ft'],
         })
@@ -596,6 +635,7 @@ def build_forecast_stoplight(cur, site, forecast_hour):
             'precip_rate_mmhr': target['precip_rate_mmhr'],
             'precip_type':      target['precip_type'],
             'wbgt_c':           target['wbgt_c'],
+            'wbgt_flag':        target.get('wbgt_flag'),
             'cape_jkg':         target['cape_jkg'],
             'ceil_ft':          target['ceil_ft'],
         },
