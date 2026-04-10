@@ -665,14 +665,77 @@ FIELD_SPECS = [
 CEIL_SPEC = ('gh', 'cloudBase', 0, 'HGT cloud base')
 
 
+# wgrib2 match pattern for surface/near-surface fields
+# Covers all fields in FIELD_SPECS plus DSWRF for WBGT
+WGRIB2_MATCH = (
+    ":(TMP|DPT|UGRD|VGRD|GUST|PRATE|APCP|CAPE|CRAIN|CSNOW|CICEP|CFRZR)"
+    ":(2 m above ground|10 m above ground|surface):"
+    "|:DSWRF:surface:"
+)
+WGRIB2_BIN = '/usr/local/bin/wgrib2'
+
+
+def _wgrib2_subset(grib_path, out_path):
+    """
+    Use wgrib2 to extract surface/near-surface fields into a small subset file.
+    Reduces 467MB GFS file to ~6MB containing only what we need.
+    Returns True on success, False on failure.
+    """
+    import subprocess
+    try:
+        result = subprocess.run(
+            [WGRIB2_BIN, str(grib_path),
+             '-match', WGRIB2_MATCH,
+             '-grib', str(out_path)],
+            capture_output=True, timeout=120
+        )
+        if result.returncode != 0 and not out_path.exists():
+            log.warning(f"wgrib2 subset failed for {grib_path.name}: "
+                        f"{result.stderr.decode()[:200]}")
+            return False
+        return out_path.exists() and out_path.stat().st_size > 0
+    except Exception as e:
+        log.warning(f"wgrib2 subset error for {grib_path.name}: {e}")
+        return False
+
+
 def load_grib_fields(grib_path):
     """
-    Load all needed grib2 fields from an HRRR sfc file.
+    Load needed grib2 fields from a model sfc file.
+    For large GFS files (>100MB): uses wgrib2 to extract a small subset
+    first, then reads with pygrib — ~18x faster than scanning the full file.
+    For small HRRR files: reads directly with pygrib.
     Returns dict: key -> grib message (or None if not found).
     """
+    import tempfile, os
     fields = {}
+
+    # Use wgrib2 pre-extraction for large files (GFS ~467MB, HRRR ~25MB)
+    use_subset = (
+        os.path.exists(WGRIB2_BIN) and
+        grib_path.stat().st_size > 100_000_000  # >100MB
+    )
+
+    read_path = grib_path
+    tmp_path   = None
+
+    if use_subset:
+        tmp_fd, tmp_name = tempfile.mkstemp(
+            suffix='.grib2', prefix='wxcop_subset_', dir='/tmp'
+        )
+        os.close(tmp_fd)
+        tmp_path = Path(tmp_name)
+        tmp_path.unlink(missing_ok=True)  # ensure no stale file
+        if _wgrib2_subset(grib_path, tmp_path):
+            read_path = tmp_path
+        else:
+            log.warning(f"wgrib2 subset failed, falling back to full file: "
+                        f"{grib_path.name}")
+            tmp_path.unlink(missing_ok=True)
+            tmp_path = None
+
     try:
-        grbs = pygrib.open(str(grib_path))
+        grbs = pygrib.open(str(read_path))
         for shortname, level_type, level, desc in FIELD_SPECS:
             try:
                 msgs = grbs.select(shortName=shortname,
@@ -691,14 +754,16 @@ def load_grib_fields(grib_path):
         except Exception:
             fields['cloudbase'] = None
 
-        # Normalize GFS sdswrf -> dswrf key for unified downstream access
-        if 'sdswrf' in fields and fields['sdswrf'] is not None:
-            if fields.get('dswrf') is None:
-                fields['dswrf'] = fields['sdswrf']
+        # Normalize GFS sdswrf -> dswrf for unified downstream access
+        if fields.get('sdswrf') is not None and fields.get('dswrf') is None:
+            fields['dswrf'] = fields['sdswrf']
 
         grbs.close()
     except Exception as e:
-        log.error(f"Failed to open {grib_path}: {e}")
+        log.error(f"Failed to open {read_path}: {e}")
+    finally:
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
 
     return fields
 
@@ -927,6 +992,8 @@ def main():
     parser.add_argument('-v', '--verbose', action='store_true')
     parser.add_argument('--cycle', help='Force HRRR cycle YYYYMMDD_HH (e.g. 20260327_18)')
     parser.add_argument('--gfs-cycle', help='Force GFS cycle for OCONUS sites YYYYMMDD_HH (e.g. 20260408_12)')
+    parser.add_argument('--oconus-only', action='store_true', help='Skip HRRR, ingest OCONUS sites only')
+    parser.add_argument('--conus-only',  action='store_true', help='Skip GFS, ingest CONUS sites only')
     parser.add_argument('--aigfs-cycle', help='(Deprecated) Force AIGFS cycle YYYYMMDD_HH — use --gfs-cycle instead')
     args = parser.parse_args()
 
@@ -962,7 +1029,7 @@ def main():
                  f"{[s['site_name'] for s in oconus_sites]}")
 
         # ── HRRR ingest for CONUS sites ───────────────────────────────────────
-        if conus_sites:
+        if conus_sites and not args.oconus_only:
             if args.cycle:
                 dt = datetime.strptime(args.cycle, '%Y%m%d_%H').replace(
                     tzinfo=timezone.utc)
@@ -986,7 +1053,7 @@ def main():
         # GFS used for OCONUS because it has full variable set for personnel
         # impacts (TMP, DPT, UGRD, VGRD, APCP, CAPE, DSWRF, WBGT).
         # AIGFS retained for aviation wind constraints but not personnel wx.
-        if oconus_sites:
+        if oconus_sites and not args.conus_only:
             if args.gfs_cycle:
                 dt = datetime.strptime(args.gfs_cycle, '%Y%m%d_%H').replace(
                     tzinfo=timezone.utc)
