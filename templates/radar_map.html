@@ -148,7 +148,6 @@
         <div class="radar-btns">
             <div class="radar-btn active" data-product="n0q" data-source="iem" title="Base Reflectivity dual-pol (N0Q)">N0Q</div>
             <div class="radar-btn"        data-product="n0r" data-source="iem" title="Base Reflectivity legacy (N0R)">N0R</div>
-            <div class="radar-btn"        data-product="n0u" data-source="iem" title="Base Velocity (N0U)">N0U</div>
         </div>
 
         <div style="font-size:10px;color:#888;margin-top:6px;margin-bottom:3px;">Local MRMS — loop</div>
@@ -266,18 +265,7 @@
                 [75,[192,0,192,230]],[80,[255,255,255,240]]
             ]
         },
-        n0u: {
-            title: 'Base Velocity (kts) — NEXRAD N0U',
-            vmin: -100, vmax: 100,
-            labels: ['-100','-50','0','50','100'],
-            stops: [
-                [-100,[100,0,255,230]],[-50,[0,100,255,220]],
-                [ -20,[0,200,255,180]], [-5,[0,0,0,0]],
-                [   0,[0,0,0,0]],       [ 5,[0,0,0,0]],
-                [  20,[255,200,0,180]], [50,[255,80,0,220]],
-                [  70,[255,0,0,230]],  [100,[255,255,255,240]]
-            ]
-        },
+
         composite: {
             title: 'MRMS Composite Reflectivity (dBZ)',
             vmin: -30, vmax: 80,
@@ -384,8 +372,8 @@
 
     var IEM_LAYERS = {
         'n0q': 'nexrad-n0q-900913',
-        'n0r': 'nexrad-n0r-900913',
-        'n0u': 'nexrad-n0u-900913'
+        'n0r': 'nexrad-n0r-900913'
+        // N0U/N0V: IEM does not cache velocity products (404) — omitted
     };
 
     var OCONUS_BOXES = [
@@ -526,26 +514,10 @@
         });
     }
 
-    // ── Prewarm MRMS tile cache ────────────────────────────────────────────────
-    var prewarmTimer = null;
-    function prewarmMrmsFrames(frames) {
-        if (prewarmTimer) { clearTimeout(prewarmTimer); prewarmTimer = null; }
-        var idx = frames.length - 2;
-        function next() {
-            if (idx < 0 || currentSource !== 'mrms') return;
-            var frame = frames[idx];
-            if (!loopLayers[frame.key]) {
-                var l = mrmsMakeTileLayer(frame.tileUrl);
-                loopLayers[frame.key] = l;
-                l.setOpacity(0);
-                l.addTo(map);
-                setTimeout(function() { if (map.hasLayer(l) && l !== loopLayer) map.removeLayer(l); }, 3000);
-            }
-            idx--;
-            prewarmTimer = setTimeout(next, 800);
-        }
-        prewarmTimer = setTimeout(next, 1000);
-    }
+    // Prewarm intentionally omitted: MRMS tiles are served from LAN-local
+    // Apache (data1 NFS mount) so latency is negligible. Adding layers to the
+    // map at opacity 0 for prewarm caused the active layer to inherit opacity 0
+    // when loopGoTo fired before the prewarm removal timeout completed.
 
     // ── Unified loop player ────────────────────────────────────────────────────
     function loopEnsureLayer(frame) {
@@ -563,8 +535,10 @@
         loopFrame = idx;
         var next = loopEnsureLayer(loopFrames[idx]);
         var prev = loopLayer;
-        next.setOpacity(getOpacity());
+        // Add to map BEFORE setOpacity — Leaflet initialises opacity on addTo
+        // and would override any value set beforehand.
         if (!map.hasLayer(next)) next.addTo(map);
+        next.setOpacity(getOpacity());
         if (prev && prev !== next) {
             setTimeout(function() { if (map.hasLayer(prev)) map.removeLayer(prev); }, 300);
         }
@@ -627,7 +601,6 @@
                 var sl = document.getElementById('iem-slider');
                 if (sl) sl.max = loopFrames.length - 1;
                 loopGoTo(loopFrames.length - 1);
-                prewarmMrmsFrames(frames);
             });
         }
     }
