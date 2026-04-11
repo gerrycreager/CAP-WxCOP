@@ -17,10 +17,10 @@
             padding: 0 16px; z-index: 1100;
             box-shadow: 0 2px 8px rgba(0,0,0,0.5); gap: 16px;
         }
-        #titleBar .tb-home { color: white; text-decoration: none; font-size: 18px; line-height: 1; flex-shrink: 0; opacity: 0.85; transition: opacity 0.15s; }
+        #titleBar .tb-home  { color: white; text-decoration: none; font-size: 18px; line-height: 1; flex-shrink: 0; opacity: 0.85; transition: opacity 0.15s; }
         #titleBar .tb-home:hover { opacity: 1; }
         #titleBar .tb-title { font-size: 16px; font-weight: 700; letter-spacing: 0.03em; white-space: nowrap; flex: 1; }
-        #titleBar .tb-utc { font-size: 13px; font-family: 'Courier New', monospace; opacity: 0.85; flex-shrink: 0; }
+        #titleBar .tb-utc   { font-size: 13px; font-family: 'Courier New', monospace; opacity: 0.85; flex-shrink: 0; }
 
         #map { position: fixed; top: 44px; left: 0; right: 0; bottom: 110px; }
 
@@ -28,14 +28,12 @@
             position: absolute; top: 54px; right: 10px;
             background: white; padding: 12px 14px; border-radius: 8px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.3); z-index: 1000; min-width: 215px;
+            max-height: calc(100vh - 74px); overflow-y: auto;
             transition: min-width 0.2s, padding 0.2s;
         }
-        .controls.collapsed { min-width: 0; padding: 6px 8px; }
+        .controls.collapsed { min-width: 0; padding: 6px 8px; overflow: hidden; }
         .controls.collapsed .controls-body { display: none; }
-        .controls-header {
-            display: flex; align-items: center; justify-content: space-between;
-            margin-bottom: 8px;
-        }
+        .controls-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
         .controls.collapsed .controls-header { margin-bottom: 0; }
         .controls h3 { margin: 0; font-size: 14px; color: #2c3e50; }
         .collapse-btn {
@@ -50,21 +48,19 @@
         .divider { margin: 8px 0; border-top: 1px solid #ddd; }
         .ctrl-section { font-size: 11px; font-weight: 700; color: #666; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px; }
 
-        .radar-btns { display: flex; gap: 4px; margin-bottom: 4px; }
+        .radar-btns { display: flex; gap: 4px; margin-bottom: 4px; flex-wrap: wrap; }
         .radar-btn {
             flex: 1; padding: 5px 4px; border: 2px solid #ccc;
             border-radius: 4px; background: white; cursor: pointer;
             font-size: 11px; font-weight: 600; color: #555;
-            transition: all 0.15s; text-align: center;
+            transition: all 0.15s; text-align: center; min-width: 36px;
         }
-        .radar-btn:hover { border-color: #888; color: #222; }
+        .radar-btn:hover  { border-color: #888; color: #222; }
         .radar-btn.active { border-color: #2c5f41; background: #2c5f41; color: white; }
-        .radar-btn.disabled { opacity: 0.4; cursor: not-allowed; }
 
         #opacitySlider { width: 100%; margin: 4px 0; accent-color: #2c5f41; }
         .opacity-row { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #555; }
 
-        /* Airport search */
         #aptSearch { display: flex; gap: 4px; margin-top: 4px; }
         #aptSearchInput {
             flex: 1; padding: 4px 6px; border: 1px solid #ccc;
@@ -78,74 +74,56 @@
         #aptClearBtn:hover { background: #555; }
         #aptSearchMsg { font-size: 10px; color: #888; margin-top: 2px; min-height: 14px; }
 
-        .legend-item { display: flex; align-items: center; margin: 3px 0; font-size: 11px; color: #444; }
-        .leg-sym { flex-shrink: 0; margin-right: 7px; border-radius: 50%; border: 1.5px solid rgba(0,0,0,0.45); }
-
-        #colorbarWrap { position: absolute; bottom: 120px; left: 10px; z-index: 1000; display: none; }
-        .colorbar-panel { background: rgba(255,255,255,0.93); border-radius: 6px; padding: 6px 8px; box-shadow: 0 1px 6px rgba(0,0,0,0.3); font-size: 10px; font-family: 'Courier New', monospace; }
-        .colorbar-title { font-weight: 700; font-size: 11px; margin-bottom: 4px; color: #222; }
-        .colorbar-strip { height: 14px; width: 200px; border-radius: 2px; border: 1px solid #aaa; margin-bottom: 2px; }
-        .colorbar-labels { display: flex; justify-content: space-between; font-size: 9px; color: #444; width: 200px; }
-
-        /* Airport label classes */
         .apt-t1-lbl { font-size: 11px; font-weight: 700; color: white; background: rgba(200,30,30,0.93); padding: 2px 5px; border-radius: 3px; border: 1px solid #800; white-space: nowrap; pointer-events: none; box-shadow: 0 1px 4px rgba(0,0,0,0.5); transform: translateX(-50%); }
         .apt-t2-lbl { font-size: 11px; font-weight: 700; color: white; background: rgba(25,80,200,0.93); padding: 2px 5px; border-radius: 3px; border: 1px solid #003a99; white-space: nowrap; pointer-events: none; box-shadow: 0 1px 3px rgba(0,0,0,0.4); transform: translateX(-50%); }
         .apt-t3-lbl { font-size: 10px; font-weight: 600; color: #111; background: rgba(220,220,220,0.93); padding: 1px 4px; border-radius: 3px; border: 1px solid #888; white-space: nowrap; pointer-events: none; box-shadow: 0 1px 2px rgba(0,0,0,0.3); transform: translateX(-50%); }
 
-        /* Player bar */
-        #playerBar { position: fixed; bottom: 0; left: 0; right: 0; height: 110px; background: #1a1a2e; color: white; z-index: 1100; display: flex; flex-direction: column; padding: 8px 16px 10px; box-shadow: 0 -2px 10px rgba(0,0,0,0.5); }
-        #timeline { position: relative; height: 28px; margin-bottom: 6px; cursor: pointer; }
-        #timelineTrack { position: absolute; top: 50%; left: 0; right: 0; transform: translateY(-50%); height: 4px; background: #444; border-radius: 2px; }
-        #timelineFill { height: 100%; background: #4a9c6f; border-radius: 2px; width: 0%; transition: width 0.1s linear; }
-        .frame-tick { position: absolute; top: 50%; width: 2px; height: 10px; background: #4a9c6f; border-radius: 1px; transform: translate(-50%,-50%); }
-        #timelineThumb { position: absolute; top: 50%; width: 14px; height: 14px; background: white; border-radius: 50%; transform: translate(-50%,-50%); box-shadow: 0 0 4px rgba(0,0,0,0.6); transition: left 0.1s linear; pointer-events: none; }
-        #timelineLabel { position: absolute; top: -18px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.75); color: white; font-size: 10px; padding: 1px 5px; border-radius: 3px; white-space: nowrap; pointer-events: none; display: none; }
-
-        #playerControls { display: flex; align-items: center; gap: 10px; }
-        .pb-btn { background: none; border: none; color: white; font-size: 20px; cursor: pointer; padding: 2px 6px; border-radius: 4px; transition: background 0.15s; line-height: 1; }
-        .pb-btn:hover { background: rgba(255,255,255,0.15); }
-        .pb-btn:disabled { opacity: 0.35; cursor: not-allowed; }
-        .speed-label { font-size: 11px; color: #aaa; white-space: nowrap; }
-        #speedSelect, #rangeSelect, #loopSelect { background: #2a2a3e; color: white; border: 1px solid #555; border-radius: 4px; padding: 3px 6px; font-size: 12px; cursor: pointer; }
-        #statusMsg { font-size: 11px; color: #f0a500; white-space: nowrap; }
-        #loading { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); background: white; padding: 20px 40px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); z-index: 2000; font-size: 18px; }
-
-        /* Lower-left legend */
-        #mapLegend { position: fixed; bottom: 118px; left: 10px; z-index: 1000;
+        /* Lower-left fixed legend */
+        #mapLegend {
+            position: fixed; bottom: 118px; left: 10px; z-index: 1000;
             background: rgba(255,255,255,0.93); border-radius: 6px;
-            padding: 7px 10px; box-shadow: 0 1px 6px rgba(0,0,0,0.3); font-size:11px; min-width:155px; }
-        #mapLegend .leg-title { font-weight:700; font-size:11px; color:#333; margin-bottom:3px; }
-        #mapLegend .legend-item { display:flex; align-items:center; margin:2px 0; font-size:11px; color:#444; }
-        #mapLegend .leg-sym { flex-shrink:0; margin-right:6px; border-radius:50%; border:1.5px solid rgba(0,0,0,0.4); }
+            padding: 7px 10px; box-shadow: 0 1px 6px rgba(0,0,0,0.3);
+            font-size: 11px; min-width: 155px;
+        }
+        #mapLegend .leg-title   { font-weight: 700; font-size: 11px; color: #333; margin-bottom: 3px; }
+        #mapLegend .legend-item { display: flex; align-items: center; margin: 2px 0; font-size: 11px; color: #444; }
+        #mapLegend .leg-sym     { flex-shrink: 0; margin-right: 6px; border-radius: 50%; border: 1.5px solid rgba(0,0,0,0.4); }
 
-        /* Loop player bar */
-        #playerBar { position:fixed; bottom:0; left:0; right:0; height:110px;
-            background:#1a1a2e; color:white; z-index:1100;
-            display:flex; flex-direction:column; padding:6px 16px 8px;
-            box-shadow:0 -2px 10px rgba(0,0,0,0.5); }
-        #iem-timeline { position:relative; height:30px; margin-bottom:4px; cursor:pointer; user-select:none; }
-        #iem-track { position:absolute; top:50%; left:0; right:0; transform:translateY(-50%);
-            height:4px; background:#444; border-radius:2px; }
-        #iem-fill  { height:100%; background:#4a9c6f; border-radius:2px; width:100%; }
-        #iem-thumb { position:absolute; top:50%; width:14px; height:14px; background:white;
-            border-radius:50%; transform:translate(-50%,-50%);
-            box-shadow:0 0 4px rgba(0,0,0,0.6); pointer-events:none; left:100%; }
-        #iem-controls { display:flex; align-items:center; gap:8px; }
-        .iem-btn { background:none; border:none; color:white; font-size:20px;
-            cursor:pointer; padding:2px 5px; border-radius:4px; line-height:1; }
-        .iem-btn:hover { background:rgba(255,255,255,0.15); }
-        .iem-btn:disabled { opacity:0.35; cursor:not-allowed; }
+        /* Colorbar — sits above legend */
+        #colorbarWrap { position: fixed; bottom: 200px; left: 10px; z-index: 1000; display: none; }
+        .colorbar-panel  { background: rgba(255,255,255,0.93); border-radius: 6px; padding: 6px 8px; box-shadow: 0 1px 6px rgba(0,0,0,0.3); font-size: 10px; font-family: 'Courier New', monospace; }
+        .colorbar-title  { font-weight: 700; font-size: 11px; margin-bottom: 4px; color: #222; }
+        .colorbar-strip  { height: 14px; width: 200px; border-radius: 2px; border: 1px solid #aaa; margin-bottom: 2px; }
+        .colorbar-labels { display: flex; justify-content: space-between; font-size: 9px; color: #444; width: 200px; }
+
+        /* Player bar */
+        #playerBar {
+            position: fixed; bottom: 0; left: 0; right: 0; height: 110px;
+            background: #1a1a2e; color: white; z-index: 1100;
+            display: flex; flex-direction: column; padding: 6px 16px 8px;
+            box-shadow: 0 -2px 10px rgba(0,0,0,0.5);
+        }
+        #iem-timeline { position: relative; height: 30px; margin-bottom: 4px; cursor: pointer; user-select: none; }
+        #iem-track { position: absolute; top: 50%; left: 0; right: 0; transform: translateY(-50%); height: 4px; background: #444; border-radius: 2px; }
+        #iem-fill  { height: 100%; background: #4a9c6f; border-radius: 2px; width: 100%; }
+        #iem-thumb { position: absolute; top: 50%; width: 14px; height: 14px; background: white; border-radius: 50%; transform: translate(-50%,-50%); box-shadow: 0 0 4px rgba(0,0,0,0.6); pointer-events: none; left: 100%; }
+        #iem-controls { display: flex; align-items: center; gap: 8px; }
+        .iem-btn { background: none; border: none; color: white; font-size: 20px; cursor: pointer; padding: 2px 5px; border-radius: 4px; line-height: 1; }
+        .iem-btn:hover    { background: rgba(255,255,255,0.15); }
+        .iem-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+        #loading { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); background: white; padding: 20px 40px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); z-index: 2000; font-size: 18px; }
     </style>
 </head>
 <body>
     <div id="titleBar">
         <a href="/" class="tb-home" title="Home">&#127968;</a>
-        <span class="tb-title">NEXRAD Radar — Iowa Environmental Mesonet</span>
+        <span class="tb-title">CAP Radar — NEXRAD &amp; MRMS</span>
         <span class="tb-utc" id="tbUtc"></span>
     </div>
 
     <div id="map"></div>
-    <div id="loading">Loading radar data...</div>
+    <div id="loading">Loading radar data…</div>
 
     <div class="controls" id="ctrlPanel">
         <div class="controls-header">
@@ -153,6 +131,7 @@
             <button class="collapse-btn" id="collapseBtn" onclick="toggleControls()" title="Collapse/expand">◀</button>
         </div>
         <div class="controls-body">
+
         <h3 style="font-size:12px;color:#555;margin-bottom:6px;">Base Map</h3>
         <select id="layerSelector" class="layer-selector">
             <option value="street">Street Map</option>
@@ -164,18 +143,20 @@
 
         <div class="divider"></div>
         <div class="ctrl-section">Radar Product</div>
+
         <div style="font-size:10px;color:#888;margin-bottom:3px;">NEXRAD via IEM — loop</div>
         <div class="radar-btns">
             <div class="radar-btn active" data-product="n0q" data-source="iem" title="Base Reflectivity dual-pol (N0Q)">N0Q</div>
             <div class="radar-btn"        data-product="n0r" data-source="iem" title="Base Reflectivity legacy (N0R)">N0R</div>
-            <div class="radar-btn"        data-product="n0s" data-source="iem" title="Storm-Relative Velocity (N0S)">N0S</div>
             <div class="radar-btn"        data-product="n0u" data-source="iem" title="Base Velocity (N0U)">N0U</div>
         </div>
+
         <div style="font-size:10px;color:#888;margin-top:6px;margin-bottom:3px;">Local MRMS — loop</div>
         <div class="radar-btns">
-            <div class="radar-btn" data-product="composite"   data-source="mrms" title="MRMS Composite Reflectivity">CMP</div>
-            <div class="radar-btn" data-product="azshear_low" data-source="mrms" title="AzShear 0-2km AGL">AZS</div>
-            <div class="radar-btn" data-product="mesh"        data-source="mrms" title="MESH Instantaneous Hail">MESH</div>
+            <div class="radar-btn" data-product="composite"      data-source="mrms" title="MRMS Composite Reflectivity">CMP</div>
+            <div class="radar-btn" data-product="azshear"        data-source="mrms" title="AzShear 0-2km AGL (not available AK — insufficient coverage)">AZS</div>
+            <div class="radar-btn" data-product="mesh"           data-source="mrms" title="MESH Instantaneous Hail Size">MESH</div>
+            <div class="radar-btn" data-product="mesh_max_30min" data-source="mrms" title="MESH 30-min Maximum Hail">MX30</div>
         </div>
 
         <div class="divider"></div>
@@ -200,7 +181,7 @@
         </div><!-- end controls-body -->
     </div>
 
-    <!-- Lower-left legend -->
+    <!-- Lower-left fixed legend -->
     <div id="mapLegend">
         <div class="leg-title">Airfields</div>
         <div class="legend-item"><div class="leg-sym" style="width:12px;height:12px;background:rgba(200,30,30,0.9);"></div>Military</div>
@@ -209,15 +190,16 @@
         <div class="legend-item"><div class="leg-sym" style="width:7px;height:7px;background:rgba(255,255,255,0.9);border-color:#666;"></div>Paved &gt;2500ft</div>
     </div>
 
+    <!-- Colorbar — above legend -->
     <div id="colorbarWrap">
         <div class="colorbar-panel">
-            <div class="colorbar-title" id="colorbarTitle">Base Reflectivity (dBZ) — NEXRAD N0Q</div>
+            <div class="colorbar-title" id="colorbarTitle"></div>
             <canvas class="colorbar-strip" id="colorbarCanvas" width="200" height="14"></canvas>
             <div class="colorbar-labels" id="colorbarLabels"></div>
         </div>
     </div>
 
-    <!-- Unified loop player bar — IEM and MRMS -->
+    <!-- Unified loop player bar -->
     <div id="playerBar">
         <div id="iem-timeline">
             <div id="iem-track"><div id="iem-fill"></div></div>
@@ -255,10 +237,49 @@
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-    // ── Colormaps ──────────────────────────────────────────────────────────
+    // ── Colormaps ──────────────────────────────────────────────────────────────
+    // AzShear: renderer outputs integer x10^-3 s^-1; index.json vmin=-20, vmax=20.
     const CMAPS = {
+        n0q: {
+            title: 'Base Reflectivity (dBZ) — NEXRAD N0Q',
+            vmin: -32, vmax: 90,
+            labels: ['-32','0','20','40','60','90'],
+            stops: [
+                [-32,[0,0,0,0]],[5,[4,233,231,200]],[10,[1,159,244,220]],
+                [15,[3,0,244,220]],[20,[3,0,244,220]],[25,[2,253,2,220]],
+                [30,[0,200,0,220]],[35,[0,144,0,220]],[40,[255,255,0,220]],
+                [45,[231,192,0,220]],[50,[255,144,0,220]],[55,[255,0,0,220]],
+                [60,[214,0,0,220]],[65,[192,0,0,220]],[70,[255,0,255,230]],
+                [75,[192,0,192,230]],[80,[255,255,255,240]]
+            ]
+        },
+        n0r: {
+            title: 'Base Reflectivity (dBZ) — NEXRAD N0R',
+            vmin: -32, vmax: 80,
+            labels: ['-32','0','20','40','60','80'],
+            stops: [
+                [-32,[0,0,0,0]],[5,[4,233,231,200]],[10,[1,159,244,220]],
+                [15,[3,0,244,220]],[20,[3,0,244,220]],[25,[2,253,2,220]],
+                [30,[0,200,0,220]],[35,[0,144,0,220]],[40,[255,255,0,220]],
+                [45,[231,192,0,220]],[50,[255,144,0,220]],[55,[255,0,0,220]],
+                [60,[214,0,0,220]],[65,[192,0,0,220]],[70,[255,0,255,230]],
+                [75,[192,0,192,230]],[80,[255,255,255,240]]
+            ]
+        },
+        n0u: {
+            title: 'Base Velocity (kts) — NEXRAD N0U',
+            vmin: -100, vmax: 100,
+            labels: ['-100','-50','0','50','100'],
+            stops: [
+                [-100,[100,0,255,230]],[-50,[0,100,255,220]],
+                [ -20,[0,200,255,180]], [-5,[0,0,0,0]],
+                [   0,[0,0,0,0]],       [ 5,[0,0,0,0]],
+                [  20,[255,200,0,180]], [50,[255,80,0,220]],
+                [  70,[255,0,0,230]],  [100,[255,255,255,240]]
+            ]
+        },
         composite: {
-            title: 'Composite Reflectivity (dBZ)',
+            title: 'MRMS Composite Reflectivity (dBZ)',
             vmin: -30, vmax: 80,
             labels: ['-30','0','20','40','60','80'],
             stops: [
@@ -270,8 +291,20 @@
                 [75,[192,0,192,230]],[80,[255,255,255,240]]
             ]
         },
+        azshear: {
+            title: 'AzShear 0-2km AGL (x10\u207b\u00b3 s\u207b\u00b9)',
+            vmin: -20, vmax: 20,
+            labels: ['-20','-10','-5','0','5','10','20'],
+            stops: [
+                [-20,[100,0,255,230]], [-10,[0,100,255,220]],
+                [ -5,[0,200,255,160]], [ -2,[0,0,0,0]],
+                [  0,[0,0,0,0]],       [  2,[0,0,0,0]],
+                [  5,[255,200,0,160]], [ 10,[255,100,0,220]],
+                [ 15,[255,0,0,230]],   [ 20,[255,255,255,240]]
+            ]
+        },
         mesh: {
-            title: 'MESH Hail Size (mm)',
+            title: 'MESH Instantaneous Hail Size (mm)',
             vmin: 0, vmax: 75,
             labels: ['0','6','12','25','38','50','75mm'],
             stops: [
@@ -280,26 +313,14 @@
                 [38,[255,0,0,230]],[50,[200,0,200,240]],[75,[255,255,255,250]]
             ]
         },
-        lightning: {
-            title: 'Lightning Probability 60min (%)',
-            vmin: 0, vmax: 100,
-            labels: ['0%','25%','50%','75%','100%'],
+        mesh_max_30min: {
+            title: 'MESH 30-min Maximum Hail (mm)',
+            vmin: 0, vmax: 75,
+            labels: ['0','6','12','25','38','50','75mm'],
             stops: [
-                [0,[0,0,0,0]],[5,[255,255,100,160]],[20,[255,200,0,190]],
-                [40,[255,140,0,210]],[60,[255,0,0,220]],[80,[200,0,200,230]],
-                [100,[255,255,255,250]]
-            ]
-        },
-        azshear: {
-            title: 'Azimuthal Shear 0-2km AGL (s⁻¹)',
-            vmin: -0.05, vmax: 0.05,
-            labels: ['-.05','-.02','-.01','0','.01','.02','.05'],
-            stops: [
-                [-0.050,[100,0,255,230]],[-0.020,[0,100,255,220]],
-                [-0.010,[0,200,255,160]],[-0.005,[0,0,0,0]],
-                [ 0.000,[0,0,0,0]],     [ 0.005,[0,0,0,0]],
-                [ 0.010,[255,200,0,160]],[ 0.020,[255,100,0,220]],
-                [ 0.030,[255,0,0,230]],  [ 0.050,[255,255,255,240]]
+                [0,[0,0,0,0]],[1,[0,255,255,180]],[6,[0,200,255,200]],
+                [12,[0,255,0,210]],[19,[255,255,0,220]],[25,[255,165,0,230]],
+                [38,[255,0,0,230]],[50,[200,0,200,240]],[75,[255,255,255,250]]
             ]
         }
     };
@@ -326,10 +347,11 @@
 
     function drawColorbar(product) {
         var cm = CMAPS[product];
+        if (!cm) return;
         var canvas = document.getElementById('colorbarCanvas');
         var ctx = canvas.getContext('2d');
         var W = canvas.width;
-        for (var x=0; x<W; x++) {
+        for (var x = 0; x < W; x++) {
             var c = interpColor(cm.stops, cm.vmin, cm.vmax, x/W);
             ctx.fillStyle = 'rgba('+c[0]+','+c[1]+','+c[2]+','+(c[3]/255).toFixed(2)+')';
             ctx.fillRect(x, 0, 1, canvas.height);
@@ -337,201 +359,200 @@
         document.getElementById('colorbarTitle').textContent = cm.title;
         document.getElementById('colorbarLabels').innerHTML =
             cm.labels.map(function(l){ return '<span>'+l+'</span>'; }).join('');
+        document.getElementById('colorbarWrap').style.display = 'block';
     }
 
-    // ── Airport display tiers ──────────────────────────────────────────────
-    // Tier 1 Military:      sym z2+  lbl z5+
-    // Tier 2 Major Hub:     sym z4+  lbl z6+
-    // Tier 3 Regional:      sym z6+  lbl z7+
-    // Tier 4 Paved >2500ft: sym z7+  no label
-    var TIER_SYM_ZOOM = { 1:2, 2:4, 3:6, 4:7 };
-    var TIER_LBL_ZOOM = { 1:5, 2:6, 3:7, 4:999 };
-    var TIER_SYM_PX   = { 1:12, 2:10, 3:8, 4:7 };
+    // ── Airport tiers ──────────────────────────────────────────────────────────
+    var TIER_SYM_ZOOM   = { 1:2, 2:4, 3:6, 4:7 };
+    var TIER_LBL_ZOOM   = { 1:5, 2:6, 3:7, 4:999 };
+    var TIER_SYM_PX     = { 1:12, 2:10, 3:8, 4:7 };
     var TIER_SYM_COLOR  = { 1:'rgba(200,30,30,0.92)', 2:'rgba(25,80,200,0.92)', 3:'rgba(80,80,80,0.85)', 4:'rgba(255,255,255,0.85)' };
     var TIER_SYM_BORDER = { 1:'rgba(100,0,0,0.9)', 2:'rgba(0,30,120,0.9)', 3:'rgba(40,40,40,0.8)', 4:'rgba(80,80,80,0.8)' };
 
-    // ── State ──────────────────────────────────────────────────────────────
+    // ── State ──────────────────────────────────────────────────────────────────
     var map, symbolsLayer, labelsLayer, highlightLayer, baseLayers = {};
     var currentLayerName = 'street';
     var airports = [];
-    var radarLayer = null;
     var currentProduct = 'n0q';
-    var pollTimer = null, dragging = false;
+    var currentSource  = 'iem';
+    var pollTimer = null;
     var lastPollTime = null;
 
-    // ── Radar config ──────────────────────────────────────────────────────────
-    var IEM_BASE = 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/';
-    var MRMS_FRAMES_API = '/CAP_WxCOP/api/mrms/frames';
-    var MRMS_WMS_API    = '/CAP_WxCOP/api/mrms/wms';
+    // ── Radar / tile config ────────────────────────────────────────────────────
+    var IEM_BASE   = 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/';
+    var MRMS_TILES = '/CAP_WxCOP/static/mrms_tiles/';
 
-    var IEM_LAYERS = { 'n0q':'nexrad-n0q-900913', 'n0r':'nexrad-n0r-900913',
-                       'n0s':'nexrad-n0s-900913', 'n0u':'nexrad-n0u-900913' };
+    var IEM_LAYERS = {
+        'n0q': 'nexrad-n0q-900913',
+        'n0r': 'nexrad-n0r-900913',
+        'n0u': 'nexrad-n0u-900913'
+    };
+
     var OCONUS_BOXES = [
         { name:'ak', latMin:50.0, latMax:72.0,  lonMin:-180.0, lonMax:-129.0 },
         { name:'hi', latMin:17.0, latMax:23.5,  lonMin:-162.0, lonMax:-154.0 },
         { name:'gu', latMin: 9.0, latMax:22.0,  lonMin: 139.0, lonMax: 148.0 },
-        // PR sector covers PR, USVI, and broader Caribbean (IEM 'pr' layer)
-        { name:'pr', latMin: 8.0, latMax:22.0,  lonMin: -85.0, lonMax: -60.0 },
+        { name:'pr', latMin: 8.0, latMax:22.0,  lonMin: -85.0, lonMax: -60.0 }
     ];
-    // IEM tile cache: nexrad-n0q-900913-{ak|hi|gu|pr}
-    var SECTOR_SUFFIX = { 'ak':'-ak','hi':'-hi','gu':'-gu','pr':'-pr' };
 
-    // ── Unified loop player state ─────────────────────────────────────────────
+    // getSector() output -> MRMS tile directory name
+    var SECTOR_TO_MRMS = {
+        '':   'CONUS',
+        'ak': 'ALASKA',
+        'hi': 'HAWAII',
+        'pr': 'CARIB',
+        'gu': 'GUAM'
+    };
+
+    // ── Loop player state ──────────────────────────────────────────────────────
     var loopFrames=[], loopFrame=-1, loopPlaying=false;
     var loopTimer=null, loopSpeed=500, loopSector='init';
     var loopLayers={}, loopLayer=null;
-    var currentSource='iem';   // 'iem' or 'mrms'
-    var _lastEffectiveProduct = 'composite';
+    var _lastLoopKey = '';
 
-    // MRMS product config — CONUS and OCONUS sector composites
-    var MAPSERVER_LAYERS = {
-        'composite':        { title: 'MRMS Composite Reflectivity' },
-        'azshear_low':      { title: 'MRMS AzShear 0-2km AGL' },
-        'mesh':             { title: 'MRMS MESH Instantaneous Hail' },
-        'composite_alaska': { title: 'MRMS Composite — Alaska' },
-        'composite_hawaii': { title: 'MRMS Composite — Hawaii' },
-        'composite_carib':  { title: 'MRMS Composite — Caribbean' },
-        'composite_guam':   { title: 'MRMS Composite — Guam' },
-    };
-
-    // Map sector name to OCONUS composite product key
-    var SECTOR_TO_COMPOSITE = {
-        'ak': 'composite_alaska',
-        'hi': 'composite_hawaii',
-        'pr': 'composite_carib',
-        'gu': 'composite_guam',
-    };
-
-    // Resolve effective MRMS product — auto-switch composite to sector variant
-    function getEffectiveProduct() {
-        var sec = getSector();
-        if (currentProduct === 'composite' && sec && SECTOR_TO_COMPOSITE[sec]) {
-            return SECTOR_TO_COMPOSITE[sec];
-        }
-        return currentProduct;
-    }
-
-    // Is currentProduct an MRMS product (routed to MapServer)?
-    function isMrmsProduct(prod) {
-        return prod in MAPSERVER_LAYERS;
-    }
-
-    function getOpacity() {
-        return parseInt(document.getElementById('opacitySlider').value)/100;
-    }
+    // ── Sector / product helpers ───────────────────────────────────────────────
     function getSector() {
         if (!map) return '';
-        var c=map.getCenter(), lat=c.lat;
-        var lon=((c.lng+180)%360+360)%360-180;
-        for (var i=0;i<OCONUS_BOXES.length;i++){
-            var s=OCONUS_BOXES[i];
-            if(lat>=s.latMin&&lat<=s.latMax&&lon>=s.lonMin&&lon<=s.lonMax) return s.name;
+        var c = map.getCenter();
+        var lat = c.lat;
+        var lon = ((c.lng+180)%360+360)%360-180;
+        for (var i = 0; i < OCONUS_BOXES.length; i++) {
+            var s = OCONUS_BOXES[i];
+            if (lat>=s.latMin && lat<=s.latMax && lon>=s.lonMin && lon<=s.lonMax) return s.name;
         }
         return '';
     }
-    function bringOverlaysToFront(){
-        if(symbolsLayer)  symbolsLayer.bringToFront();
-        if(labelsLayer)   labelsLayer.bringToFront();
-        if(highlightLayer) highlightLayer.bringToFront();
+
+    // Returns MRMS tile sector string, or null if product+sector is unavailable.
+    // AzShear has no ALASKA directory — insufficient coverage for blended product.
+    function getMrmsSector() {
+        var sec = getSector();
+        var dir = (SECTOR_TO_MRMS[sec] !== undefined) ? SECTOR_TO_MRMS[sec] : 'CONUS';
+        if (currentProduct === 'azshear' && dir === 'ALASKA') return null;
+        return dir;
     }
 
-    // ── IEM tile-cache frames ─────────────────────────────────────────────────
+    // Stable key used to detect when loopRebuild is needed on pan/zoom
+    function loopKey() {
+        if (currentSource === 'iem') return 'iem:' + currentProduct + ':' + getSector();
+        var ms = getMrmsSector();
+        return 'mrms:' + currentProduct + ':' + (ms || 'UNAVAIL');
+    }
+
+    function getOpacity() {
+        return parseInt(document.getElementById('opacitySlider').value) / 100;
+    }
+
+    function bringOverlaysToFront() {
+        if (symbolsLayer)   symbolsLayer.bringToFront();
+        if (labelsLayer)    labelsLayer.bringToFront();
+        if (highlightLayer) highlightLayer.bringToFront();
+    }
+
+    // ── IEM tile-cache frames ──────────────────────────────────────────────────
     function iemBuildFrames() {
-        var hrs  = parseInt(document.getElementById('iem-duration').value)||1;
+        var hrs  = parseInt(document.getElementById('iem-duration').value) || 1;
         var mins = hrs * 60;
         var sec  = getSector();
-        var base = IEM_LAYERS[currentProduct]||IEM_LAYERS['n0q'];
-        // IEM tile cache naming:
-        //   CONUS live:  nexrad-n0q-900913-conus
-        //   CONUS loop:  nexrad-n0q-900913-m05m  (no sector suffix)
-        //   AK live:     nexrad-n0q-900913-ak
-        //   AK loop:     nexrad-n0q-900913-ak-m05m
-        var liveName  = sec ? base+'-'+sec : base+'-conus';
+        var base = IEM_LAYERS[currentProduct] || IEM_LAYERS['n0q'];
+        var liveName  = sec ? base+'-'+sec : base;
         var loopInfix = sec ? base+'-'+sec : base;
-        var frames=[];
-        for (var m=mins; m>=5; m-=5) {
-            var mm=String(m).padStart(2,'0');
-            var layerName = loopInfix+'-m'+mm+'m';
-            frames.push({ key:'iem:'+layerName, layer:layerName,
-                          label:'-'+m+' min', source:'iem', ts:null });
+        var frames = [];
+        for (var m = mins; m >= 5; m -= 5) {
+            var mm = String(m).padStart(2,'0');
+            frames.push({
+                key:   'iem:'+loopInfix+'-m'+mm+'m',
+                layer: loopInfix+'-m'+mm+'m',
+                label: '-'+m+' min',
+                source:'iem', ts: null
+            });
         }
-        frames.push({ key:'iem:'+liveName, layer:liveName,
-                      label:'LIVE', source:'iem', ts:null });
+        frames.push({ key:'iem:'+liveName, layer:liveName, label:'LIVE', source:'iem', ts:null });
         return frames;
     }
 
     function iemMakeTileLayer(layerName) {
-        return L.tileLayer(IEM_BASE+layerName+'/{z}/{x}/{y}.png', {
-            opacity:0, zIndex:400, maxZoom:18,
-            attribution:'NEXRAD &copy; <a href="https://mesonet.agron.iastate.edu/">IEM</a>',
-            errorTileUrl:'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
+        return L.tileLayer(IEM_BASE + layerName + '/{z}/{x}/{y}.png', {
+            opacity: 0, zIndex: 400, maxZoom: 18,
+            attribution: 'NEXRAD &copy; <a href="https://mesonet.agron.iastate.edu/">IEM</a>',
+            errorTileUrl: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
         });
     }
 
-    // ── MRMS WMS proxy frames ─────────────────────────────────────────────────
+    // ── MRMS local tile frames ─────────────────────────────────────────────────
+    // Reads index.json directly from the static tile tree — no Flask proxy.
+    // Duration applied by slicing the tail of the frames array.
+    // AzShear cadence ~2/min; MESH/CMP ~1/6min. Index is capped at 30 frames
+    // by the renderer. We use 12 frames/hr as a generous upper bound so the
+    // slice always covers the requested window without undercounting.
     function mrmsFetchFrames(callback) {
-        var hrs = parseInt(document.getElementById('iem-duration').value)||1;
-        var _eff = getEffectiveProduct();
-        fetch(MRMS_FRAMES_API+'?product='+_eff+'&hours='+hrs)
-            .then(function(r){ return r.json(); })
-            .then(function(data){
-                var frames = (data.frames||[]).map(function(f){
-                    return { key:'mrms:'+f.ts, layer:null,
-                             label:f.label, source:'mrms', ts:f.ts };
+        var sector = getMrmsSector();
+        if (!sector) { callback([]); return; }
+
+        var url = MRMS_TILES + currentProduct + '/' + sector + '/index.json';
+        fetch(url, { cache: 'no-cache' })
+            .then(function(r) {
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return r.json();
+            })
+            .then(function(data) {
+                var all = data.frames || [];
+                var hrs = parseInt(document.getElementById('iem-duration').value) || 1;
+                var maxFrames = Math.min(all.length, hrs * 12);
+                var frames = all.slice(-maxFrames).map(function(f) {
+                    return {
+                        key:       'mrms:' + currentProduct + ':' + f.timestamp,
+                        tileUrl:   f.tile_url,   // already contains {z}/{x}/{y}
+                        label:     fmtTime(f.valid_time),
+                        source:    'mrms',
+                        ts:        f.timestamp,
+                        validTime: f.valid_time
+                    };
                 });
                 callback(frames);
             })
-            .catch(function(e){
-                console.warn('MRMS frames fetch failed:', e);
+            .catch(function(e) {
+                console.warn('MRMS index.json fetch failed:', e);
                 callback([]);
             });
     }
 
-    // Pre-warm tile cache for MRMS frames in background
-    // Starts from latest and works backwards so recent frames are ready first
+    function mrmsMakeTileLayer(tileUrl) {
+        return L.tileLayer(tileUrl, {
+            opacity: 0, zIndex: 400,
+            maxNativeZoom: 10, maxZoom: 18,
+            attribution: 'MRMS &copy; NOAA/CIMSS',
+            errorTileUrl: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
+        });
+    }
+
+    // ── Prewarm MRMS tile cache ────────────────────────────────────────────────
     var prewarmTimer = null;
     function prewarmMrmsFrames(frames) {
-        if (prewarmTimer) { clearTimeout(prewarmTimer); prewarmTimer=null; }
-        // Start from second-to-last (latest already loaded by loopGoTo)
+        if (prewarmTimer) { clearTimeout(prewarmTimer); prewarmTimer = null; }
         var idx = frames.length - 2;
         function next() {
             if (idx < 0 || currentSource !== 'mrms') return;
             var frame = frames[idx];
             if (!loopLayers[frame.key]) {
-                // Create layer but don't add to map — just instantiate so tiles fetch
-                var l = mrmsMakeTileLayer(frame.ts);
+                var l = mrmsMakeTileLayer(frame.tileUrl);
                 loopLayers[frame.key] = l;
-                // Briefly add at opacity 0 to trigger tile load, then remove
                 l.setOpacity(0);
                 l.addTo(map);
-                setTimeout(function(){ if(map.hasLayer(l) && l!==loopLayer) map.removeLayer(l); }, 3000);
+                setTimeout(function() { if (map.hasLayer(l) && l !== loopLayer) map.removeLayer(l); }, 3000);
             }
             idx--;
-            prewarmTimer = setTimeout(next, 800); // stagger requests
+            prewarmTimer = setTimeout(next, 800);
         }
-        prewarmTimer = setTimeout(next, 1000); // start after current frame renders
+        prewarmTimer = setTimeout(next, 1000);
     }
 
-    function mrmsMakeTileLayer(ts) {
-        var eff = getEffectiveProduct();
-        var url = MRMS_WMS_API+'?product='+eff+'&ts='+(ts||'');
-        // Layer name matches the product key (composite_alaska, azshear_low, etc.)
-        var layerName = eff;
-        return L.tileLayer.wms(url, {
-            layers: layerName,
-            format:'image/png', transparent:true,
-            opacity:0, zIndex:400, version:'1.1.1',
-            srs: 'EPSG:4326',
-            attribution:'MRMS &copy; NOAA/CIMSS'
-        });
-    }
-
-    // ── Unified loop player ───────────────────────────────────────────────────
+    // ── Unified loop player ────────────────────────────────────────────────────
     function loopEnsureLayer(frame) {
         if (!loopLayers[frame.key]) {
-            loopLayers[frame.key] = frame.source==='iem'
+            loopLayers[frame.key] = frame.source === 'iem'
                 ? iemMakeTileLayer(frame.layer)
-                : mrmsMakeTileLayer(frame.ts);
+                : mrmsMakeTileLayer(frame.tileUrl);
         }
         return loopLayers[frame.key];
     }
@@ -544,8 +565,8 @@
         var prev = loopLayer;
         next.setOpacity(getOpacity());
         if (!map.hasLayer(next)) next.addTo(map);
-        if (prev && prev!==next) {
-            setTimeout(function(){ if(map.hasLayer(prev)) map.removeLayer(prev); }, 300);
+        if (prev && prev !== next) {
+            setTimeout(function() { if (map.hasLayer(prev)) map.removeLayer(prev); }, 300);
         }
         loopLayer = next;
         bringOverlaysToFront();
@@ -553,153 +574,153 @@
     }
 
     function loopStop() {
-        loopPlaying=false;
-        if(loopTimer){clearTimeout(loopTimer);loopTimer=null;}
+        loopPlaying = false;
+        if (loopTimer) { clearTimeout(loopTimer); loopTimer = null; }
         updatePlayerUI();
     }
 
     function loopStart() {
         if (!loopFrames.length) return;
-        loopPlaying=true;
+        loopPlaying = true;
         updatePlayerUI();
-        (function tick(){
-            if(!loopPlaying) return;
-            loopGoTo(loopFrame+1 >= loopFrames.length ? 0 : loopFrame+1);
-            loopTimer=setTimeout(tick, loopSpeed);
+        (function tick() {
+            if (!loopPlaying) return;
+            loopGoTo(loopFrame + 1 >= loopFrames.length ? 0 : loopFrame + 1);
+            loopTimer = setTimeout(tick, loopSpeed);
         })();
     }
 
     function loopRebuild() {
         loopStop();
-        // Clear all cached tile layers
-        Object.values(loopLayers).forEach(function(l){
-            if(map.hasLayer(l)) map.removeLayer(l);
+        Object.values(loopLayers).forEach(function(l) {
+            if (map.hasLayer(l)) map.removeLayer(l);
         });
-        loopLayers={}; loopLayer=null;
+        loopLayers = {}; loopLayer = null;
+        _lastLoopKey = loopKey();
 
-        var timeEl=document.getElementById('iem-time');
-        if(timeEl) timeEl.textContent='Loading…';
+        var timeEl  = document.getElementById('iem-time');
+        var frameEl = document.getElementById('iem-frame');
 
-        if (currentSource==='iem') {
-            var sec=getSector();
-            loopSector=sec;
-            loopFrames=iemBuildFrames();
-            var sl=document.getElementById('iem-slider');
-            if(sl) sl.max=loopFrames.length-1;
-            loopGoTo(loopFrames.length-1);
+        // AzShear + Alaska: known no-coverage condition
+        if (currentSource === 'mrms' && getMrmsSector() === null) {
+            loopFrames = [];
+            if (timeEl)  timeEl.textContent  = 'AzShear not available — AK sector';
+            if (frameEl) frameEl.textContent = '— / —';
+            return;
+        }
+
+        if (timeEl) timeEl.textContent = 'Loading\u2026';
+
+        if (currentSource === 'iem') {
+            loopSector = getSector();
+            loopFrames = iemBuildFrames();
+            var sl = document.getElementById('iem-slider');
+            if (sl) sl.max = loopFrames.length - 1;
+            loopGoTo(loopFrames.length - 1);
         } else {
-            // MRMS — fetch frame list from API
-            // Track effective product so autoRefresh can detect sector changes
-            _lastEffectiveProduct = getEffectiveProduct();
-            mrmsFetchFrames(function(frames){
+            mrmsFetchFrames(function(frames) {
                 if (!frames.length) {
-                    var timeEl=document.getElementById('iem-time');
-                    if(timeEl) timeEl.textContent='No MRMS frames available';
+                    if (timeEl) timeEl.textContent = 'No MRMS frames available';
                     return;
                 }
-                loopFrames=frames;
-                var sl=document.getElementById('iem-slider');
-                if(sl) sl.max=loopFrames.length-1;
-                loopGoTo(loopFrames.length-1);
+                loopFrames = frames;
+                var sl = document.getElementById('iem-slider');
+                if (sl) sl.max = loopFrames.length - 1;
+                loopGoTo(loopFrames.length - 1);
                 prewarmMrmsFrames(frames);
             });
         }
     }
 
     function updatePlayerUI() {
-        var n=loopFrames.length, f=loopFrame;
-        var frameEl=document.getElementById('iem-frame');
-        var timeEl =document.getElementById('iem-time');
-        var playEl =document.getElementById('iem-play');
-        var sl     =document.getElementById('iem-slider');
-        var fill   =document.getElementById('iem-fill');
-        var thumb  =document.getElementById('iem-thumb');
-        var stEl   =document.getElementById('iem-status');
-        if(frameEl) frameEl.textContent = n ? (f+1)+' / '+n : '— / —';
-        if(timeEl && n)  timeEl.textContent = loopFrames[f].label;
-        if(playEl)  playEl.textContent = loopPlaying ? '⏸' : '▶';
-        if(sl) sl.value=f;
-        var pct = n>1 ? (f/(n-1)*100) : 100;
-        if(fill)  fill.style.width=pct+'%';
-        if(thumb) thumb.style.left=pct+'%';
-        var d1=document.getElementById('iem-first'),d2=document.getElementById('iem-prev');
-        var d3=document.getElementById('iem-next'), d4=document.getElementById('iem-last');
-        if(d1) d1.disabled=f===0;      if(d2) d2.disabled=f===0;
-        if(d3) d3.disabled=f===n-1;    if(d4) d4.disabled=f===n-1;
-        if(stEl && lastPollTime){
-            var h=lastPollTime.getUTCHours(), m=lastPollTime.getUTCMinutes();
-            stEl.textContent='Upd '+String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+'Z';
+        var n = loopFrames.length, f = loopFrame;
+        var frameEl = document.getElementById('iem-frame');
+        var timeEl  = document.getElementById('iem-time');
+        var playEl  = document.getElementById('iem-play');
+        var sl      = document.getElementById('iem-slider');
+        var fill    = document.getElementById('iem-fill');
+        var thumb   = document.getElementById('iem-thumb');
+        var stEl    = document.getElementById('iem-status');
+        if (frameEl) frameEl.textContent = n ? (f+1)+' / '+n : '— / —';
+        if (timeEl && n) timeEl.textContent = loopFrames[f].label;
+        if (playEl) playEl.textContent = loopPlaying ? '\u23f8' : '\u25b6';
+        if (sl) sl.value = f;
+        var pct = n > 1 ? (f/(n-1)*100) : 100;
+        if (fill)  fill.style.width = pct + '%';
+        if (thumb) thumb.style.left = pct + '%';
+        var d1=document.getElementById('iem-first'), d2=document.getElementById('iem-prev');
+        var d3=document.getElementById('iem-next'),  d4=document.getElementById('iem-last');
+        if (d1) d1.disabled = f === 0;     if (d2) d2.disabled = f === 0;
+        if (d3) d3.disabled = f === n-1;   if (d4) d4.disabled = f === n-1;
+        if (stEl && lastPollTime) {
+            var h  = lastPollTime.getUTCHours();
+            var m2 = lastPollTime.getUTCMinutes();
+            stEl.textContent = 'Upd ' + String(h).padStart(2,'0') + ':' + String(m2).padStart(2,'0') + 'Z';
         }
     }
 
-    // Legacy alias used by map moveend
-    function showIemRadar() { loopRebuild(); }
-
-    // ── Map init ───────────────────────────────────────────────────────────
+    // ── Map init ───────────────────────────────────────────────────────────────
     function initMap() {
         map = L.map('map', {
             center: [39.0, -98.0], zoom: 5,
-            zoomControl: true,
-            minZoom: 3,
-            maxZoom: 18    // base map limit; MRMS tiles upscale via maxNativeZoom
+            zoomControl: true, minZoom: 3, maxZoom: 18
         });
 
         baseLayers = {
-            street:    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap', maxZoom: 18 }),
-            sectional: L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Specialty/World_Navigation_Charts/MapServer/tile/{z}/{y}/{x}', { attribution: 'VFR Sectional &copy; FAA/Esri', maxZoom: 12, minZoom: 5 }),
-            satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: '&copy; Esri', maxZoom: 18 }),
-            dark:      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { attribution: '&copy; OSM/CARTO', subdomains: 'abcd', maxZoom: 18 }),
-            topo:      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', { attribution: '&copy; Esri', maxZoom: 18 })
+            street:    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                { attribution: '&copy; OpenStreetMap', maxZoom: 18 }),
+            sectional: L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Specialty/World_Navigation_Charts/MapServer/tile/{z}/{y}/{x}',
+                { attribution: 'VFR Sectional &copy; FAA/Esri', maxZoom: 12, minZoom: 5 }),
+            satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                { attribution: '&copy; Esri', maxZoom: 18 }),
+            dark:      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+                { attribution: '&copy; OSM/CARTO', subdomains: 'abcd', maxZoom: 18 }),
+            topo:      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
+                { attribution: '&copy; Esri', maxZoom: 18 })
         };
         baseLayers.street.addTo(map);
 
         L.control.scale({ position: 'bottomleft', imperial: true, metric: false, maxWidth: 150 }).addTo(map);
 
-        symbolsLayer  = L.featureGroup().addTo(map);
-        labelsLayer   = L.featureGroup().addTo(map);
+        symbolsLayer   = L.featureGroup().addTo(map);
+        labelsLayer    = L.featureGroup().addTo(map);
         highlightLayer = L.featureGroup().addTo(map);
 
         setupControls();
         loadAirports();
-        currentSource = 'iem';
+
+        currentSource  = 'iem';
+        currentProduct = 'n0q';
+        drawColorbar('n0q');
         loopRebuild();
 
         map.on('zoomend moveend', function() {
             updateAirports();
-            if (currentSource==='iem' && getSector()!==loopSector) loopRebuild();
-            if (currentSource==='mrms' && currentProduct==='composite' &&
-                getEffectiveProduct()!==_lastEffectiveProduct) loopRebuild();
+            if (loopKey() !== _lastLoopKey) loopRebuild();
         });
 
-        // Auto-refresh every 2 min for MRMS, 5 min for IEM
-        // Advances to latest frame without interrupting active playback
+        // Auto-refresh: 2 min cycle works for both IEM and MRMS
         function autoRefresh() {
+            var k = loopKey();
+            if (k !== _lastLoopKey) { loopRebuild(); return; }
+
             if (currentSource === 'mrms') {
-                // Rebuild if sector changed (e.g. user panned to Alaska)
-                if (getEffectiveProduct() !== _lastEffectiveProduct) {
-                    loopRebuild(); return;
-                }
-                var hrs = parseInt(document.getElementById('iem-duration').value)||1;
+                if (getMrmsSector() === null) return; // AzShear/AK — nothing to refresh
                 mrmsFetchFrames(function(frames) {
                     if (!frames.length) return;
                     loopFrames = frames;
-                    var sl=document.getElementById('iem-slider');
-                    if(sl) sl.max=loopFrames.length-1;
-                    if (!loopPlaying) loopGoTo(loopFrames.length-1);
+                    var sl = document.getElementById('iem-slider');
+                    if (sl) sl.max = loopFrames.length - 1;
+                    if (!loopPlaying) loopGoTo(loopFrames.length - 1);
                     lastPollTime = new Date();
                     updatePlayerUI();
                 });
             } else {
-                // IEM — rebuild tile frame list and go to latest
                 var wasPlaying = loopPlaying;
-                var wasFrame   = loopFrame;
-                var oldLen     = loopFrames.length;
                 loopFrames = iemBuildFrames();
-                var sl=document.getElementById('iem-slider');
-                if(sl) sl.max=loopFrames.length-1;
-                if (!wasPlaying) {
-                    loopGoTo(loopFrames.length-1);
-                }
+                var sl = document.getElementById('iem-slider');
+                if (sl) sl.max = loopFrames.length - 1;
+                if (!wasPlaying) loopGoTo(loopFrames.length - 1);
                 lastPollTime = new Date();
                 updatePlayerUI();
             }
@@ -707,7 +728,7 @@
         pollTimer = setInterval(autoRefresh, 2 * 60 * 1000);
     }
 
-    // ── Controls ───────────────────────────────────────────────────────────
+    // ── Controls setup ─────────────────────────────────────────────────────────
     function setupControls() {
         document.getElementById('layerSelector').addEventListener('change', function(e) {
             var nl = e.target.value;
@@ -715,38 +736,34 @@
                 alert('VFR Sectional requires zoom 5+.');
                 this.value = currentLayerName; return;
             }
-            Object.values(baseLayers).forEach(function(l){ if (map.hasLayer(l)) map.removeLayer(l); });
+            Object.values(baseLayers).forEach(function(l) { if (map.hasLayer(l)) map.removeLayer(l); });
             baseLayers[nl].addTo(map);
             currentLayerName = nl;
         });
 
         document.querySelectorAll('.radar-btn').forEach(function(btn) {
             btn.addEventListener('click', function() {
-                document.querySelectorAll('.radar-btn').forEach(function(b){ b.classList.remove('active'); });
+                document.querySelectorAll('.radar-btn').forEach(function(b) { b.classList.remove('active'); });
                 this.classList.add('active');
                 currentProduct = this.dataset.product;
-                currentSource  = this.dataset.source;   // 'iem' or 'mrms'
-                // Colorbar
-                if (currentProduct==='azshear_low')  drawColorbar('azshear');
-                else if (currentProduct==='mesh')     drawColorbar('mesh');
-                else                                  drawColorbar('composite');
+                currentSource  = this.dataset.source;
+                drawColorbar(currentProduct);
                 loopRebuild();
             });
         });
 
-        // Player controls
-        document.getElementById('iem-first').addEventListener('click',   function(){ loopStop(); loopGoTo(0); });
-        document.getElementById('iem-prev').addEventListener('click',    function(){ loopStop(); loopGoTo(loopFrame-1); });
-        document.getElementById('iem-play').addEventListener('click',    function(){ loopPlaying ? loopStop() : loopStart(); });
-        document.getElementById('iem-next').addEventListener('click',    function(){ loopStop(); loopGoTo(loopFrame+1); });
-        document.getElementById('iem-last').addEventListener('click',    function(){ loopStop(); loopGoTo(loopFrames.length-1); });
-        document.getElementById('iem-refresh').addEventListener('click', function(){ loopRebuild(); }); // full rebuild on manual refresh
-        document.getElementById('iem-slider').addEventListener('input',  function(){ loopStop(); loopGoTo(parseInt(this.value)); });
-        document.getElementById('iem-speed').addEventListener('change',  function(){ loopSpeed=parseInt(this.value); });
-        document.getElementById('iem-duration').addEventListener('change', function(){ loopRebuild(); });
+        document.getElementById('iem-first').addEventListener('click',    function() { loopStop(); loopGoTo(0); });
+        document.getElementById('iem-prev').addEventListener('click',     function() { loopStop(); loopGoTo(loopFrame-1); });
+        document.getElementById('iem-play').addEventListener('click',     function() { loopPlaying ? loopStop() : loopStart(); });
+        document.getElementById('iem-next').addEventListener('click',     function() { loopStop(); loopGoTo(loopFrame+1); });
+        document.getElementById('iem-last').addEventListener('click',     function() { loopStop(); loopGoTo(loopFrames.length-1); });
+        document.getElementById('iem-refresh').addEventListener('click',  function() { loopRebuild(); });
+        document.getElementById('iem-slider').addEventListener('input',   function() { loopStop(); loopGoTo(parseInt(this.value)); });
+        document.getElementById('iem-speed').addEventListener('change',   function() { loopSpeed = parseInt(this.value); });
+        document.getElementById('iem-duration').addEventListener('change',function() { loopRebuild(); });
 
         document.getElementById('opacitySlider').addEventListener('input', function() {
-            var op = this.value/100;
+            var op = this.value / 100;
             if (loopLayer) loopLayer.setOpacity(op);
         });
 
@@ -756,70 +773,23 @@
             if (this.checked && document.getElementById('symbolToggle').checked) updateAirports();
         });
 
-        // Airport search
         document.getElementById('aptSearchInput').addEventListener('keydown', function(e) {
             if (e.key === 'Enter') searchAirport();
         });
         document.getElementById('aptSearchBtn').addEventListener('click', searchAirport);
         document.getElementById('aptClearBtn').addEventListener('click', clearHighlight);
-
-        // Player controls wired above in radar-btn click handler
     }
 
-
-    // ── Airport search / highlight ─────────────────────────────────────────
-    function searchAirport() {
-        var raw = document.getElementById('aptSearchInput').value.trim().toUpperCase();
-        if (!raw) return;
-        var msg = document.getElementById('aptSearchMsg');
-        var found = null;
-        for (var i=0; i<airports.length; i++) {
-            if (airports[i].station_id === raw) { found = airports[i]; break; }
-        }
-        if (!found) {
-            msg.style.color = '#c00';
-            msg.textContent = raw + ' not found';
-            return;
-        }
-        var lat = found.lat || found.latitude;
-        var lon = found.lon || found.longitude;
-        msg.style.color = '#2c5f41';
-        msg.textContent = found.name || found.airport_name || raw;
-
-        clearHighlight();
-
-        L.circle([lat, lon], {
-            radius: 5000,
-            color: '#ff9800', weight: 3, opacity: 0.9,
-            fillColor: '#ff9800', fillOpacity: 0.08, dashArray: '6 4'
-        }).addTo(highlightLayer);
-
-        L.circleMarker([lat, lon], {
-            radius: 8, color: '#ff9800', weight: 3,
-            fillColor: '#fff', fillOpacity: 0.9
-        }).bindTooltip(raw + (found.name||found.airport_name ? ' — '+(found.name||found.airport_name) : ''),
-            { permanent: true, direction: 'top', offset: [0, -12] })
-          .addTo(highlightLayer);
-
-        highlightLayer.bringToFront();
-        map.setView([lat, lon], Math.max(map.getZoom(), 8));
-    }
-
-    function clearHighlight() {
-        highlightLayer.clearLayers();
-        document.getElementById('aptSearchMsg').textContent = '';
-    }
-
-    // ── Airport loading + rendering ────────────────────────────────────────
+    // ── Airport loading + rendering ────────────────────────────────────────────
     function loadAirports() {
         fetch('/CAP_WxCOP/api/wind-forecast/conus')
-            .then(function(r){ if (!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
-            .then(function(data){
+            .then(function(r) { if (!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+            .then(function(data) {
                 airports = data.airports || [];
                 updateAirports();
                 document.getElementById('loading').style.display = 'none';
             })
-            .catch(function(err){
+            .catch(function(err) {
                 console.warn('Airport load failed:', err);
                 document.getElementById('loading').style.display = 'none';
             });
@@ -833,7 +803,6 @@
         if (!showSymbols) return;
 
         var zoom = map.getZoom(), bounds = map.getBounds();
-
         airports.forEach(function(apt) {
             var lat = apt.lat || apt.latitude;
             var lon = apt.lon || apt.longitude;
@@ -842,14 +811,16 @@
             var tier = Math.min(apt.label_priority || (apt.is_military ? 1 : 3), 3);
             if (zoom < TIER_SYM_ZOOM[tier]) return;
 
-            var sz = TIER_SYM_PX[tier];
+            var sz   = TIER_SYM_PX[tier];
             var zOff = tier===1 ? 1000 : tier===2 ? 500 : 100;
-            var tip  = apt.station_id + (apt.name ? ' — '+apt.name : '');
+            var tip  = apt.station_id + (apt.name ? ' \u2014 '+apt.name : '');
 
             L.marker([lat, lon], {
                 icon: L.divIcon({
                     className: '',
-                    html: '<div style="width:'+sz+'px;height:'+sz+'px;background:'+TIER_SYM_COLOR[tier]+';border:1.5px solid '+TIER_SYM_BORDER[tier]+';border-radius:50%;box-shadow:0 1px 3px rgba(0,0,0,0.5);"></div>',
+                    html: '<div style="width:'+sz+'px;height:'+sz+'px;background:'+TIER_SYM_COLOR[tier]+
+                          ';border:1.5px solid '+TIER_SYM_BORDER[tier]+
+                          ';border-radius:50%;box-shadow:0 1px 3px rgba(0,0,0,0.5);"></div>',
                     iconSize: [sz,sz], iconAnchor: [sz/2,sz/2]
                 }),
                 interactive: true, zIndexOffset: zOff
@@ -864,14 +835,52 @@
             }
         });
 
-        if (radarLayer) { symbolsLayer.bringToFront(); labelsLayer.bringToFront(); }
+        if (loopLayer) { symbolsLayer.bringToFront(); labelsLayer.bringToFront(); }
         highlightLayer.bringToFront();
     }
 
-    // ── Radar refresh button ──────────────────────────────────────────────
-    function manualRefresh() { showIemRadar(); }
+    // ── Airport search / highlight ─────────────────────────────────────────────
+    function searchAirport() {
+        var raw = document.getElementById('aptSearchInput').value.trim().toUpperCase();
+        if (!raw) return;
+        var msg = document.getElementById('aptSearchMsg');
+        var found = null;
+        for (var i = 0; i < airports.length; i++) {
+            if (airports[i].station_id === raw) { found = airports[i]; break; }
+        }
+        if (!found) {
+            msg.style.color = '#c00';
+            msg.textContent = raw + ' not found';
+            return;
+        }
+        var lat = found.lat || found.latitude;
+        var lon = found.lon || found.longitude;
+        msg.style.color = '#2c5f41';
+        msg.textContent = found.name || found.airport_name || raw;
+        clearHighlight();
 
-    // ── Utilities ──────────────────────────────────────────────────────────
+        L.circle([lat, lon], {
+            radius: 5000, color: '#ff9800', weight: 3, opacity: 0.9,
+            fillColor: '#ff9800', fillOpacity: 0.08, dashArray: '6 4'
+        }).addTo(highlightLayer);
+
+        L.circleMarker([lat, lon], {
+            radius: 8, color: '#ff9800', weight: 3,
+            fillColor: '#fff', fillOpacity: 0.9
+        }).bindTooltip(raw + (found.name||found.airport_name ? ' \u2014 '+(found.name||found.airport_name) : ''),
+            { permanent: true, direction: 'top', offset: [0, -12] })
+          .addTo(highlightLayer);
+
+        highlightLayer.bringToFront();
+        map.setView([lat, lon], Math.max(map.getZoom(), 8));
+    }
+
+    function clearHighlight() {
+        highlightLayer.clearLayers();
+        document.getElementById('aptSearchMsg').textContent = '';
+    }
+
+    // ── Utilities ──────────────────────────────────────────────────────────────
     function fmtTime(iso) {
         if (!iso) return '?';
         try {
@@ -881,15 +890,11 @@
                    String(d.getUTCMinutes()).padStart(2,'0') + 'Z';
         } catch(e) { return iso; }
     }
-    function setStatus(msg) {
-        document.getElementById('statusMsg').textContent = msg;
-        setTimeout(function(){ document.getElementById('statusMsg').textContent=''; }, 4000);
-    }
 
-    // ── UTC clock ──────────────────────────────────────────────────────────
+    // ── UTC clock ──────────────────────────────────────────────────────────────
     (function utcClock() {
-        function pad(n){ return String(n).padStart(2,'0'); }
-        function tick(){
+        function pad(n) { return String(n).padStart(2,'0'); }
+        function tick() {
             var el = document.getElementById('tbUtc');
             if (!el) return;
             var d = new Date();
@@ -900,25 +905,22 @@
         tick(); setInterval(tick, 1000);
     })();
 
-    // ── Boot ───────────────────────────────────────────────────────────────
+    // ── Collapsible controls ───────────────────────────────────────────────────
+    function toggleControls() {
+        var panel = document.getElementById('ctrlPanel');
+        var btn   = document.getElementById('collapseBtn');
+        var collapsed = panel.classList.toggle('collapsed');
+        btn.textContent = collapsed ? '\u25b6' : '\u25c0';
+        btn.title = collapsed ? 'Expand controls' : 'Collapse controls';
+    }
+
+    // ── Boot ───────────────────────────────────────────────────────────────────
     document.addEventListener('DOMContentLoaded', function() {
         initMap();
-        drawColorbar('composite');
-        document.getElementById('colorbarWrap').style.display = 'block';
-        // Controls: remove timeline scrub listeners (no longer needed)
     });
     window.addEventListener('error', function(e) {
         if (e.message && e.message.includes('message channel closed')) return true;
     });
-
-    // ── Collapsible controls panel ───────────────────────────────────────────
-    function toggleControls() {
-        const panel = document.getElementById('ctrlPanel');
-        const btn   = document.getElementById('collapseBtn');
-        const collapsed = panel.classList.toggle('collapsed');
-        btn.textContent = collapsed ? '▶' : '◀';
-        btn.title = collapsed ? 'Expand controls' : 'Collapse controls';
-    }
     </script>
 </body>
 </html>
