@@ -90,7 +90,7 @@ DB_DSN      = os.environ.get('DB_DSN',
 GFS_BASE        = Path('/LDM/models/gfs/0p25')
 GFS_CYCLES      = [0, 6, 12, 18]          # 4 cycles/day
 GFS_LOOKBACK    = 4                        # look back up to 4 cycles (24 hrs)
-GFS_FCST_HOURS  = list(range(0, 49, 3))   # F000-F048 at 3-hr steps (hourly when available)
+GFS_FCST_HOURS  = list(range(0, 25, 3))   # F000-F024 at 3-hr steps (matches CONDUIT delivery)
 
 # Forecast hours to ingest (F00 = analysis, F01-F24 = forecast)
 FCST_HOURS  = list(range(0, 19))   # F00-F18: HRRR hourly cycles go to F18
@@ -447,8 +447,11 @@ def ingest_aigfs_cycle(conn, cycle_dt, aigfs_path, sites, verbose=False):
 
 def find_latest_gfs_cycle():
     """
-    Find the most recent GFS 0.25° cycle with F000 and F048 both present.
+    Find the most recent GFS 0.25° cycle with F000 and F024 both present.
     GFS cycles run at 00/06/12/18Z. Files land ~3.5 hours after cycle time.
+    F024 is used as the completion sentinel — CONDUIT delivers GFS to F024
+    at 3-hr steps; F048 is not reliably delivered and is not needed for the
+    24-hour operational planning window.
     Returns (cycle_dt, cycle_date_dir) or (None, None).
     """
     now_utc = datetime.now(timezone.utc)
@@ -461,16 +464,16 @@ def find_latest_gfs_cycle():
         hour_str   = cycle_dt.strftime('%H')
         date_dir   = GFS_BASE / date_str
         f000 = date_dir / f'gfs_0p25_{date_str}_{hour_str}z_f000.grib2'
-        f048 = date_dir / f'gfs_0p25_{date_str}_{hour_str}z_f048.grib2'
+        f024 = date_dir / f'gfs_0p25_{date_str}_{hour_str}z_f024.grib2'
         if not (f000.exists() and f000.stat().st_size > 0):
             continue
-        if not (f048.exists() and f048.stat().st_size > 0):
-            log.info(f"GFS {date_str}/{hour_str}Z: F000 present but F048 not yet "
+        if not (f024.exists() and f024.stat().st_size > 0):
+            log.info(f"GFS {date_str}/{hour_str}Z: F000 present but F024 not yet "
                      f"complete — trying previous cycle")
             continue
-        age = now_utc.timestamp() - f048.stat().st_mtime
+        age = now_utc.timestamp() - f024.stat().st_mtime
         if age < FILE_STABILITY_SECS:
-            log.info(f"GFS {date_str}/{hour_str}Z: F048 too recent ({age:.0f}s) — waiting")
+            log.info(f"GFS {date_str}/{hour_str}Z: F024 too recent ({age:.0f}s) — waiting")
             continue
         log.info(f"Latest complete GFS cycle: {date_str}/{hour_str}Z")
         return cycle_dt, date_dir
