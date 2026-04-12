@@ -203,6 +203,7 @@ def parse_precip_type(grbs_by_shortname, idx):
     """
     Determine precip type from categorical grib2 fields.
     CRAIN, CSNOW, CICEP, CFRZR — value=1 means category is present.
+    Keys are lowercase to match FIELD_SPECS storage convention.
     Returns: 'rain', 'snow', 'sleet', 'fzra', or None
     """
     def get_val(name):
@@ -214,13 +215,13 @@ def parse_precip_type(grbs_by_shortname, idx):
         except Exception:
             return 0
 
-    if get_val('CFRZR') == 1:
+    if get_val('cfrzr') == 1:
         return 'fzra'
-    if get_val('CSNOW') == 1:
+    if get_val('csnow') == 1:
         return 'snow'
-    if get_val('CICEP') == 1:
+    if get_val('cicep') == 1:
         return 'sleet'
-    if get_val('CRAIN') == 1:
+    if get_val('crain') == 1:
         return 'rain'
     return None
 
@@ -662,18 +663,24 @@ FIELD_SPECS = [
     ('csnow', 'surface',           0,    'CSNOW surface'),
     ('cicep', 'surface',           0,    'CICEP surface'),
     ('cfrzr', 'surface',           0,    'CFRZR surface'),
+    ('vis',   'surface',           0,    'VIS surface'),
 ]
 
-# Cloud base height (not always present in all HRRR versions)
-CEIL_SPEC = ('gh', 'cloudBase', 0, 'HGT cloud base')
+# Cloud ceiling height.
+# HRRR: shortName='ceil', typeOfLevel='cloudCeiling'
+# GFS:  shortName='gh',   typeOfLevel='cloudBase' (less reliable)
+# Try HRRR form first; fall back to GFS form in load_grib_fields.
+CEIL_SPEC_HRRR = ('ceil', 'cloudCeiling')
+CEIL_SPEC_GFS  = ('gh',   'cloudBase')
 
 
 # wgrib2 match pattern for surface/near-surface fields
 # Covers all fields in FIELD_SPECS plus DSWRF for WBGT
 WGRIB2_MATCH = (
-    ":(TMP|DPT|UGRD|VGRD|GUST|PRATE|APCP|CAPE|CRAIN|CSNOW|CICEP|CFRZR)"
+    ":(TMP|DPT|UGRD|VGRD|GUST|PRATE|APCP|CAPE|CRAIN|CSNOW|CICEP|CFRZR|VIS)"
     ":(2 m above ground|10 m above ground|surface):"
     "|:DSWRF:surface:"
+    "|:CEIL:cloudCeiling:"
 )
 WGRIB2_BIN = '/usr/local/bin/wgrib2'
 
@@ -749,13 +756,16 @@ def load_grib_fields(grib_path):
             except Exception:
                 fields[shortname] = None
 
-        # Cloud base (optional)
-        try:
-            msgs = grbs.select(shortName=CEIL_SPEC[0],
-                               typeOfLevel=CEIL_SPEC[1])
-            fields['cloudbase'] = msgs[0] if msgs else None
-        except Exception:
-            fields['cloudbase'] = None
+        # Cloud ceiling — try HRRR shortName first, fall back to GFS form
+        fields['cloudbase'] = None
+        for sn, tol in (CEIL_SPEC_HRRR, CEIL_SPEC_GFS):
+            try:
+                msgs = grbs.select(shortName=sn, typeOfLevel=tol)
+                if msgs:
+                    fields['cloudbase'] = msgs[0]
+                    break
+            except Exception:
+                continue
 
         # Normalize GFS sdswrf -> dswrf for unified downstream access
         if fields.get('sdswrf') is not None and fields.get('dswrf') is None:
@@ -813,7 +823,7 @@ def upsert_site_wx(conn, records):
                 wind_dir, wind_speed_kts, wind_gust_kts,
                 tmp_c, dpt_c, heat_index_c, wind_chill_c,
                 precip_mm, precip_rate_mmhr, precip_type,
-                dswrf_wm2, wbgt_c, cape_jkg, ceil_ft,
+                dswrf_wm2, wbgt_c, cape_jkg, ceil_ft, vis_m,
                 ingested_at
             ) VALUES %s
             ON CONFLICT (site_id, model_run, forecast_hour)
@@ -832,6 +842,7 @@ def upsert_site_wx(conn, records):
                 wbgt_c           = EXCLUDED.wbgt_c,
                 cape_jkg         = EXCLUDED.cape_jkg,
                 ceil_ft          = EXCLUDED.ceil_ft,
+                vis_m            = EXCLUDED.vis_m,
                 ingested_at      = EXCLUDED.ingested_at
         """, [
             (r['site_id'], r['model_name'], r['model_run'], r['valid_time'],
@@ -840,7 +851,7 @@ def upsert_site_wx(conn, records):
              r['heat_index_c'], r['wind_chill_c'],
              r['precip_mm'], r['precip_rate_mmhr'], r['precip_type'],
              r['dswrf_wm2'], r['wbgt_c'], r['cape_jkg'], r['ceil_ft'],
-             r['ingested_at'])
+             r.get('vis_m'), r['ingested_at'])
             for r in records
         ])
     conn.commit()
@@ -924,6 +935,7 @@ def ingest_cycle(conn, cycle_dt, cycle_dir, sites, verbose=False):
             apcp_m   = val('tp')     # m accumulated
             cape     = val('cape')
             dswrf    = val('dswrf')
+            vis_raw  = val('vis')    # visibility in metres
 
             # Ceiling
             cb_m = val('cloudbase')
@@ -938,6 +950,7 @@ def ingest_cycle(conn, cycle_dt, cycle_dir, sites, verbose=False):
             precip_mm_val = round(apcp_m * 1000.0, 2) if apcp_m is not None else None
             cape_val   = round(cape, 1) if cape is not None else None
             dswrf_val  = round(dswrf, 1) if dswrf is not None else None
+            vis_m_val  = round(vis_raw) if vis_raw is not None else None
 
             # Precip type
             ptype = parse_precip_type(fields, idx)
@@ -970,6 +983,7 @@ def ingest_cycle(conn, cycle_dt, cycle_dir, sites, verbose=False):
                 'wbgt_c':         wbgt,
                 'cape_jkg':       cape_val,
                 'ceil_ft':        ceil_ft,
+                'vis_m':          vis_m_val,
                 'ingested_at':    now_utc,
             })
 
