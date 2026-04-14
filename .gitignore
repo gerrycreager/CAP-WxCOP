@@ -76,3 +76,4 @@ venv/
 *.wsgi.bak
 wwa_ingest_state.txt
 *.html.*
+a.out
