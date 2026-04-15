@@ -54,6 +54,13 @@ try:
 except Exception as e:
     print(f"⚠ Could not load Wind Forecast API: {e}")
 
+try:
+    from weather_impacts_api import weather_impacts_api
+    app.register_blueprint(weather_impacts_api, url_prefix='/api/weather-impacts')
+    print("✓ Weather Impacts API registered at /CAP_WxCOP/api/weather-impacts")
+except Exception as e:
+    print(f"⚠ Could not load Weather Impacts API: {e}")
+
 # Enhanced Weather API - Military priorities, expanded capacity
 try:
     from weather_enhanced_api import weather_enhanced_api
