@@ -156,6 +156,10 @@ def mrms_radar():
 def wbgt_calculator():
     return render_template('wbgt_calculator.html')
 
+@app.route('/weather-impacts')
+def weather_impacts():
+    return render_template('weather_impacts.html')
+
 # ============================================================================
 # LEGACY ROUTES - Maintain compatibility
 # ============================================================================
