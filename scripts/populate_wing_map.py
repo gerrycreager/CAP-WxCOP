@@ -96,6 +96,11 @@ WING_MAP = {
     'US-OR': ('ORWG', 'PCR'),
     'US-WA': ('WAWG', 'PCR'),
     # GU-GU: GUWG forthcoming, subordinate to PCR per ICL 24-07
+    # Puerto Rico Wing (PRWG/SER) — includes US Virgin Islands per CAPR 30-1
+    # OurAirports uses ISO 3166-2 subdivision codes, not US- prefix for territories
+    'PR-U-A': ('PRWG', 'SER'),   # Puerto Rico
+    'VI-SC':  ('PRWG', 'SER'),   # US Virgin Islands - St. Croix
+    'VI-ST':  ('PRWG', 'SER'),   # US Virgin Islands - St. Thomas/St. John
 }
 
 def main():
