@@ -51,7 +51,7 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 GLMP_BASE   = Path('/LDM/models/glmp')
 GFS_BASE    = Path('/LDM/models/gfs/0p25')
-LOCKFILE    = '/var/lock/ingest_glmp_impacts.lock'
+LOCKFILE    = '/home/ldm/var/logs/ingest_glmp_impacts.lock'
 DB_DSN      = os.environ.get('DB_DSN',
                              'dbname=avwx_data user=avwx_user host=192.168.0.60')
 
