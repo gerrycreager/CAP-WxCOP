@@ -262,6 +262,7 @@
     <div class="status-pill status-ok"><div class="dot"></div>LDM INGEST NOMINAL</div>
     <div class="status-pill status-ok"><div class="dot"></div>DB AVWX_DATA ONLINE</div>
     <div class="status-pill status-ok"><div class="dot"></div>GLM LIGHTNING ACTIVE</div>
+    <div class="status-pill status-ok"><div class="dot"></div>GLMP IMPACTS CURRENT</div>
     <div class="status-pill status-warn"><div class="dot"></div>DEV ENVIRONMENT</div>
   </div>
 
@@ -320,6 +321,22 @@
       </div>
     </a>
 
+    <a class="app-card new" href="/CAP_WxCOP_DEV/weather-impacts">
+      <div class="card-header">
+        <div class="card-icon">🚦</div>
+        <div class="card-badges">
+          <span class="badge badge-new">NEW</span>
+          <span class="badge badge-live">LIVE</span>
+        </div>
+      </div>
+      <div class="card-title">Weather Impacts</div>
+      <div class="card-desc">CAPR 70-1 VFR/IFR stoplight assessment for 3,566 qualified CAP airfields. Ceiling, visibility, wind, crosswind, temperature, heat index, and wind chill evaluated per airport per forecast hour. 25-hour horizon from NOAA GLMP gridded MOS. Wing ICL overrides applied.</div>
+      <div class="card-meta">
+        <span>CAPR 70-1 · GLMP · 3,566 airports · F01–F25</span>
+        <span class="card-arrow">→</span>
+      </div>
+    </a>
+
     <a class="app-card new" href="/CAP_WxCOP_DEV/wbgt">
   <div class="card-header">
     <div class="card-icon">🌡️</div>
@@ -336,9 +353,23 @@
   </div>
 </a>
 
-  </div>
+    <a class="app-card new" href="/CAP_WxCOP_DEV/admin/wing-icl">
+      <div class="card-header">
+        <div class="card-icon">⚖️</div>
+        <div class="card-badges">
+          <span class="badge badge-new">NEW</span>
+          <span class="badge badge-dev">ADMIN</span>
+        </div>
+      </div>
+      <div class="card-title">Wing ICL Overrides</div>
+      <div class="card-desc">Wing-level Individual/Command Limit overrides for CAPR 70-1 weather thresholds. Wing Directors of Operations and Stan/Eval may adjust wind and crosswind limits for their Wing. Changes apply immediately to Weather Impacts stoplights. MFA-protected.</div>
+      <div class="card-meta">
+        <span>Wing DO · Stan/Eval · CAPR 70-1 · MFA</span>
+        <span class="card-arrow">→</span>
+      </div>
+    </a>
 
-  <!-- OPERATIONAL TOOLS -->
+  </div>
   <div class="section-header">
     <div class="section-tag">Operational Tools</div>
     <div class="section-line"></div>
@@ -425,8 +456,8 @@
         <div class="card-badges"><span class="badge badge-live">LIVE</span></div>
       </div>
       <div class="card-title">Model Ingest</div>
-      <div class="card-desc">HRRR (3-km, hourly) for all CONUS aviation and cadet sites. AIGFS (AI Global Forecast System) for all OCONUS sites — Alaska, Hawaii, Puerto Rico, Guam — for both aviation wind constraints and cadet weather planning.</div>
-      <div class="card-meta"><span>HRRR CONUS · AIGFS OCONUS · data2</span></div>
+      <div class="card-desc">HRRR (3-km, hourly) for CONUS aviation and cadet sites. AIGFS for all OCONUS sites. GLMP (Gridded LAMP, 2.5-km) for Weather Impacts — ceiling, visibility, wind, temp for 3,566 airports every 30 minutes, 25-hour horizon.</div>
+      <div class="card-meta"><span>HRRR · AIGFS · GLMP · LDM · NOMADS</span></div>
     </div>
 
   </div>
