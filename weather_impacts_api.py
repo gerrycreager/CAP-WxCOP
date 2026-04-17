@@ -63,7 +63,11 @@ def parse_bounds(bounds_str):
 
 
 def color_label(color):
-    labels = {'GREEN': 'Favorable', 'YELLOW': 'Marginal', 'RED': 'Unfavorable'}
+    labels = {
+        'GREEN':   'Go',
+        'YELLOW':  'Caution — Marginal',
+        'RED':     'No-Go / Req. Auth.',
+    }
     return labels.get(color, 'Unknown')
 
 
