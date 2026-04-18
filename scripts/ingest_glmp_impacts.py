@@ -453,6 +453,7 @@ def get_airports(conn):
             ORDER BY a.station_id
         """)
         airports = cur.fetchall()
+    conn.commit()  # release transaction immediately after read
     log.info(f'Loaded {len(airports)} qualifying airports with runway data')
     return airports
 
