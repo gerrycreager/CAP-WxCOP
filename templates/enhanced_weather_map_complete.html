@@ -416,9 +416,9 @@
             </select>
             <div style="font-size:10px;color:#888;margin-top:3px;" id="glmStatus"></div>
             <div style="margin-top:4px;font-size:10px;line-height:1.6;">
-                <span style="color:#ff2222;">●</span> &lt;5 min &nbsp;
-                <span style="color:#ffcc00;">●</span> 5–15 min &nbsp;
-                <span style="color:#00cc44;">●</span> &gt;15 min
+                <span style="color:#ff2222;">⚡</span> 0–5 min (Stop if within 5NM) &nbsp;
+                <span style="color:#ff8800;">⚡</span> 5–15 min (Caution) &nbsp;
+                <span style="color:#00cc44;">⚡</span> 15–30 min (Resume if clear)
             </div>
         </div>
 
@@ -428,7 +428,7 @@
         <div class="divider"></div>
         <h3>Radar</h3>
         <label class="checkbox-label">
-            <input type="checkbox" id="radarToggle"> NEXRAD Radar (IEM)
+            <input type="checkbox" id="radarToggle"> NEXRAD Radar (IEM loop)
         </label>
         <div id="radarSubControls" style="display:none; margin-top:6px;">
             <div style="font-size:11px;color:#555;margin-bottom:3px;">Opacity</div>
@@ -437,6 +437,27 @@
             <div style="font-size:10px;color:#888;margin-top:3px;" id="mrmsStatus">
                 NEXRAD via Iowa Environmental Mesonet (~5 min latency)
             </div>
+        </div>
+        <label class="checkbox-label" style="margin-top:6px;">
+            <input type="checkbox" id="mrmsLocalToggle"> MRMS Composite (local)
+        </label>
+        <div id="mrmsLocalControls" style="display:none; margin-top:4px; margin-left:4px;">
+            <div style="font-size:11px;color:#555;margin-bottom:3px;">Duration</div>
+            <select id="mrmsLocalDuration" style="width:100%;font-size:12px;padding:2px;">
+                <option value="60">1 hour</option>
+                <option value="120" selected>2 hours</option>
+                <option value="180">3 hours</option>
+                <option value="240">4 hours</option>
+            </select>
+            <div style="display:flex;gap:4px;margin-top:4px;">
+                <button id="mlBtnFirst" style="flex:1;font-size:11px;padding:2px;">⏮</button>
+                <button id="mlBtnPrev"  style="flex:1;font-size:11px;padding:2px;">◀</button>
+                <button id="mlBtnPlay"  style="flex:1;font-size:11px;padding:2px;">▶</button>
+                <button id="mlBtnNext"  style="flex:1;font-size:11px;padding:2px;">▶|</button>
+                <button id="mlBtnLast"  style="flex:1;font-size:11px;padding:2px;">⏭</button>
+            </div>
+            <div id="mrmsLocalTime" style="font-size:10px;color:#8bc4a8;margin-top:3px;font-family:monospace;">—</div>
+            <div style="font-size:10px;color:#888;margin-top:2px;">Local MRMS · 2-min updates</div>
         </div>
     </div>
 
@@ -1236,11 +1257,13 @@
             }
 
             function buildFrames(sector) {
-                var suf = SECTOR_SUFFIX[sector] || '-conus';
+                var durSel = document.getElementById('mrmsDuration');
+                var maxMin = durSel ? parseInt(durSel.value) : 60;
+                var suf = SECTOR_SUFFIX[sector] || '';
                 var frames = [];
-                for (var m = 55; m >= 5; m -= 5) {
+                for (var m = maxMin; m >= 5; m -= 5) {
                     var mm = String(m).padStart(2, '0');
-                    frames.push({ layer: 'nexrad-n0q-m'+mm+'m'+suf, label: '-'+m+' min' });
+                    frames.push({ layer: 'nexrad-n0q-900913-m'+mm+'m'+suf, label: '-'+m+' min' });
                 }
                 frames.push({ layer: 'nexrad-n0q-900913'+suf, label: 'LIVE' });
                 return frames;
@@ -1629,6 +1652,212 @@
                 if (mtrLayer && map.hasLayer(mtrLayer)) map.removeLayer(mtrLayer);
             }
         });
+        // ── MRMS Local Composite Loop Player ────────────────────────────────
+        var mlFrames = [], mlCurrent = -1, mlPlaying = false;
+        var mlPlayTimer = null, mlPollTimer = null;
+        var mlLayers = {}, mlActiveLayer = null;
+        var ML_INDEX = '/CAP_WxCOP_DEV/static/mrms_tiles/composite/CONUS/index.json';
+        var ML_TILE_BASE = '/CAP_WxCOP_DEV/static/mrms_tiles/composite/CONUS/';
+
+        function mlLoadIndex() {
+            var minutes = parseInt(document.getElementById('mrmsLocalDuration').value) || 120;
+            fetch(ML_INDEX + '?_=' + Date.now())
+                .then(function(r) { return r.json(); })
+                .then(function(idx) {
+                    var allFrames = idx.frames || [];
+                    // Filter to selected duration
+                    var cutoff = new Date(Date.now() - minutes * 60000);
+                    mlFrames = allFrames.filter(function(f) {
+                        var ts = f.timestamp; // YYYYMMDD-HHMM
+                        var dt = new Date(
+                            ts.slice(0,4)+'-'+ts.slice(4,6)+'-'+ts.slice(6,8)+'T'+
+                            ts.slice(9,11)+':'+ts.slice(11,13)+':00Z'
+                        );
+                        return dt >= cutoff;
+                    });
+                    if (!mlFrames.length) mlFrames = allFrames.slice(-10);
+                    // Preload tile layers
+                    mlLayers = {};
+                    mlFrames.forEach(function(f) {
+                        if (!mlLayers[f.timestamp]) {
+                            mlLayers[f.timestamp] = L.tileLayer(
+                                ML_TILE_BASE + f.timestamp + '/{z}/{x}/{y}.png', {
+                                opacity: 0, maxZoom: 10, minZoom: 3, zIndex: 410,
+                                errorTileUrl: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
+                                attribution: 'MRMS &copy; NOAA/NSSL — Local'
+                            });
+                        }
+                    });
+                    mlGoFrame(mlFrames.length - 1);
+                })
+                .catch(function(e) { console.warn('MRMS local index load failed:', e); });
+        }
+
+        function mlGoFrame(idx) {
+            if (!mlFrames.length) return;
+            idx = Math.max(0, Math.min(idx, mlFrames.length - 1));
+            var ts = mlFrames[idx].timestamp;
+
+            // Hide current
+            if (mlActiveLayer && map.hasLayer(mlActiveLayer)) {
+                mlActiveLayer.setOpacity(0);
+                map.removeLayer(mlActiveLayer);
+            }
+
+            // Show new
+            mlCurrent = idx;
+            mlActiveLayer = mlLayers[ts];
+            if (mlActiveLayer) {
+                if (!map.hasLayer(mlActiveLayer)) mlActiveLayer.addTo(map);
+                mlActiveLayer.setOpacity(0.75);
+            }
+
+            // Update time display
+            var timeEl = document.getElementById('mrmsLocalTime');
+            if (timeEl) {
+                timeEl.textContent = ts.slice(0,4)+'/'+ts.slice(4,6)+'/'+ts.slice(6,8)+
+                    ' '+ts.slice(9,11)+':'+ts.slice(11,13)+'Z · F '+(idx+1)+'/'+mlFrames.length;
+            }
+        }
+
+        function mlPlay() {
+            if (mlPlaying) return;
+            mlPlaying = true;
+            document.getElementById('mlBtnPlay').textContent = '⏸';
+            mlPlayTimer = setInterval(function() {
+                var next = (mlCurrent + 1) % mlFrames.length;
+                mlGoFrame(next);
+            }, 600);
+        }
+
+        function mlPause() {
+            mlPlaying = false;
+            document.getElementById('mlBtnPlay').textContent = '▶';
+            if (mlPlayTimer) { clearInterval(mlPlayTimer); mlPlayTimer = null; }
+        }
+
+        function mlStop() {
+            mlPause();
+            // Hide all local layers
+            Object.values(mlLayers).forEach(function(l) {
+                if (map.hasLayer(l)) map.removeLayer(l);
+            });
+            mlActiveLayer = null;
+            mlCurrent = -1;
+        }
+
+        document.getElementById('mrmsLocalToggle').addEventListener('change', function() {
+            var ctrl = document.getElementById('mrmsLocalControls');
+            if (this.checked) {
+                ctrl.style.display = 'block';
+                mlLoadIndex();
+                mlPollTimer = setInterval(mlLoadIndex, 120000);
+            } else {
+                ctrl.style.display = 'none';
+                mlStop();
+                if (mlPollTimer) { clearInterval(mlPollTimer); mlPollTimer = null; }
+            }
+        });
+
+        document.getElementById('mrmsLocalDuration').addEventListener('change', function() {
+            if (document.getElementById('mrmsLocalToggle').checked) mlLoadIndex();
+        });
+
+        document.getElementById('mlBtnFirst').addEventListener('click', function() { mlPause(); mlGoFrame(0); });
+        document.getElementById('mlBtnPrev').addEventListener('click',  function() { mlPause(); mlGoFrame(mlCurrent - 1); });
+        document.getElementById('mlBtnPlay').addEventListener('click',  function() { mlPlaying ? mlPause() : mlPlay(); });
+        document.getElementById('mlBtnNext').addEventListener('click',  function() { mlPause(); mlGoFrame(mlCurrent + 1); });
+        document.getElementById('mlBtnLast').addEventListener('click',  function() { mlPause(); mlGoFrame(mlFrames.length - 1); });
+
+        // ── GLM Lightning ────────────────────────────────────────────────────
+        var glmLayer = null;
+        var glmRefreshTimer = null;
+        var GLM_API = '/CAP_WxCOP_DEV/api/glm/flashes';
+
+        function glmFlashColor(ageMinutes) {
+            if (ageMinutes < 5)  return '#ff2222';   // Red   — stop activities
+            if (ageMinutes < 15) return '#ff8800';   // Orange — caution
+            return '#00cc44';                         // Green  — resume if clear
+        }
+
+        function glmFlashSize(ageMinutes) {
+            if (ageMinutes < 5)  return 14;
+            if (ageMinutes < 15) return 11;
+            return 9;
+        }
+
+        function loadGLM() {
+            var minutes = parseInt(document.getElementById('glmMinutes').value) || 30;
+            var statusEl = document.getElementById('glmStatus');
+            if (statusEl) statusEl.textContent = 'Loading…';
+
+            fetch(GLM_API + '?minutes=' + minutes)
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (glmLayer) { map.removeLayer(glmLayer); glmLayer = null; }
+                    glmLayer = L.layerGroup();
+
+                    var features = data.features || [];
+                    var now = Date.now();
+                    var count = 0;
+
+                    features.forEach(function(f) {
+                        if (!f.geometry || !f.geometry.coordinates) return;
+                        var lon = f.geometry.coordinates[0];
+                        var lat = f.geometry.coordinates[1];
+                        var flashTime = new Date(f.properties.flash_time).getTime();
+                        var ageMin = (now - flashTime) / 60000;
+                        if (ageMin < 0 || ageMin > minutes) return;
+
+                        var color = glmFlashColor(ageMin);
+                        var size  = glmFlashSize(ageMin);
+
+                        var icon = L.divIcon({
+                            className: '',
+                            html: '<span style="font-size:' + size + 'px;color:' + color +
+                                  ';text-shadow:0 0 3px rgba(0,0,0,0.8);line-height:1;' +
+                                  'display:block;text-align:center;">⚡</span>',
+                            iconSize: [size, size],
+                            iconAnchor: [size/2, size/2]
+                        });
+
+                        L.marker([lat, lon], { icon: icon, interactive: false })
+                            .addTo(glmLayer);
+                        count++;
+                    });
+
+                    if (document.getElementById('glmToggle').checked) {
+                        glmLayer.addTo(map);
+                    }
+
+                    if (statusEl) {
+                        statusEl.textContent = count + ' flashes · last ' + minutes + ' min · ' +
+                            new Date().toUTCString().slice(17,25) + 'Z';
+                    }
+                })
+                .catch(function(e) {
+                    if (statusEl) statusEl.textContent = 'GLM load failed';
+                    console.warn('GLM fetch error:', e);
+                });
+        }
+
+        document.getElementById('glmToggle').addEventListener('change', function() {
+            var sub = document.getElementById('glmSubControls');
+            if (this.checked) {
+                sub.style.display = 'block';
+                loadGLM();
+                glmRefreshTimer = setInterval(loadGLM, 60000);
+            } else {
+                sub.style.display = 'none';
+                if (glmLayer) { map.removeLayer(glmLayer); glmLayer = null; }
+                if (glmRefreshTimer) { clearInterval(glmRefreshTimer); glmRefreshTimer = null; }
+            }
+        });
+
+        document.getElementById('glmMinutes').addEventListener('change', function() {
+            if (document.getElementById('glmToggle').checked) loadGLM();
+        });
+
         } // end initAirspaceLayers
 
     })();
