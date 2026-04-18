@@ -151,6 +151,13 @@ try:
 except Exception as e:
     print(f'⚠ Could not load MRMS WMS API: {e}')
 
+try:
+    from weather_impacts_api import weather_impacts_api
+    app.register_blueprint(weather_impacts_api, url_prefix='/api/weather-impacts')
+    print("✓ Weather Impacts API registered at /CAP_WxCOP/api/weather-impacts")
+except Exception as e:
+    print(f'⚠ Could not load Weather Impacts API: {e}')
+
 print("CAP Weather COP initialization complete.\n")
 
 # ============================================================================
@@ -188,6 +195,10 @@ def enhanced_weather_map_legacy():
 @app.route('/enhanced_weather_map.html')
 def enhanced_weather_map_html_legacy():
     return render_template('enhanced_weather_map_complete.html')
+
+@app.route('/weather-impacts')
+def weather_impacts():
+    return render_template('weather_impacts.html')
 
 @app.route('/weather_map.html')
 def weather_map_legacy():

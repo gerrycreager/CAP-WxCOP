@@ -1,515 +1,426 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CAP Wind Constraints Generator</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            padding: 2rem;
-            color: #333;
-        }
-        
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-        }
-        
-        header {
-            background: white;
-            border-radius: 12px;
-            padding: 2rem;
-            margin-bottom: 2rem;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        }
-        
-        h1 {
-            color: #667eea;
-            font-size: 2rem;
-            margin-bottom: 0.5rem;
-            font-weight: 700;
-        }
-        
-        .subtitle {
-            color: #666;
-            font-size: 1rem;
-        }
-        
-        .control-panel {
-            background: white;
-            border-radius: 12px;
-            padding: 2rem;
-            margin-bottom: 2rem;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        }
-        
-        .form-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 1.5rem;
-            margin-bottom: 1.5rem;
-        }
-        
-        .form-group {
-            display: flex;
-            flex-direction: column;
-        }
-        
-        .form-group.hidden {
-            display: none;
-        }
-        
-        label {
-            font-weight: 600;
-            margin-bottom: 0.5rem;
-            color: #555;
-            font-size: 0.9rem;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-        
-        .help-text {
-            font-size: 0.75rem;
-            color: #888;
-            margin-top: 0.25rem;
-            font-weight: normal;
-            text-transform: none;
-            letter-spacing: normal;
-        }
-        
-        select, input[type="text"], input[type="number"] {
-            padding: 0.75rem;
-            border: 2px solid #e0e0e0;
-            border-radius: 8px;
-            font-size: 1rem;
-            transition: all 0.3s ease;
-            background: white;
-        }
-        
-        select:focus, input[type="text"]:focus, input[type="number"]:focus {
-            outline: none;
-            border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-        }
-        
-        select:hover, input[type="text"]:hover, input[type="number"]:hover {
-            border-color: #667eea;
-        }
-        
-        .btn-primary {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            padding: 1rem 2rem;
-            border-radius: 8px;
-            font-size: 1rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 6px rgba(102, 126, 234, 0.3);
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-        
-        .btn-primary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 12px rgba(102, 126, 234, 0.4);
-        }
-        
-        .btn-primary:active {
-            transform: translateY(0);
-        }
-        
-        .info-box {
-            background: #f8f9fa;
-            border-left: 4px solid #667eea;
-            padding: 1.5rem;
-            border-radius: 8px;
-            margin-bottom: 2rem;
-            line-height: 1.6;
-        }
-        
-        .info-box h3 {
-            color: #667eea;
-            margin-bottom: 0.75rem;
-            font-size: 1.1rem;
-        }
-        
-        .info-box p {
-            margin-bottom: 0.5rem;
-            color: #555;
-        }
-        
-        .error-message {
-            background: #fee;
-            border-left: 4px solid #e53e3e;
-            padding: 1rem;
-            border-radius: 8px;
-            color: #c53030;
-            margin-bottom: 2rem;
-        }
-        
-        .results-section {
-            margin-top: 2rem;
-        }
-        
-        .results-header {
-            background: white;
-            border-radius: 12px;
-            padding: 1.5rem;
-            margin-bottom: 1.5rem;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        }
-        
-        .results-header h2 {
-            color: #667eea;
-            font-size: 1.75rem;
-            font-weight: 700;
-        }
-        
-        .map-card {
-            background: white;
-            border-radius: 12px;
-            padding: 2rem;
-            margin-bottom: 2rem;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        }
-        
-        .map-card h3 {
-            color: #333;
-            font-size: 1.5rem;
-            margin-bottom: 1.5rem;
-            padding-bottom: 1rem;
-            border-bottom: 2px solid #e0e0e0;
-        }
-        
-        .map-image-container {
-            position: relative;
-            margin-bottom: 1.5rem;
-            border-radius: 8px;
-            overflow: hidden;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-        }
-        
-        .map-image-container img {
-            width: 100%;
-            height: auto;
-            display: block;
-        }
-        
-        .download-section {
-            background: #f8f9fa;
-            border-radius: 8px;
-            padding: 1.5rem;
-        }
-        
-        .download-header {
-            font-size: 1.1rem;
-            font-weight: 600;
-            color: #333;
-            margin-bottom: 1rem;
-            display: flex;
-            align-items: center;
-        }
-        
-        .download-header svg {
-            margin-right: 0.5rem;
-        }
-        
-        .download-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 1rem;
-        }
-        
-        .download-btn {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 0.875rem 1.25rem;
-            background: white;
-            border: 2px solid #667eea;
-            border-radius: 8px;
-            color: #667eea;
-            text-decoration: none;
-            font-weight: 600;
-            transition: all 0.3s ease;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-        }
-        
-        .download-btn:hover {
-            background: #667eea;
-            color: white;
-            transform: translateY(-2px);
-            box-shadow: 0 4px 8px rgba(102, 126, 234, 0.3);
-        }
-        
-        .download-btn svg {
-            margin-right: 0.5rem;
-        }
-        
-        .download-btn.primary {
-            background: #667eea;
-            color: white;
-        }
-        
-        .download-btn.primary:hover {
-            background: #5568d3;
-        }
-        
-        @media (max-width: 768px) {
-            body {
-                padding: 1rem;
-            }
-            
-            h1 {
-                font-size: 1.5rem;
-            }
-            
-            .form-grid {
-                grid-template-columns: 1fr;
-            }
-            
-            .download-grid {
-                grid-template-columns: 1fr;
-            }
-        }
-    </style>
-    <script>
-        function updateFormVisibility() {
-            const selectionType = document.getElementById('selection_type').value;
-            
-            // Get form groups
-            const wingGroup = document.getElementById('wing_group');
-            const regionGroup = document.getElementById('region_group');
-            const radiusGroup = document.getElementById('radius_group');
-            const radiusCoordGroup = document.getElementById('radius_coord_group');
-            
-            // Hide all optional groups
-            wingGroup.classList.add('hidden');
-            regionGroup.classList.add('hidden');
-            radiusGroup.classList.add('hidden');
-            radiusCoordGroup.classList.add('hidden');
-            
-            // Show relevant groups
-            if (selectionType === 'wing') {
-                wingGroup.classList.remove('hidden');
-            } else if (selectionType === 'region') {
-                regionGroup.classList.remove('hidden');
-            } else if (selectionType === 'radius') {
-                radiusGroup.classList.remove('hidden');
-                radiusCoordGroup.classList.remove('hidden');
-            }
-        }
-        
-        // Initialize on page load
-        document.addEventListener('DOMContentLoaded', function() {
-            updateFormVisibility();
-        });
-    </script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CAP WxCOP</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow:wght@400;600;700&family=Barlow+Condensed:wght@600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --navy:    #0a1628;
+      --navy2:   #0f2044;
+      --blue:    #1a3a6b;
+      --accent:  #4fc3f7;
+      --accent2: #e94560;
+      --go:      #00b33c;
+      --caution: #e6b800;
+      --stop:    #cc2200;
+      --text:    #e0e8f0;
+      --muted:   #7a9abf;
+      --border:  rgba(79,195,247,0.15);
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Barlow', sans-serif;
+      background: var(--navy);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ---- Scanline texture overlay ---- */
+    body::before {
+      content: '';
+      position: fixed; inset: 0;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0,0,0,0.03) 2px,
+        rgba(0,0,0,0.03) 4px
+      );
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ---- Header ---- */
+    header {
+      position: relative; z-index: 1;
+      background: linear-gradient(180deg, #060e1c 0%, var(--navy) 100%);
+      border-bottom: 1px solid var(--border);
+      padding: 0 2rem;
+    }
+    .header-inner {
+      max-width: 1300px; margin: 0 auto;
+      display: flex; align-items: stretch;
+      justify-content: space-between;
+    }
+    .brand {
+      padding: 1.2rem 0;
+      display: flex; flex-direction: column; justify-content: center;
+    }
+    .brand-top {
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 0.65rem; font-weight: 600;
+      letter-spacing: 0.2em; text-transform: uppercase;
+      color: var(--muted); margin-bottom: 2px;
+    }
+    .brand-name {
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 1.6rem; font-weight: 700;
+      color: #fff; letter-spacing: 0.05em;
+      line-height: 1;
+    }
+    .brand-name span { color: var(--accent); }
+    .brand-sub {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.68rem; color: var(--muted);
+      margin-top: 4px; letter-spacing: 0.05em;
+    }
+    .dev-badge {
+      align-self: center;
+      background: var(--accent2);
+      color: #fff; font-family: 'Share Tech Mono', monospace;
+      font-size: 0.7rem; font-weight: 700;
+      padding: 3px 10px; border-radius: 3px;
+      letter-spacing: 0.1em;
+      animation: pulse-badge 3s ease-in-out infinite;
+    }
+    @keyframes pulse-badge {
+      0%,100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+    .header-right {
+      display: flex; align-items: center; gap: 1.5rem;
+    }
+    .clock {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.85rem; color: var(--accent);
+      text-align: right; line-height: 1.5;
+    }
+    .clock-label { font-size: 0.6rem; color: var(--muted); letter-spacing: 0.1em; }
+
+    /* ---- Main content ---- */
+    main {
+      position: relative; z-index: 1;
+      max-width: 1300px; margin: 0 auto;
+      padding: 2.5rem 2rem 3rem;
+    }
+
+    /* ---- Section headers ---- */
+    .section-header {
+      display: flex; align-items: center; gap: 12px;
+      margin-bottom: 1.2rem; margin-top: 2.5rem;
+    }
+    .section-header:first-child { margin-top: 0; }
+    .section-tag {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.65rem; color: var(--accent);
+      letter-spacing: 0.15em; text-transform: uppercase;
+      border: 1px solid var(--border);
+      padding: 2px 8px; border-radius: 2px;
+    }
+    .section-line {
+      flex: 1; height: 1px;
+      background: linear-gradient(90deg, var(--border), transparent);
+    }
+
+    /* ---- Card grid ---- */
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 1rem;
+    }
+    .card-grid.wide {
+      grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+    }
+
+    /* ---- App card ---- */
+    .app-card {
+      background: var(--navy2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1.4rem;
+      text-decoration: none;
+      color: inherit;
+      display: flex; flex-direction: column; gap: 0.6rem;
+      transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
+      cursor: pointer;
+      position: relative; overflow: hidden;
+    }
+    .app-card::before {
+      content: '';
+      position: absolute; top: 0; left: 0; right: 0;
+      height: 2px;
+      background: var(--accent);
+      transform: scaleX(0); transform-origin: left;
+      transition: transform 0.25s;
+    }
+    .app-card:hover {
+      border-color: rgba(79,195,247,0.4);
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    }
+    .app-card:hover::before { transform: scaleX(1); }
+    .app-card.new::before { background: var(--go); }
+    .app-card.new { border-color: rgba(0,179,60,0.25); }
+    .app-card.new:hover { border-color: rgba(0,179,60,0.5); }
+
+    .card-header {
+      display: flex; align-items: flex-start;
+      justify-content: space-between; gap: 8px;
+    }
+    .card-icon { font-size: 1.5rem; line-height: 1; flex-shrink: 0; }
+    .card-badges { display: flex; gap: 5px; flex-wrap: wrap; }
+    .badge {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.6rem; padding: 1px 6px;
+      border-radius: 2px; letter-spacing: 0.05em;
+    }
+    .badge-new  { background: rgba(0,179,60,0.2);  color: #00e64d; border: 1px solid rgba(0,179,60,0.3); }
+    .badge-dev  { background: rgba(233,69,96,0.2); color: #ff6b87; border: 1px solid rgba(233,69,96,0.3); }
+    .badge-live { background: rgba(79,195,247,0.15); color: var(--accent); border: 1px solid var(--border); }
+
+    .card-title {
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 1.1rem; font-weight: 700;
+      color: #fff; letter-spacing: 0.03em;
+    }
+    .card-desc {
+      font-size: 0.82rem; color: var(--muted);
+      line-height: 1.5;
+    }
+    .card-meta {
+      margin-top: auto; padding-top: 0.6rem;
+      border-top: 1px solid var(--border);
+      display: flex; align-items: center;
+      justify-content: space-between;
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.65rem; color: var(--muted);
+    }
+    .card-arrow { color: var(--accent); font-size: 0.9rem; }
+    .app-card.new .card-arrow { color: var(--go); }
+
+    /* ---- Status row ---- */
+    .status-row {
+      display: flex; gap: 1rem; flex-wrap: wrap;
+      margin-bottom: 2rem;
+    }
+    .status-pill {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.68rem; padding: 4px 12px;
+      border-radius: 3px; display: flex;
+      align-items: center; gap: 6px;
+    }
+    .status-pill .dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      animation: blink 2s ease-in-out infinite;
+    }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+    .status-ok   { background: rgba(0,179,60,0.1);  color: #00e64d; border: 1px solid rgba(0,179,60,0.2); }
+    .status-ok .dot   { background: #00e64d; }
+    .status-warn { background: rgba(230,184,0,0.1); color: #ffd700; border: 1px solid rgba(230,184,0,0.2); }
+    .status-warn .dot { background: #ffd700; }
+
+    /* ---- Footer ---- */
+    footer {
+      position: relative; z-index: 1;
+      border-top: 1px solid var(--border);
+      padding: 1rem 2rem;
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.65rem; color: var(--muted);
+      display: flex; justify-content: space-between;
+      flex-wrap: wrap; gap: 0.5rem;
+    }
+  </style>
 </head>
 <body>
-    <div class="container">
-        <header>
-    <div style="display: flex; justify-content: space-between; align-items: center;">
-        <div>
-            <h1>🌪️ CAP Wind Constraints Map Generator</h1>
-            <p class="subtitle">Predictive Model Wind Analysis for Civil Air Patrol Operations</p>
-                </div>
-        <a href="/" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 0.7rem 1.5rem; border-radius: 8px; text-decoration: none; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.2); transition: transform 0.2s, box-shadow 0.2s;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 8px rgba(0,0,0,0.3)';" onmouseout="this.style.transform=''; this.style.boxShadow='0 2px 4px rgba(0,0,0,0.2)';">
-            🏠 Home
-        </a>
+
+<header>
+  <div class="header-inner">
+    <div class="brand">
+      <div class="brand-top">Civil Air Patrol · National Headquarters</div>
+      <div class="brand-name">CAP <span>Wx</span>COP</div>
+      <div class="brand-sub">Weather Common Operating Picture — Development</div>
     </div>
-    </header>
-        
-        <div class="control-panel">
-            <form method="post" action="">
-                <div class="form-grid">
-                    <div class="form-group">
-                        <label for="selection_type">Selection Type</label>
-                        <select id="selection_type" name="selection_type" onchange="updateFormVisibility()">
-                            <option value="wing" {% if selection_type == 'state' %}selected{% endif %}>Wing</option>
-                            <option value="region" {% if selection_type == 'region' %}selected{% endif %}>CAP Region</option>
-                            <option value="radius" {% if selection_type == 'radius' %}selected{% endif %}>50nm Radius (Airport/Point)</option>
-                            <option value="conus" {% if selection_type == 'conus' %}selected{% endif %}>Continental US</option>
-                        </select>
-                    </div>
-
-                    <div class="form-group hidden" id="wing_group">
-                        <label for="wing_code">Wing Code</label>
-                        <select id="wing_code" name="wing_code">
-                            {% for code in wing_codes %}
-                            <option value="{{ code }}">{{ code }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-
-                    <div class="form-group hidden" id="region_group">
-                        <label for="region_code">CAP Region</label>
-                        <select id="region_code" name="region_code">
-                            <optgroup label="Standard Regions">
-                                <option value="NER">NER - Northeast</option>
-                                <option value="MAR">MAR - Mid-Atlantic</option>
-                                <option value="GLR">GLR - Great Lakes</option>
-                                <option value="NCR">NCR - North Central</option>
-                                <option value="RMR">RMR - Rocky Mountain</option>
-                                <option value="SWR">SWR - Southwest</option>
-                            </optgroup>
-                            <optgroup label="Southeast Region">
-                                <option value="SER-CONUS">SER-CONUS - Southeast CONUS</option>
-                                <option value="SER-CARIB">SER-CARIB - Southeast Caribbean</option>
-                            </optgroup>
-                            <optgroup label="Pacific Region">
-                                <option value="PCR-WEST">PCR-WEST - Pacific West Coast</option>
-                                <option value="PCR-HI">PCR-HI - Pacific Hawaii</option>
-                                <option value="PCR-AK">PCR-AK - Pacific Alaska</option>
-                            </optgroup>
-                        </select>
-                    </div>
-
-                    <div class="form-group hidden" id="radius_group">
-                        <label for="center_point">
-                            Airport Code or Grid Name
-                            <span class="help-text">ICAO code (e.g., KMXF) or CAP Grid identifier</span>
-                        </label>
-                        <input type="text" id="center_point" name="center_point" 
-                               placeholder="e.g., KMXF or Grid-Alpha-12">
-                    </div>
-                    
-                    <div class="form-group hidden" id="radius_coord_group">
-                        <label for="center_lat">
-                            Latitude (optional)
-                            <span class="help-text">Only if not using airport code</span>
-                        </label>
-                        <input type="number" id="center_lat" name="center_lat" 
-                               step="0.0001" placeholder="e.g., 40.4518">
-                    </div>
-                    
-                    <div class="form-group hidden" id="radius_coord_group2">
-                        <label for="center_lon">
-                            Longitude (optional)
-                            <span class="help-text">Only if not using airport code</span>
-                        </label>
-                        <input type="number" id="center_lon" name="center_lon" 
-                               step="0.0001" placeholder="e.g., -104.6574">
-                    </div>
-
-                    <div class="form-group">
-                        <label for="primary_airport">
-                            Primary Airport (Optional)
-                            <span class="help-text">Highlighted with highest priority</span>
-                        </label>
-                        <input type="text" id="primary_airport" name="primary_airport" placeholder="e.g., KMXF">
-                    </div>
-                </div>
-
-                <button type="submit" class="btn-primary">Generate Wind Map</button>
-            </form>
-        </div>
-
-        <div class="info-box">
-            <h3>ℹ️ Important Information</h3>
-            <p><strong>Testing System:</strong> This system is for testing purposes only and complies with constraint guidelines found in CAPR 70-1 regarding wind limits.</p>
-            <p><strong>Data Source:</strong> ALL data derived solely from US Government sources. Wind analysis uses NOAA HRRR (High-Resolution Rapid Refresh) model data. Airport information from OurAirports database. Airports shown have paved runways of 2,500 feet or more.</p>
-            <p><strong>Forecast Period:</strong> Analysis covers a 12-hour period from model initialization time (forecast hours 0-12). Maximum winds during this 12-hour window are displayed.</p>
-            <p><strong>Regional Sub-Divisions:</strong> Pacific Region (PCR) and Southeast Region (SER) are divided into geographic sub-regions due to their separation by thousands of miles. Only the sub-regions are available for selection to ensure readable, properly-zoomed maps (e.g., PCR-West Coast shows CA/NV/OR/WA; PCR-Hawaii shows HI; PCR-Alaska shows AK).</p>
-            <p><strong>50nm Radius Mode:</strong> Enter an airport ICAO code (e.g., KMXF) to center on that airport, or provide a CAP Grid name with latitude/longitude coordinates. The map will show all qualifying airports within 50 nautical miles.</p>
-            <p><strong>Coordinate System:</strong> All shapefiles are provided in WGS84 geographic coordinates (EPSG:4326). Shapefile downloads include all necessary component files (.shp, .shx, .dbf, .prj, .cpg) packaged as zip files.</p>
-            <p><strong>Process:</strong> When you request a map, the server locates the latest forecast cycle, fetches any missing forecast files, samples winds at qualifying airports, and generates a high-resolution image and shapefiles for download.</p>
-            <p style="color: #c53030; font-weight: 600; margin-top: 1rem;">⚠️ This is NOT an official CAP website.</p>
-        </div>
-
-        {% if error %}
-        <div class="error-message">
-            <strong>Error:</strong> {{ error }}
-        </div>
-        {% endif %}
-
-        {% if maps %}
-        <div class="results-section">
-            <div class="results-header">
-                <h2>📊 Generated Wind Map{{ 's' if maps|length > 1 else '' }}</h2>
-            </div>
-
-            {% for m in maps %}
-            <div class="map-card">
-                <h3>{{ m.map_name }}</h3>
-                
-                <div class="map-image-container">
-                    <img src="{{ m.url }}" alt="{{ m.map_name }} wind map" loading="lazy">
-                </div>
-
-                <div class="download-section">
-                    <div class="download-header">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                            <polyline points="7 10 12 15 17 10"></polyline>
-                            <line x1="12" y1="15" x2="12" y2="3"></line>
-                        </svg>
-                        Download Options
-                    </div>
-                    <p style="font-size: 0.85rem; color: #666; margin-bottom: 1rem;">
-                        Shapefiles are in WGS84 (EPSG:4326) and include all component files (.shp, .shx, .dbf, .prj, .cpg)
-                    </p>
-                    
-                    <div class="download-grid">
-                        <a href="{{ m.url }}" download class="download-btn primary">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                                <circle cx="8.5" cy="8.5" r="1.5"></circle>
-                                <polyline points="21 15 16 10 5 21"></polyline>
-                            </svg>
-                            Map Image (PNG)
-                        </a>
-                        
-                        {% if m.airport_shp_url %}
-                        <a href="{{ m.airport_shp_url }}" download class="download-btn">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <polyline points="16 17 21 12 16 7"></polyline>
-                                <line x1="21" y1="12" x2="9" y2="12"></line>
-                                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
-                            </svg>
-                            Airports (ZIP)
-                        </a>
-                        {% endif %}
-                        
-                        {% if m.contours_poly_url %}
-                        <a href="{{ m.contours_poly_url }}" download class="download-btn">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <polyline points="16 17 21 12 16 7"></polyline>
-                                <line x1="21" y1="12" x2="9" y2="12"></line>
-                                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
-                            </svg>
-                            Contour Polygons (ZIP)
-                        </a>
-                        {% endif %}
-                        
-                        {% if m.contours_line_url %}
-                        <a href="{{ m.contours_line_url }}" download class="download-btn">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <polyline points="16 17 21 12 16 7"></polyline>
-                                <line x1="21" y1="12" x2="9" y2="12"></line>
-                                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
-                            </svg>
-                            Contour Lines (ZIP)
-                        </a>
-                        {% endif %}
-                    </div>
-                </div>
-            </div>
-            {% endfor %}
-        </div>
-        {% endif %}
+    <div class="header-right">
+      <div class="dev-badge">DEV</div>
+      <div class="clock">
+        <div class="clock-label">UTC</div>
+        <div id="clock">--:--:--Z</div>
+        <div id="clock-date" style="font-size:0.7rem;color:var(--muted)"></div>
+      </div>
     </div>
+  </div>
+</header>
+
+<main>
+
+  <!-- Status row -->
+  <div class="status-row" id="status-row">
+    <div class="status-pill status-ok"><div class="dot"></div>LDM INGEST NOMINAL</div>
+    <div class="status-pill status-ok"><div class="dot"></div>DB AVWX_DATA ONLINE</div>
+    <div class="status-pill status-ok"><div class="dot"></div>GLM LIGHTNING ACTIVE</div>
+    <div class="status-pill status-ok"><div class="dot"></div>GLMP IMPACTS CURRENT</div>
+    <div class="status-pill status-warn"><div class="dot"></div>DEV ENVIRONMENT</div>
+  </div>
+
+  <!-- NEW CAPABILITIES -->
+  <div class="section-header">
+    <div class="section-tag">New Capabilities</div>
+    <div class="section-line"></div>
+  </div>
+  <div class="card-grid wide">
+
+    <a class="app-card new" href="/CAP_WxCOP/weather-impacts">
+      <div class="card-header">
+        <div class="card-icon">🚦</div>
+        <div class="card-badges">
+          <span class="badge badge-new">NEW</span>
+          <span class="badge badge-live">LIVE</span>
+        </div>
+      </div>
+      <div class="card-title">Weather Impacts</div>
+      <div class="card-desc">CAPR 70-1 VFR/IFR Go/Caution/No-Go assessment for 3,566 qualified CAP airfields. Ceiling, visibility, wind, crosswind, temperature, heat index, and wind chill evaluated per airport per forecast hour. 25-hour horizon from NOAA GLMP gridded MOS. Wing ICL overrides applied.</div>
+      <div class="card-meta">
+        <span>CAPR 70-1 · GLMP · 3,566 airports · F01–F25</span>
+        <span class="card-arrow">→</span>
+      </div>
+    </a>
+
+    <a class="app-card new" href="/CAP_WxCOP/wbgt">
+  <div class="card-header">
+    <div class="card-icon">🌡️</div>
+    <div class="card-badges">
+      <span class="badge badge-new">NEW</span>
+      <span class="badge badge-live">LIVE</span>
+    </div>
+  </div>
+  <div class="card-title">WBGT Calculator</div>
+  <div class="card-desc">Interactive Wet Bulb Globe Temperature calculator per DAFI 48-151 Ch.4. Solar elevation computed from lat/lon, date, and UTC time. Load live conditions from any cadet site. Displays DAFI flag color and CAPR 60-2 activity guidance.</div>
+  <div class="card-meta">
+    <span>CAPR 60-2 · DAFI 48-151 · Liljegren/USARIEM</span>
+    <span class="card-arrow">→</span>
+  </div>
+</a>
+
+  </div>
+  <div class="section-header">
+    <div class="section-tag">Operational Tools</div>
+    <div class="section-line"></div>
+  </div>
+  <div class="card-grid">
+
+    <a class="app-card" href="/CAP_WxCOP/enhanced-weather-map">
+      <div class="card-header">
+        <div class="card-icon">🌦️</div>
+        <div class="card-badges"><span class="badge badge-live">LIVE</span></div>
+      </div>
+      <div class="card-title">Enhanced Weather Map</div>
+      <div class="card-desc">METAR, TAF, SIGMET, AIRMET, TFR, NEXRAD radar, and NWS alerts on an interactive map. Military and civil airport overlays with popup observations.</div>
+      <div class="card-meta">
+        <span>METAR · TAF · SIGMET · AIRMET</span>
+        <span class="card-arrow">→</span>
+      </div>
+    </a>
+
+    <a class="app-card" href="/CAP_WxCOP/wind-map">
+      <div class="card-header">
+        <div class="card-icon">💨</div>
+        <div class="card-badges"><span class="badge badge-live">LIVE</span></div>
+      </div>
+      <div class="card-title">Wind Constraints Map</div>
+      <div class="card-desc">HRRR-derived wind constraint analysis for CAP aircraft operations. GO/CAUTION/STOP by airport with CAPR 70-1 wind thresholds. Temporal slider for 18-hour forecast.</div>
+      <div class="card-meta">
+        <span>HRRR · CAPR 70-1</span>
+        <span class="card-arrow">→</span>
+      </div>
+    </a>
+
+    <a class="app-card" href="/CAP_WxCOP/legacy-wind-generator">
+      <div class="card-header">
+        <div class="card-icon">🗺️</div>
+        <div class="card-badges"><span class="badge badge-live">LIVE</span></div>
+      </div>
+      <div class="card-title">Wind Constraints Generator</div>
+      <div class="card-desc">On-demand wind constraint map generation by state, region, or CONUS. Downloads shapefile and PNG outputs for mission planning and briefing.</div>
+      <div class="card-meta">
+        <span>HRRR · Shapefile · PNG</span>
+        <span class="card-arrow">→</span>
+      </div>
+    </a>
+
+  </div>
+
+  <!-- DATA & INGEST -->
+  <div class="section-header">
+    <div class="section-tag">Data Infrastructure</div>
+    <div class="section-line"></div>
+  </div>
+  <div class="card-grid">
+
+    <div class="app-card" style="cursor:default;">
+      <div class="card-header">
+        <div class="card-icon">⚡</div>
+        <div class="card-badges"><span class="badge badge-live">LIVE</span></div>
+      </div>
+      <div class="card-title">GLM Lightning</div>
+      <div class="card-desc">GOES-16/18 Geostationary Lightning Mapper flash data. Updated every minute. 1.5M+ flash records in 2-hour rolling window. Displayed on Cadet Weather COP.</div>
+      <div class="card-meta"><span>G16 · G18 · 1-min update</span></div>
+    </div>
+
+    <a class="app-card" href="/CAP_WxCOP/mrms" style="text-decoration:none;color:inherit;">
+      <div class="card-header">
+        <div class="card-icon">🛰️</div>
+        <div class="card-badges">
+          <span class="badge badge-live">LIVE</span>
+          <span class="badge badge-dev">MET</span>
+        </div>
+      </div>
+      <div class="card-title">MRMS Reflectivity</div>
+      <div class="card-desc">Multi-Radar Multi-Sensor composite reflectivity tiles. Expert/meteorologist tool — radar and GLM are integrated into the operational weather map for general use. CONUS, Alaska, Hawaii, Caribbean, and Guam domains, updated every 2 minutes.</div>
+      <div class="card-meta">
+        <span>CONUS · AK · HI · PR · GU · 2-min</span>
+        <span class="card-arrow">→</span>
+      </div>
+    </a>
+
+    <div class="app-card" style="cursor:default;">
+      <div class="card-header">
+        <div class="card-icon">🔢</div>
+        <div class="card-badges"><span class="badge badge-live">LIVE</span></div>
+      </div>
+      <div class="card-title">Model Ingest</div>
+      <div class="card-desc">HRRR (3-km, hourly) for CONUS aviation and cadet sites. AIGFS for all OCONUS sites. GLMP (Gridded LAMP, 2.5-km) for Weather Impacts — ceiling, visibility, wind, temp for 3,566 airports every 30 minutes, 25-hour horizon.</div>
+      <div class="card-meta"><span>HRRR · AIGFS · GLMP · LDM · NOMADS</span></div>
+    </div>
+
+  </div>
+
+</main>
+
+<footer>
+  <span>CAP WxCOP · Development Environment · r815 / data1 / data2</span>
+  <span>All data from US Government sources only · Not for operational use without verification</span>
+</footer>
+
+<script>
+function updateClock() {
+  const now = new Date();
+  const hh = String(now.getUTCHours()).padStart(2,'0');
+  const mm = String(now.getUTCMinutes()).padStart(2,'0');
+  const ss = String(now.getUTCSeconds()).padStart(2,'0');
+  document.getElementById('clock').textContent = `${hh}:${mm}:${ss}Z`;
+  const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  document.getElementById('clock-date').textContent =
+    `${days[now.getUTCDay()]} ${now.getUTCDate()} ${months[now.getUTCMonth()]} ${now.getUTCFullYear()}`;
+}
+updateClock();
+setInterval(updateClock, 1000);
+</script>
+
 </body>
 </html>
 

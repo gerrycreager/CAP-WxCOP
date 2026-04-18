@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <link rel="icon" href="data:,">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CAP Weather Impacts</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; overflow: hidden; height: 100vh; display: flex; flex-direction: column; }
+
+        /* ── Title bar ── */
+        #titleBar {
+            position: fixed; top: 0; left: 0; right: 0; height: 44px;
+            background: linear-gradient(135deg, #1a3a2a, #2c5f41);
+            color: white; display: flex; align-items: center;
+            padding: 0 16px; z-index: 1100; gap: 16px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+        }
+        #titleBar .tb-home { color: white; text-decoration: none; font-size: 18px; opacity: 0.85; flex-shrink: 0; }
+        #titleBar .tb-home:hover { opacity: 1; }
+        #titleBar .tb-title { font-size: 16px; font-weight: 700; letter-spacing: 0.03em; flex: 1; }
+        #titleBar .tb-utc { font-size: 13px; font-family: 'Courier New', monospace; opacity: 0.85; flex-shrink: 0; }
+
+        /* ── Main layout ── */
+        #main { display: flex; position: fixed; top: 44px; left: 0; right: 0; bottom: 0; }
+
+        /* ── Left sidebar ── */
+        #sidebar {
+            width: 240px; background: #f8f8f8; border-right: 1px solid #ddd;
+            display: flex; flex-direction: column; flex-shrink: 0; overflow-y: auto;
+            z-index: 500;
+        }
+        .sb-section { padding: 12px; border-bottom: 1px solid #e0e0e0; }
+        .sb-label { font-size: 11px; font-weight: 700; color: #666; text-transform: uppercase;
+                    letter-spacing: 0.05em; margin-bottom: 8px; }
+
+        /* Operation type toggle */
+        #opToggle { display: flex; gap: 4px; }
+        .op-btn {
+            flex: 1; padding: 6px 4px; border: 2px solid #ccc; border-radius: 4px;
+            background: white; cursor: pointer; font-size: 12px; font-weight: 600;
+            color: #555; text-align: center; transition: all 0.15s;
+        }
+        .op-btn:hover { border-color: #888; }
+        .op-btn.active { border-color: #2c5f41; background: #2c5f41; color: white; }
+
+        /* Hour slider */
+        #hourSlider { width: 100%; accent-color: #2c5f41; margin: 6px 0; }
+        #hourLabel { font-size: 14px; font-weight: 700; color: #1a3a2a; text-align: center; }
+        #hourSub { font-size: 11px; color: #888; text-align: center; margin-bottom: 4px; }
+        .hour-btns { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }
+        .hour-btn {
+            font-size: 11px; padding: 3px 6px; border-radius: 3px;
+            background: #e8e8e8; border: 1px solid #ccc; color: #555;
+            cursor: pointer; transition: background 0.15s;
+        }
+        .hour-btn:hover { background: #d0d0d0; }
+        .hour-btn.active { background: #2c5f41; color: white; border-color: #1a3a2a; }
+
+        /* ICAO search */
+        #aptSearch { display: flex; gap: 4px; }
+        #aptInput {
+            flex: 1; padding: 5px 7px; border: 1px solid #ccc; border-radius: 4px;
+            font-size: 12px; font-family: monospace; text-transform: uppercase;
+        }
+        #aptInput::placeholder { text-transform: none; }
+        #aptGoBtn { padding: 5px 8px; background: #2c5f41; color: white; border: none;
+                    border-radius: 4px; cursor: pointer; font-size: 12px; }
+        #aptGoBtn:hover { background: #4a7c59; }
+        #aptMsg { font-size: 10px; color: #888; min-height: 14px; margin-top: 2px; }
+
+        /* Toggle checkboxes */
+        .toggle-row { display: flex; align-items: center; gap: 7px; font-size: 12px;
+                      color: #444; margin: 3px 0; cursor: pointer; }
+        .toggle-row input { cursor: pointer; accent-color: #2c5f41; }
+
+        /* Legend */
+        .leg-item { display: flex; align-items: center; gap: 8px; margin: 4px 0; font-size: 12px; color: #444; }
+        .leg-dot { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; border: 1.5px solid rgba(0,0,0,0.2); }
+
+        /* Status */
+        #statusBar { font-size: 10px; color: #888; padding: 6px 12px;
+                     border-top: 1px solid #e0e0e0; margin-top: auto; }
+
+        /* ── Map ── */
+        #map { flex: 1; }
+
+        /* Airport label classes */
+        .apt-t1-lbl { font-size: 11px; font-weight: 700; color: white; background: rgba(200,30,30,0.93);
+                      padding: 2px 5px; border-radius: 3px; border: 1px solid #800;
+                      white-space: nowrap; pointer-events: none; transform: translateX(-50%); }
+        .apt-t2-lbl { font-size: 11px; font-weight: 700; color: white; background: rgba(25,80,200,0.93);
+                      padding: 2px 5px; border-radius: 3px; border: 1px solid #003a99;
+                      white-space: nowrap; pointer-events: none; transform: translateX(-50%); }
+        .apt-t3-lbl { font-size: 10px; font-weight: 600; color: #111; background: rgba(220,220,220,0.93);
+                      padding: 1px 4px; border-radius: 3px; border: 1px solid #888;
+                      white-space: nowrap; pointer-events: none; transform: translateX(-50%); }
+
+        /* ── Right detail panel ── */
+        #detailPanel {
+            width: 380px; background: white; border-left: 1px solid #ddd;
+            display: none; flex-direction: column; flex-shrink: 0; overflow-y: auto;
+            z-index: 500;
+        }
+        #detailPanel.visible { display: flex; }
+
+        #detailHeader { padding: 12px 14px; border-bottom: 1px solid #eee; background: #f8f8f8; }
+        #detailClose { float: right; background: none; border: none; font-size: 18px;
+                       cursor: pointer; color: #888; line-height: 1; padding: 0 4px; }
+        #detailClose:hover { color: #333; }
+        #detailStation { font-size: 16px; font-weight: 700; color: #1a3a2a; }
+        #detailName { font-size: 12px; color: #666; margin-top: 2px; }
+
+        #detailBanner {
+            margin: 12px 14px 8px; padding: 10px; border-radius: 6px;
+            text-align: center; font-size: 14px; font-weight: 700; letter-spacing: 0.04em;
+        }
+        .banner-GREEN  { background: #e8f5e9; color: #1b5e20; border: 1px solid #a5d6a7; }
+        .banner-YELLOW { background: #fffde7; color: #f57f17; border: 1px solid #ffe082; }
+        .banner-RED    { background: #ffebee; color: #b71c1c; border: 1px solid #ef9a9a; }
+        .banner-UNKNOWN{ background: #f5f5f5; color: #9e9e9e; border: 1px solid #e0e0e0; }
+
+        /* Parameter grid */
+        .param-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+                      padding: 0 14px 10px; }
+        .param-box { border-radius: 5px; padding: 8px; background: #f8f8f8;
+                     border: 1px solid #eee; text-align: center; }
+        .param-label { font-size: 10px; text-transform: uppercase; color: #888;
+                       letter-spacing: 0.04em; margin-bottom: 3px; }
+        .param-value { font-size: 13px; font-weight: 600; }
+        .pv-GREEN  { color: #2e7d32; }
+        .pv-YELLOW { color: #f57f17; }
+        .pv-RED    { color: #c62828; }
+        .pv-UNKNOWN{ color: #9e9e9e; }
+
+        /* Forecast table */
+        #fcstWrap { padding: 0 14px 14px; overflow-x: auto; }
+        .fcst-section-label {
+            font-size: 11px; font-weight: 700; color: #2c5f41; text-transform: uppercase;
+            letter-spacing: 0.04em; margin: 8px 0 4px;
+        }
+        .fcst-tbl { width: 100%; border-collapse: collapse; font-size: 11px; min-width: 320px; }
+        .fcst-tbl th { background: #2c5f41; color: white; padding: 5px 6px;
+                       text-align: center; font-weight: 600; white-space: nowrap; }
+        .fcst-tbl td { padding: 4px 6px; border-bottom: 1px solid #f0f0f0;
+                       text-align: center; white-space: nowrap; }
+        .fcst-tbl tr.selected { background: #e8f5e9; }
+        .fcst-tbl tr:hover { background: #f5f5f5; cursor: pointer; }
+        .chip { display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+                vertical-align: middle; margin-right: 3px; }
+        .chip-GREEN  { background: #43a047; }
+        .chip-YELLOW { background: #fdd835; }
+        .chip-RED    { background: #e53935; }
+        .chip-UNKNOWN{ background: #bdbdbd; }
+        .cell-RED    { color: #c62828; font-weight: 700; }
+        .cell-YELLOW { color: #f57f17; font-weight: 600; }
+
+        /* Loading overlay */
+        #loading { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+                   background: white; padding: 20px 40px; border-radius: 8px;
+                   box-shadow: 0 4px 15px rgba(0,0,0,0.2); z-index: 2000;
+                   font-size: 16px; color: #333; }
+    </style>
+</head>
+<body>
+
+<div id="titleBar">
+    <a href="/" class="tb-home" title="Home">&#127968;</a>
+    <span class="tb-title">&#9992; CAP Weather Impacts — CAPR 70-1</span>
+    <span class="tb-utc" id="tbUtc"></span>
+</div>
+
+<div id="main">
+
+    <!-- Left sidebar -->
+    <div id="sidebar">
+
+        <!-- Operation type -->
+        <div class="sb-section">
+            <div class="sb-label">Operation Type</div>
+            <div id="opToggle">
+                <div class="op-btn active" data-op="vfr">VFR Fixed Wing</div>
+                <div class="op-btn"        data-op="ifr">IFR Fixed Wing</div>
+            </div>
+        </div>
+
+        <!-- Forecast hour -->
+        <div class="sb-section">
+            <div class="sb-label">Forecast Hour</div>
+            <div id="hourLabel">—</div>
+            <div id="hourSub">—</div>
+            <input type="range" id="hourSlider" min="1" max="25" value="1"
+                   oninput="onHourChange(parseInt(this.value))">
+            <div class="hour-btns" id="hourBtns"></div>
+        </div>
+
+        <!-- Airport search -->
+        <div class="sb-section">
+            <div class="sb-label">Find Airport</div>
+            <div id="aptSearch">
+                <input type="text" id="aptInput" maxlength="4" placeholder="ICAO e.g. KLSF">
+                <button id="aptGoBtn" onclick="searchAirport()">Go</button>
+            </div>
+            <div id="aptMsg"></div>
+        </div>
+
+        <!-- Display toggles -->
+        <div class="sb-section">
+            <div class="sb-label">Display</div>
+            <label class="toggle-row">
+                <input type="checkbox" id="showLabels" checked> Airport labels
+            </label>
+        </div>
+
+        <!-- Legend -->
+        <div class="sb-section">
+            <div class="sb-label">Impacts Legend</div>
+            <div class="leg-item"><div class="leg-dot" style="background:#43a047;"></div>Go — Within limits</div>
+            <div class="leg-item"><div class="leg-dot" style="background:#fdd835;border-color:#888;"></div>Caution — Marginal conditions</div>
+            <div class="leg-item"><div class="leg-dot" style="background:#e53935;"></div>No-Go / Requires Auth. Release</div>
+            <div class="leg-item"><div class="leg-dot" style="background:#bdbdbd;"></div>No data</div>
+            <div style="font-size:10px;color:#888;margin-top:6px;">
+                Worst-parameter-wins per airport<br>
+                Source: NOAA GLMP · CAPR 70-1
+            </div>
+        </div>
+
+        <div id="statusBar">Loading…</div>
+    </div>
+
+    <!-- Map -->
+    <div id="map"></div>
+
+    <!-- Right detail panel -->
+    <div id="detailPanel">
+        <div id="detailHeader">
+            <button id="detailClose" onclick="closeDetail()">&#x2715;</button>
+            <div id="detailStation">—</div>
+            <div id="detailName">—</div>
+        </div>
+        <div id="detailBanner" class="banner-UNKNOWN">—</div>
+        <div class="param-grid" id="paramGrid"></div>
+        <div id="fcstWrap">
+            <div class="fcst-section-label">25-Hour Forecast</div>
+            <table class="fcst-tbl" id="fcstTbl">
+                <thead>
+                    <tr>
+                        <th>Hr</th>
+                        <th>Valid (Z)</th>
+                        <th>Status</th>
+                        <th>Ceil</th>
+                        <th>Vis</th>
+                        <th>Wind</th>
+                        <th>XW</th>
+                        <th>Tmp°F</th>
+                    </tr>
+                </thead>
+                <tbody id="fcstTbody"></tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+
+<div id="loading">Loading weather impacts…</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ── Constants ─────────────────────────────────────────────────────────────
+const API_BASE    = '/CAP_WxCOP/api/weather-impacts';
+const METAR_API   = '/CAP_WxCOP/api/weather/station';
+const COLOR_HEX   = { GREEN: '#43a047', YELLOW: '#fdd835', RED: '#e53935', UNKNOWN: '#bdbdbd' };
+const COLOR_LABEL = { GREEN: 'Go', YELLOW: 'Caution — Marginal', RED: 'No-Go / Req. Auth.', UNKNOWN: 'No Data' };
+const QUICK_HOURS = [1, 3, 6, 9, 12, 18, 24];
+
+// CAPR 70-1 parameter labels for display
+const PARAM_LABELS = {
+    wind:       'Wind Speed',
+    crosswind:  'Crosswind',
+    ceiling:    'Ceiling',
+    visibility: 'Visibility',
+    temp_cold:  'Temp (Cold)',
+    temp_hot:   'Temp (Hot)',
+    wind_chill: 'Wind Chill',
+    heat_index: 'Heat Index',
+};
+
+// Airport display tiers
+const TIER_SYM_ZOOM   = { 1:3, 2:5, 3:6, 4:7 };
+const TIER_LBL_ZOOM   = { 1:5, 2:7, 3:8, 4:999 };
+const TIER_SYM_PX     = { 1:14, 2:11, 3:9, 4:7 };
+
+// ── State ─────────────────────────────────────────────────────────────────
+var map, symbolsLayer, labelsLayer, highlightLayer, baseLayers;
+var currentOp      = 'vfr';
+var currentHour    = 1;
+var allData        = [];   // full airport array for current hour
+var selectedStation = null;
+var availableHours = [];
+var modelRun       = null;
+var pollTimer      = null;
+
+// ── Map init ──────────────────────────────────────────────────────────────
+function initMap() {
+    map = L.map('map', { center: [39.0, -98.0], zoom: 5, minZoom: 3, maxZoom: 18 });
+
+    baseLayers = {
+        street:    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                    { attribution: '&copy; OpenStreetMap', maxZoom: 18 }),
+        satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                    { attribution: '&copy; Esri', maxZoom: 18 }),
+        dark:      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+                    { attribution: '&copy; OSM/CARTO', subdomains: 'abcd', maxZoom: 18 }),
+        topo:      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
+                    { attribution: '&copy; Esri', maxZoom: 18 }),
+    };
+    baseLayers.street.addTo(map);
+    L.control.layers({
+        'Street':    baseLayers.street,
+        'Satellite': baseLayers.satellite,
+        'Dark':      baseLayers.dark,
+        'Topo':      baseLayers.topo,
+    }, {}, { position: 'topright' }).addTo(map);
+
+    L.control.scale({ position: 'bottomleft', imperial: true, metric: false }).addTo(map);
+
+    symbolsLayer   = L.featureGroup().addTo(map);
+    labelsLayer    = L.featureGroup().addTo(map);
+    highlightLayer = L.featureGroup().addTo(map);
+
+    map.on('zoomend moveend', updateMarkers);
+}
+
+// ── Quick-hour buttons ────────────────────────────────────────────────────
+function buildHourBtns() {
+    var el = document.getElementById('hourBtns');
+    el.innerHTML = '';
+    QUICK_HOURS.forEach(function(h) {
+        var btn = document.createElement('button');
+        btn.className = 'hour-btn' + (h === currentHour ? ' active' : '');
+        btn.dataset.hour = h;
+        btn.textContent = 'F' + String(h).padStart(2,'0');
+        btn.addEventListener('click', function() { onHourChange(h); });
+        el.appendChild(btn);
+    });
+}
+
+function updateHourBtns(h) {
+    document.querySelectorAll('.hour-btn').forEach(function(btn) {
+        btn.classList.toggle('active', parseInt(btn.dataset.hour) === h);
+        // Update labels to valid times if available
+        var hr = parseInt(btn.dataset.hour);
+        var row = allData.length ? findHourRow(allData[0], hr) : null;
+        if (row && row.valid_time) {
+            btn.textContent = fmtTime(row.valid_time);
+        }
+    });
+}
+
+function updateHourLabel(h) {
+    var row = allData.length ? findHourRow(allData[0], h) : null;
+    document.getElementById('hourSlider').value = h;
+    if (row && row.valid_time) {
+        document.getElementById('hourLabel').textContent = fmtTime(row.valid_time) + 'Z';
+        document.getElementById('hourSub').textContent = 'F+' + String(h).padStart(2,'0');
+    } else {
+        document.getElementById('hourLabel').textContent = 'F+' + String(h).padStart(2,'0');
+        document.getElementById('hourSub').textContent = '—';
+    }
+}
+
+// ── Data loading ──────────────────────────────────────────────────────────
+function loadData() {
+    var bounds = map.getBounds();
+    var bStr   = [
+        bounds.getWest().toFixed(2),
+        bounds.getSouth().toFixed(2),
+        bounds.getEast().toFixed(2),
+        bounds.getNorth().toFixed(2)
+    ].join(',');
+
+    var url = API_BASE + '/airports?hour=' + currentHour +
+              '&op=' + currentOp + '&bounds=' + bStr + '&limit=5000';
+
+    fetch(url)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            allData  = data.airports || [];
+            modelRun = data.model_run || null;
+            updateMarkers();
+            updateHourLabel(currentHour);
+            updateHourBtns(currentHour);
+            updateStatus(data);
+            document.getElementById('loading').style.display = 'none';
+            if (selectedStation) {
+                var apt = allData.find(function(a) { return a.station_id === selectedStation; });
+                // Don't reload full detail on pan — just update banner if airport in view
+            }
+        })
+        .catch(function(e) {
+            console.warn('Weather impacts load failed:', e);
+            document.getElementById('loading').style.display = 'none';
+        });
+}
+
+function updateStatus(data) {
+    var age = data.model_run
+        ? Math.round((Date.now() - new Date(data.model_run).getTime()) / 60000)
+        : null;
+    var el = document.getElementById('statusBar');
+    el.textContent = data.count + ' airports · ' +
+        (data.model_run ? 'Run: ' + fmtTime(data.model_run) + 'Z' : '—') +
+        (age !== null ? ' (' + age + ' min ago)' : '');
+}
+
+// ── Marker rendering ──────────────────────────────────────────────────────
+function updateMarkers() {
+    symbolsLayer.clearLayers();
+    labelsLayer.clearLayers();
+
+    var zoom   = map.getZoom();
+    var bounds = map.getBounds();
+    var showLabels = document.getElementById('showLabels').checked;
+
+    allData.forEach(function(apt) {
+        if (!apt.lat || !apt.lon) return;
+        if (!bounds.contains([apt.lat, apt.lon])) return;
+
+        var tier = apt.is_military ? 1 :
+                   (apt.longest_rwy_ft >= 8000 ? 2 :
+                   (apt.longest_rwy_ft >= 4000 ? 3 : 4));
+
+        if (zoom < TIER_SYM_ZOOM[tier]) return;
+
+        var sz     = TIER_SYM_PX[tier];
+        var color  = COLOR_HEX[apt.color] || COLOR_HEX.UNKNOWN;
+        var border = apt.color === 'YELLOW' ? '#888' : 'rgba(0,0,0,0.3)';
+        var zOff   = tier === 1 ? 1000 : tier === 2 ? 500 : 100;
+
+        var icon = L.divIcon({
+            className: '',
+            html: '<div style="width:' + sz + 'px;height:' + sz + 'px;' +
+                  'background:' + color + ';border:2px solid ' + border + ';' +
+                  'border-radius:50%;box-shadow:0 1px 4px rgba(0,0,0,0.4);"></div>',
+            iconSize: [sz, sz], iconAnchor: [sz/2, sz/2]
+        });
+
+        var tip = apt.station_id +
+                  (apt.name ? ' — ' + apt.name : '') +
+                  ' | ' + (COLOR_LABEL[apt.color] || 'Unknown') +
+                  (apt.worst_param ? ' (' + (PARAM_LABELS[apt.worst_param] || apt.worst_param) + ')' : '');
+
+        L.marker([apt.lat, apt.lon], { icon: icon, zIndexOffset: zOff })
+            .bindTooltip(tip, { permanent: false, direction: 'top',
+                                offset: [0, -sz/2-2], className: 'wx-tooltip' })
+            .on('click', function() { loadStationDetail(apt.station_id); })
+            .addTo(symbolsLayer);
+
+        if (showLabels && zoom >= TIER_LBL_ZOOM[tier]) {
+            var lblClass = 'apt-t' + Math.min(tier, 3) + '-lbl';
+            L.marker([apt.lat, apt.lon], {
+                icon: L.divIcon({
+                    className: lblClass, html: apt.station_id,
+                    iconSize: null, iconAnchor: [0, sz + 14]
+                }),
+                interactive: false, zIndexOffset: zOff + 10
+            }).addTo(labelsLayer);
+        }
+    });
+
+    highlightLayer.bringToFront();
+}
+
+// ── Station detail panel ──────────────────────────────────────────────────
+function loadStationDetail(stationId) {
+    selectedStation = stationId;
+    document.getElementById('detailStation').textContent = stationId;
+    document.getElementById('detailName').textContent = 'Loading…';
+    document.getElementById('detailBanner').className = 'banner-UNKNOWN';
+    document.getElementById('detailBanner').textContent = '—';
+    document.getElementById('paramGrid').innerHTML = '';
+    document.getElementById('fcstTbody').innerHTML = '';
+    document.getElementById('detailPanel').classList.add('visible');
+
+    fetch(API_BASE + '/station/' + stationId + '?op=' + currentOp)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            renderDetail(data);
+        })
+        .catch(function(e) {
+            document.getElementById('detailName').textContent = 'Error loading data';
+            console.warn('Station detail failed:', e);
+        });
+}
+
+function renderDetail(data) {
+    var station  = data.station || {};
+    var forecast = data.forecast || [];
+
+    document.getElementById('detailStation').textContent = station.station_id || '—';
+    document.getElementById('detailName').textContent =
+        (station.name || '') +
+        (station.is_military ? ' ★ Military' : '') +
+        (station.elevation_ft ? ' · ' + station.elevation_ft + ' ft MSL' : '');
+
+    // Current hour row
+    var row = forecast.find(function(r) { return r.forecast_hour === currentHour; })
+              || forecast[0];
+    if (!row) return;
+
+    // Banner
+    var banner = document.getElementById('detailBanner');
+    banner.className = 'banner-' + (row.color || 'UNKNOWN');
+    banner.textContent = (COLOR_LABEL[row.color] || row.color || '—') +
+        (row.worst_param ? ' — ' + (PARAM_LABELS[row.worst_param] || row.worst_param) : '') +
+        ' · Valid ' + (row.valid_time ? fmtTime(row.valid_time) + 'Z' : '—');
+
+    // Parameter grid — key values with color coding
+    var params = [
+        { label: 'Ceiling',   value: row.ceil_display || '—',
+          cls: ceilClass(row.ceil_ft) },
+        { label: 'Visibility', value: row.vis_display || '—',
+          cls: visClass(row.vis_m) },
+        { label: 'Wind',      value: row.wind_dir !== null && row.wind_speed_kts !== null
+                                     ? row.wind_dir + '° / ' + row.wind_speed_kts.toFixed(0) + ' kt'
+                                     : '—',
+          cls: windClass(row.wind_speed_kts) },
+        { label: 'Crosswind', value: row.crosswind_kts !== null
+                                     ? row.crosswind_kts.toFixed(1) + ' kt'
+                                     : '—',
+          cls: xwindClass(row.crosswind_kts, currentOp) },
+        { label: 'Temp °F',   value: row.tmp_f !== null ? row.tmp_f.toFixed(1) + '°' : '—',
+          cls: 'pv-GREEN' },
+        { label: 'Heat Index', value: row.heat_index_f !== null ? row.heat_index_f.toFixed(1) + '°' : '—',
+          cls: hiClass(row.heat_index_f) },
+        { label: 'Wind Chill', value: row.wind_chill_f !== null ? row.wind_chill_f.toFixed(1) + '°' : '—',
+          cls: wcClass(row.wind_chill_f) },
+        { label: 'Best Rwy',  value: row.best_runway_hdg !== null
+                                     ? 'Rwy ' + String(Math.round(row.best_runway_hdg/10)).padStart(2,'0')
+                                     : '—',
+          cls: '' },
+    ];
+
+    var grid = document.getElementById('paramGrid');
+    grid.innerHTML = '';
+    params.forEach(function(p) {
+        grid.innerHTML += '<div class="param-box">' +
+            '<div class="param-label">' + p.label + '</div>' +
+            '<div class="param-value ' + p.cls + '">' + p.value + '</div>' +
+            '</div>';
+    });
+
+    // Forecast table
+    var tbody = document.getElementById('fcstTbody');
+    tbody.innerHTML = '';
+    forecast.forEach(function(r) {
+        var isSelected = r.forecast_hour === currentHour;
+        var tr = document.createElement('tr');
+        if (isSelected) tr.className = 'selected';
+
+        var wind = r.wind_speed_kts !== null
+            ? r.wind_speed_kts.toFixed(0) + (r.wind_gust_kts ? 'G' + r.wind_gust_kts.toFixed(0) : '') + 'kt'
+            : '—';
+        var xw = r.crosswind_kts !== null ? r.crosswind_kts.toFixed(1) + 'kt' : '—';
+
+        tr.innerHTML =
+            '<td>F' + String(r.forecast_hour).padStart(2,'0') + '</td>' +
+            '<td>' + (r.valid_time ? fmtTime(r.valid_time) : '—') + '</td>' +
+            '<td><span class="chip chip-' + (r.color||'UNKNOWN') + '"></span>' +
+                (COLOR_LABEL[r.color] || '—') + '</td>' +
+            '<td class="' + ceilClass(r.ceil_ft) + '">' + (r.ceil_display || '—') + '</td>' +
+            '<td class="' + visClass(r.vis_m) + '">' + (r.vis_display || '—') + '</td>' +
+            '<td class="' + windClass(r.wind_speed_kts) + '">' + wind + '</td>' +
+            '<td class="' + xwindClass(r.crosswind_kts, currentOp) + '">' + xw + '</td>' +
+            '<td>' + (r.tmp_f !== null ? r.tmp_f.toFixed(0) + '°' : '—') + '</td>';
+
+        tr.addEventListener('click', function() { onHourChange(r.forecast_hour); });
+        tbody.appendChild(tr);
+    });
+
+    // Scroll selected row into view
+    var selRow = tbody.querySelector('tr.selected');
+    if (selRow) selRow.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+function closeDetail() {
+    selectedStation = null;
+    document.getElementById('detailPanel').classList.remove('visible');
+}
+
+// ── Color helper functions (mirror server-side thresholds) ────────────────
+function ceilClass(ft) {
+    if (ft === null || ft === undefined) return 'pv-UNKNOWN';
+    if (ft === 99999 || ft > 2000) return 'pv-GREEN';
+    if (ft >= 500) return 'pv-YELLOW';
+    return 'pv-RED';
+}
+function visClass(m) {
+    if (m === null || m === undefined) return 'pv-UNKNOWN';
+    if (m > 3200) return 'pv-GREEN';
+    if (m >= 1600) return 'pv-YELLOW';
+    return 'pv-RED';
+}
+function windClass(kts) {
+    if (kts === null || kts === undefined) return 'pv-UNKNOWN';
+    if (kts < 25) return 'pv-GREEN';
+    if (kts < 30) return 'pv-YELLOW';
+    return 'pv-RED';
+}
+function xwindClass(kts, op) {
+    if (kts === null || kts === undefined) return 'pv-UNKNOWN';
+    var yellow = op === 'ifr' ? 8 : 8;
+    var red    = op === 'ifr' ? 13 : 15;
+    if (kts < yellow) return 'pv-GREEN';
+    if (kts < red)    return 'pv-YELLOW';
+    return 'pv-RED';
+}
+function hiClass(f) {
+    if (f === null || f === undefined) return '';
+    if (f <= 90)  return 'pv-GREEN';
+    if (f <= 101) return 'pv-YELLOW';
+    return 'pv-RED';
+}
+function wcClass(f) {
+    if (f === null || f === undefined) return '';
+    if (f > 40)  return 'pv-GREEN';
+    if (f >= 22) return 'pv-YELLOW';
+    return 'pv-RED';
+}
+
+// ── Airport search ────────────────────────────────────────────────────────
+function searchAirport() {
+    var raw = document.getElementById('aptInput').value.trim().toUpperCase();
+    var msg = document.getElementById('aptMsg');
+    if (!raw) return;
+
+    var found = allData.find(function(a) { return a.station_id === raw; });
+    if (found) {
+        msg.style.color = '#2c5f41';
+        msg.textContent = found.name || raw;
+        map.setView([found.lat, found.lon], Math.max(map.getZoom(), 9), { animate: true });
+        loadStationDetail(found.station_id);
+    } else {
+        msg.style.color = '#c00';
+        msg.textContent = raw + ' not in current view — try zooming out';
+    }
+}
+
+// ── Hour change ───────────────────────────────────────────────────────────
+function onHourChange(h) {
+    currentHour = h;
+    document.getElementById('hourSlider').value = h;
+    updateHourBtns(h);
+    updateHourLabel(h);
+    loadData();
+    if (selectedStation) loadStationDetail(selectedStation);
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+function fmtTime(iso) {
+    if (!iso) return '—';
+    try {
+        var d = new Date(iso);
+        return String(d.getUTCDate()).padStart(2,'0') +
+               String(d.getUTCHours()).padStart(2,'0') +
+               String(d.getUTCMinutes()).padStart(2,'0');
+    } catch(e) { return iso; }
+}
+
+function findHourRow(airport, h) {
+    // airport object doesn't have forecast array — just return null
+    return null;
+}
+
+// ── Controls wiring ───────────────────────────────────────────────────────
+function setupControls() {
+    document.querySelectorAll('.op-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            document.querySelectorAll('.op-btn').forEach(function(b) {
+                b.classList.remove('active');
+            });
+            this.classList.add('active');
+            currentOp = this.dataset.op;
+            loadData();
+            if (selectedStation) loadStationDetail(selectedStation);
+        });
+    });
+
+    document.getElementById('hourSlider').addEventListener('input', function() {
+        onHourChange(parseInt(this.value));
+    });
+
+    document.getElementById('showLabels').addEventListener('change', updateMarkers);
+
+    document.getElementById('aptInput').addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') searchAirport();
+    });
+
+    map.on('moveend', function() { loadData(); });
+}
+
+// ── UTC clock ─────────────────────────────────────────────────────────────
+(function utcClock() {
+    function pad(n) { return String(n).padStart(2,'0'); }
+    function tick() {
+        var el = document.getElementById('tbUtc');
+        if (!el) return;
+        var d = new Date();
+        el.textContent = d.getUTCFullYear() + '-' + pad(d.getUTCMonth()+1) + '-' +
+            pad(d.getUTCDate()) + ' ' + pad(d.getUTCHours()) + ':' +
+            pad(d.getUTCMinutes()) + ':' + pad(d.getUTCSeconds()) + 'Z';
+    }
+    tick(); setInterval(tick, 1000);
+})();
+
+// ── Boot ──────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', function() {
+    initMap();
+    buildHourBtns();
+    setupControls();
+    loadData();
+    // Auto-refresh every 5 min
+    pollTimer = setInterval(function() { loadData(); }, 5 * 60 * 1000);
+});
+
+window.addEventListener('error', function(e) {
+    if (e.message && e.message.includes('message channel closed')) return true;
+});
+</script>
+</body>
+</html>

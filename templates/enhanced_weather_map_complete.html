@@ -176,13 +176,13 @@
         /* ── MRMS radar player bar ───────────────────────────── */
         #mrmsPlayerBar {
             display: none; position: fixed;
-            bottom: 0; left: 0; right: 0; height: 90px;
+            bottom: 0; left: 0; right: 0; height: 50px;
             background: #1a1a2e; color: white; z-index: 1100;
-            flex-direction: column; padding: 6px 16px 8px;
+            flex-direction: row; align-items: center; padding: 0 16px; gap: 8px;
             box-shadow: 0 -2px 10px rgba(0,0,0,0.5);
         }
         #mrmsPlayerBar.active { display: flex; }
-        body.radar-open #map { bottom: 90px; }
+        body.radar-open #map { bottom: 50px; }
 
         #mrmsTimeline {
             position: relative; height: 22px; margin-bottom: 4px; cursor: pointer;
@@ -232,7 +232,7 @@
             pointer-events: none;
             transition: bottom 0.2s;
         }
-        body.radar-open #fixedLegend { bottom: 100px; }
+        body.radar-open #fixedLegend { bottom: 60px; }
         #fixedLegend .leg-section-title {
             font-size: 10px; font-weight: 700; color: #555;
             text-transform: uppercase; letter-spacing: 0.04em;
@@ -258,7 +258,7 @@
         #mrmsColorbar {
             display: none; position: fixed; bottom: 215px; left: 10px; z-index: 1001;
         }
-        body.radar-open #mrmsColorbar { bottom: 215px; }
+        body.radar-open #mrmsColorbar { bottom: 270px; }
         #mrmsColorbar .cb-panel {
             background: rgba(255,255,255,0.93); border-radius: 6px;
             padding: 5px 8px; box-shadow: 0 1px 6px rgba(0,0,0,0.3);
@@ -416,9 +416,9 @@
             </select>
             <div style="font-size:10px;color:#888;margin-top:3px;" id="glmStatus"></div>
             <div style="margin-top:4px;font-size:10px;line-height:1.6;">
-                <span style="color:#ff2222;">●</span> &lt;5 min &nbsp;
-                <span style="color:#ffcc00;">●</span> 5–15 min &nbsp;
-                <span style="color:#00cc44;">●</span> &gt;15 min
+                <span style="color:#ff2222;">⚡</span> 0–5 min (Stop if within 5NM) &nbsp;
+                <span style="color:#ff8800;">⚡</span> 5–15 min (Caution) &nbsp;
+                <span style="color:#00cc44;">⚡</span> 15–30 min (Resume if clear)
             </div>
         </div>
 
@@ -428,7 +428,7 @@
         <div class="divider"></div>
         <h3>Radar</h3>
         <label class="checkbox-label">
-            <input type="checkbox" id="radarToggle"> NEXRAD Radar (IEM)
+            <input type="checkbox" id="radarToggle"> NEXRAD Radar (IEM loop)
         </label>
         <div id="radarSubControls" style="display:none; margin-top:6px;">
             <div style="font-size:11px;color:#555;margin-bottom:3px;">Opacity</div>
@@ -437,6 +437,27 @@
             <div style="font-size:10px;color:#888;margin-top:3px;" id="mrmsStatus">
                 NEXRAD via Iowa Environmental Mesonet (~5 min latency)
             </div>
+        </div>
+        <label class="checkbox-label" style="margin-top:6px;">
+            <input type="checkbox" id="mrmsLocalToggle"> MRMS Composite (local)
+        </label>
+        <div id="mrmsLocalControls" style="display:none; margin-top:4px; margin-left:4px;">
+            <div style="font-size:11px;color:#555;margin-bottom:3px;">Duration</div>
+            <select id="mrmsLocalDuration" style="width:100%;font-size:12px;padding:2px;">
+                <option value="60">1 hour</option>
+                <option value="120" selected>2 hours</option>
+                <option value="180">3 hours</option>
+                <option value="240">4 hours</option>
+            </select>
+            <div style="display:flex;gap:4px;margin-top:4px;">
+                <button id="mlBtnFirst" style="flex:1;font-size:11px;padding:2px;">⏮</button>
+                <button id="mlBtnPrev"  style="flex:1;font-size:11px;padding:2px;">◀</button>
+                <button id="mlBtnPlay"  style="flex:1;font-size:11px;padding:2px;">▶</button>
+                <button id="mlBtnNext"  style="flex:1;font-size:11px;padding:2px;">▶|</button>
+                <button id="mlBtnLast"  style="flex:1;font-size:11px;padding:2px;">⏭</button>
+            </div>
+            <div id="mrmsLocalTime" style="font-size:10px;color:#8bc4a8;margin-top:3px;font-family:monospace;">—</div>
+            <div style="font-size:10px;color:#888;margin-top:2px;">Local MRMS · 2-min updates</div>
         </div>
     </div>
 
@@ -589,6 +610,7 @@
 
         function initMap() {
             map = L.map('map', { zoomControl: true });
+            window._capMap = map;  // expose for GLM/MRMS local scope
             map.fitBounds([[24.0, -125.0], [50.0, -66.0]], {maxZoom: 4});
 
 
@@ -1212,104 +1234,201 @@
             tick(); setInterval(tick, 1000);
         })();
 
-        // ── IEM NEXRAD WMS Radar ──────────────────────────────────────────────
+        // ── IEM NEXRAD WMS Radar with time-step player ────────────────────────
         (function() {
-            // Source: Iowa Environmental Mesonet NEXRAD WMS
-            // URL: https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0q.cgi
-            // Latency: ~5 minutes (IEM ingest cycle)
-            // Covers: CONUS, Alaska, Hawaii, Puerto Rico, Guam
-
-            var IEM_WMS_URL = 'https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0q.cgi';
-
-            var IEM_LAYERS = {
-                'CONUS':  'nexrad-n0q-900913-conus',
-                'ALASKA': 'nexrad-n0q-900913-ak',
-                'HAWAII': 'nexrad-n0q-900913-hi',
-                'PR':     'nexrad-n0q-900913-pr',
-                'GUAM':   'nexrad-n0q-900913-gu',
-            };
+            var IEM_BASE = 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/';
 
             var OCONUS_BOXES = [
-                { name: 'ALASKA', latMin: 50.0, latMax: 72.0,  lonMin: -180.0, lonMax: -129.0 },
-                { name: 'HAWAII', latMin: 17.0, latMax: 23.5,  lonMin: -161.0, lonMax: -154.0 },
-                { name: 'GUAM',   latMin:  9.0, latMax: 22.0,  lonMin:  139.0, lonMax:  148.0 },
-                { name: 'PR',     latMin: 16.0, latMax: 19.5,  lonMin:  -68.0, lonMax:  -64.0 },
+                { name: 'ak', latMin: 50.0, latMax: 72.0,  lonMin: -180.0, lonMax: -129.0 },
+                { name: 'hi', latMin: 17.0, latMax: 23.5,  lonMin: -161.0, lonMax: -154.0 },
+                { name: 'gu', latMin:  9.0, latMax: 22.0,  lonMin:  139.0, lonMax:  148.0 },
+                { name: 'pr', latMin: 16.0, latMax: 19.5,  lonMin:  -68.0, lonMax:  -64.0 },
             ];
+            var SECTOR_SUFFIX = { 'ak': '-ak', 'hi': '-hi', 'gu': '-gu', 'pr': '-pr' };
 
-            var radarLayer    = null;
-            var radarVisible  = false;
-            var _curSector    = 'CONUS';
-            var radarPollTimer = null;
-
-            function getIemSector() {
-                if (!map) return 'CONUS';
-                var c   = map.getCenter();
-                var lat = c.lat;
+            function getSector() {
+                if (!map) return '';
+                var c = map.getCenter(), lat = c.lat;
                 var lon = ((c.lng + 180) % 360 + 360) % 360 - 180;
                 for (var i = 0; i < OCONUS_BOXES.length; i++) {
                     var s = OCONUS_BOXES[i];
-                    if (lat >= s.latMin && lat <= s.latMax &&
-                        lon >= s.lonMin && lon <= s.lonMax) return s.name;
+                    if (lat>=s.latMin&&lat<=s.latMax&&lon>=s.lonMin&&lon<=s.lonMax) return s.name;
                 }
-                return 'CONUS';
+                return '';
             }
 
-            function showRadar() {
-                var sector    = getIemSector();
-                _curSector    = sector;
-                var layerName = IEM_LAYERS[sector] || IEM_LAYERS['CONUS'];
-                var opacity   = parseInt(document.getElementById('mrmsOpacity').value, 10) / 100;
+            function buildFrames(sector) {
+                var durSel = document.getElementById('mrmsDuration');
+                var maxMin = durSel ? parseInt(durSel.value) : 60;
+                var suf = SECTOR_SUFFIX[sector] || '';
+                var frames = [];
+                for (var m = maxMin; m >= 5; m -= 5) {
+                    var mm = String(m).padStart(2, '0');
+                    frames.push({ layer: 'nexrad-n0q-900913-m'+mm+'m'+suf, label: '-'+m+' min' });
+                }
+                frames.push({ layer: 'nexrad-n0q-900913'+suf, label: 'LIVE' });
+                return frames;
+            }
 
-                if (radarLayer && map.hasLayer(radarLayer)) map.removeLayer(radarLayer);
-
-                radarLayer = L.tileLayer.wms(IEM_WMS_URL, {
-                    layers:      layerName,
-                    format:      'image/png',
-                    transparent: true,
-                    opacity:     opacity,
-                    attribution: 'NEXRAD &copy; <a href="https://mesonet.agron.iastate.edu/">IEM</a>',
-                    zIndex:      400,
-                    version:     '1.1.1',
+            function makeTileLayer(layerName) {
+                return L.tileLayer(IEM_BASE + layerName + '/{z}/{x}/{y}.png', {
+                    opacity: 0, attribution: 'NEXRAD &copy; <a href="https://mesonet.agron.iastate.edu/">IEM</a>',
+                    zIndex: 400, maxZoom: 18,
+                    errorTileUrl: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
                 });
+            }
 
-                radarLayer.addTo(map);
-                radarLayer.bringToFront();
-                if (typeof labelsLayer !== 'undefined') labelsLayer.bringToFront();
+            var radarVisible = false, radarLayers = {}, radarLayer = null;
+            var frames = [], currentFrame = -1, playing = false, playTimer = null, pollTimer = null;
+            var _curSector = 'init';
 
-                document.getElementById('mrmsStatus').textContent =
-                    'NEXRAD via IEM — ' + sector + ' (~5 min latency)';
+            function getOpacity() {
+                var el = document.getElementById('mrmsOpacity');
+                return el ? parseInt(el.value,10)/100 : 0.7;
+            }
+
+            function ensureLayer(name) {
+                if (!radarLayers[name]) radarLayers[name] = makeTileLayer(name);
+                return radarLayers[name];
+            }
+
+            function goToFrame(idx) {
+                if (!frames.length) return;
+                idx = Math.max(0, Math.min(frames.length-1, idx));
+                currentFrame = idx;
+                var next = ensureLayer(frames[idx].layer);
+                var prev = radarLayer;
+                next.setOpacity(getOpacity());
+                if (!map.hasLayer(next)) next.addTo(map);
+                if (prev && prev !== next) {
+                    setTimeout(function(){ if(map.hasLayer(prev)) map.removeLayer(prev); }, 400);
+                }
+                radarLayer = next;
+                updateUI();
+            }
+
+            function updateUI() {
+                var fd = document.getElementById('mrmsFrameDisplay');
+                var td = document.getElementById('mrmsTimeDisplay');
+                var pb = document.getElementById('mBtnPlay');
+                if (fd) fd.textContent = frames.length ? (currentFrame+1)+' / '+frames.length : '— / —';
+                if (td) td.textContent = frames.length ? frames[currentFrame].label : 'No data';
+                if (pb) pb.textContent = playing ? '⏸' : '▶';
+                var f=currentFrame, l=frames.length-1;
+                var bF=document.getElementById('mBtnFirst'), bP=document.getElementById('mBtnPrev');
+                var bN=document.getElementById('mBtnNext'),  bL=document.getElementById('mBtnLast');
+                if(bF) bF.disabled=f===0; if(bP) bP.disabled=f===0;
+                if(bN) bN.disabled=f===l; if(bL) bL.disabled=f===l;
+            }
+
+            function stopPlay() {
+                playing = false;
+                if (playTimer) { clearTimeout(playTimer); playTimer = null; }
+                updateUI();
+            }
+
+            function startPlay() {
+                if (!frames.length) return;
+                playing = true;
+                updateUI();
+                (function tick() {
+                    if (!playing) return;
+                    var next = currentFrame + 1 >= frames.length ? 0 : currentFrame + 1;
+                    goToFrame(next);
+                    playTimer = setTimeout(tick, 600);
+                })();
+            }
+
+            function buildAndShow() {
+                var sector = getSector();
+                if (sector !== _curSector) {
+                    Object.keys(radarLayers).forEach(function(k){
+                        if(map.hasLayer(radarLayers[k])) map.removeLayer(radarLayers[k]);
+                    });
+                    radarLayers = {}; radarLayer = null; _curSector = sector;
+                }
+                frames = buildFrames(sector);
+                goToFrame(frames.length - 1);
+            }
+
+            function drawNexradColorbar() {
+                var canvas = document.getElementById('mrmsCbCanvas');
+                if (!canvas) return;
+                var ctx = canvas.getContext('2d'), W = canvas.width;
+                var stops = [
+                    [-30,[0,0,0,0]],[5,[4,233,231,200]],[10,[1,159,244,220]],
+                    [15,[3,0,244,220]],[20,[3,0,244,220]],[25,[2,253,2,220]],
+                    [30,[0,200,0,220]],[35,[0,144,0,220]],[40,[255,255,0,220]],
+                    [45,[231,192,0,220]],[50,[255,144,0,220]],[55,[255,0,0,220]],
+                    [60,[214,0,0,220]],[65,[192,0,0,220]],[70,[255,0,255,230]],
+                    [75,[192,0,192,230]],[80,[255,255,255,240]]
+                ];
+                var vmin=-30, vmax=80;
+                for (var x=0; x<W; x++) {
+                    var v = vmin + (x/W)*(vmax-vmin), c=[0,0,0,0];
+                    for (var i=0; i<stops.length-1; i++) {
+                        if (v>=stops[i][0] && v<=stops[i+1][0]) {
+                            var f2 = stops[i+1][0]>stops[i][0] ? (v-stops[i][0])/(stops[i+1][0]-stops[i][0]) : 0;
+                            c=[0,1,2,3].map(function(j){return Math.round(stops[i][1][j]+f2*(stops[i+1][1][j]-stops[i][1][j]));});
+                            break;
+                        }
+                    }
+                    ctx.fillStyle='rgba('+c[0]+','+c[1]+','+c[2]+','+(c[3]/255).toFixed(2)+')';
+                    ctx.fillRect(x,0,1,canvas.height);
+                }
+                var labels = document.getElementById('mrmsCbLabels');
+                if (labels) labels.innerHTML = ['-30','0','20','40','60','80']
+                    .map(function(l){return '<span>'+l+'</span>';}).join('');
             }
 
             document.addEventListener('DOMContentLoaded', function() {
                 document.getElementById('radarToggle').addEventListener('change', function(e) {
-                    var sub = document.getElementById('radarSubControls');
-                    var cb  = document.getElementById('mrmsColorbar');
+                    var sub=document.getElementById('radarSubControls');
+                    var cb=document.getElementById('mrmsColorbar');
+                    var bar=document.getElementById('mrmsPlayerBar');
                     if (e.target.checked) {
-                        radarVisible = true;
-                        sub.style.display = 'block';
-                        cb.style.display  = 'block';
+                        radarVisible=true;
+                        sub.style.display='block'; cb.style.display='block';
+                        bar.classList.add('active');
                         document.body.classList.add('radar-open');
-                        showRadar();
-                        radarPollTimer = setInterval(showRadar, 5 * 60 * 1000);
+                        drawNexradColorbar();
+                        buildAndShow();
+                        pollTimer = setInterval(function(){
+                            var wp=playing; if(playing) stopPlay();
+                            buildAndShow(); if(wp) startPlay();
+                        }, 5*60*1000);
                     } else {
-                        radarVisible = false;
-                        sub.style.display = 'none';
-                        cb.style.display  = 'none';
+                        radarVisible=false; stopPlay();
+                        sub.style.display='none'; cb.style.display='none';
+                        bar.classList.remove('active');
                         document.body.classList.remove('radar-open');
-                        if (radarLayer && map.hasLayer(radarLayer)) map.removeLayer(radarLayer);
-                        if (radarPollTimer) { clearInterval(radarPollTimer); radarPollTimer = null; }
+                        Object.keys(radarLayers).forEach(function(k){
+                            if(map.hasLayer(radarLayers[k])) map.removeLayer(radarLayers[k]);
+                        });
+                        radarLayers={}; radarLayer=null;
+                        if(pollTimer){clearInterval(pollTimer);pollTimer=null;}
                     }
                 });
 
-                document.getElementById('mrmsOpacity').addEventListener('input', function() {
-                    if (radarLayer) radarLayer.setOpacity(this.value / 100);
+                document.getElementById('mrmsOpacity').addEventListener('input', function(){
+                    if(radarLayer) radarLayer.setOpacity(this.value/100);
                 });
+
+                var btnPlay=document.getElementById('mBtnPlay');
+                var btnFirst=document.getElementById('mBtnFirst');
+                var btnLast=document.getElementById('mBtnLast');
+                var btnPrev=document.getElementById('mBtnPrev');
+                var btnNext=document.getElementById('mBtnNext');
+                if(btnPlay)  btnPlay.addEventListener('click',  function(){playing?stopPlay():startPlay();});
+                if(btnFirst) btnFirst.addEventListener('click', function(){stopPlay();goToFrame(0);});
+                if(btnLast)  btnLast.addEventListener('click',  function(){stopPlay();goToFrame(frames.length-1);});
+                if(btnPrev)  btnPrev.addEventListener('click',  function(){stopPlay();goToFrame(currentFrame-1);});
+                if(btnNext)  btnNext.addEventListener('click',  function(){stopPlay();goToFrame(currentFrame+1);});
             });
 
-            if (map) map.on('moveend', function() {
-                if (!radarVisible) return;
-                var newSector = getIemSector();
-                if (newSector !== _curSector) showRadar();
+            map && map.on('moveend', function(){
+                if(!radarVisible) return;
+                if(getSector()!==_curSector) buildAndShow();
             });
 
         })();
@@ -1533,9 +1652,137 @@
             } else {
                 if (mtrLayer && map.hasLayer(mtrLayer)) map.removeLayer(mtrLayer);
             }
-        });
+        }); // end mtrToggle
         } // end initAirspaceLayers
 
+    })();
+
+    // ── MRMS Local Composite & GLM Lightning — outside all IIFEs ────────────
+    (function() {
+        document.addEventListener('DOMContentLoaded', function() {
+            var ML_INDEX    = '/CAP_WxCOP/static/mrms_tiles/composite/CONUS/index.json';
+            var ML_TILE_BASE= '/CAP_WxCOP/static/mrms_tiles/composite/CONUS/';
+            var GLM_API     = '/CAP_WxCOP/api/glm/flashes';
+            function getMap() { return window._capMap; }
+
+            // ── MRMS Local Loop Player ───────────────────────────────────────
+            var mlFrames=[], mlCurrent=-1, mlPlaying=false;
+            var mlPlayTimer=null, mlPollTimer=null;
+            var mlLayers={}, mlActiveLayer=null;
+
+            function mlLoadIndex() {
+                var minutes = parseInt(document.getElementById('mrmsLocalDuration').value)||120;
+                fetch(ML_INDEX+'?_='+Date.now())
+                    .then(function(r){return r.json();})
+                    .then(function(idx){
+                        var all=idx.frames||[];
+                        var cutoff=new Date(Date.now()-minutes*60000);
+                        mlFrames=all.filter(function(f){
+                            var ts=f.timestamp;
+                            var dt=new Date(ts.slice(0,4)+'-'+ts.slice(4,6)+'-'+ts.slice(6,8)+'T'+ts.slice(9,11)+':'+ts.slice(11,13)+':00Z');
+                            return dt>=cutoff;
+                        });
+                        if(!mlFrames.length) mlFrames=all.slice(-10);
+                        mlLayers={};
+                        mlFrames.forEach(function(f){
+                            mlLayers[f.timestamp]=L.tileLayer(ML_TILE_BASE+f.timestamp+'/{z}/{x}/{y}.png',{
+                                opacity:0,maxZoom:10,minZoom:3,zIndex:410,
+                                errorTileUrl:'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
+                                attribution:'MRMS &copy; NOAA/NSSL — Local'
+                            });
+                        });
+                        mlGoFrame(mlFrames.length-1);
+                    })
+                    .catch(function(e){console.warn('MRMS local index error:',e);});
+            }
+
+            function mlGoFrame(idx){
+                var m=getMap(); if(!m||!mlFrames.length) return;
+                idx=Math.max(0,Math.min(idx,mlFrames.length-1));
+                var ts=mlFrames[idx].timestamp;
+                if(mlActiveLayer&&m.hasLayer(mlActiveLayer)){mlActiveLayer.setOpacity(0);m.removeLayer(mlActiveLayer);}
+                mlCurrent=idx; mlActiveLayer=mlLayers[ts];
+                if(mlActiveLayer){if(!m.hasLayer(mlActiveLayer))mlActiveLayer.addTo(m);mlActiveLayer.setOpacity(0.75);}
+                var el=document.getElementById('mrmsLocalTime');
+                if(el) el.textContent=ts.slice(0,4)+'/'+ts.slice(4,6)+'/'+ts.slice(6,8)+' '+ts.slice(9,11)+':'+ts.slice(11,13)+'Z · F '+(idx+1)+'/'+mlFrames.length;
+            }
+
+            function mlPlay(){
+                if(mlPlaying) return; mlPlaying=true;
+                document.getElementById('mlBtnPlay').textContent='⏸';
+                mlPlayTimer=setInterval(function(){mlGoFrame((mlCurrent+1)%mlFrames.length);},600);
+            }
+            function mlPause(){
+                mlPlaying=false; document.getElementById('mlBtnPlay').textContent='▶';
+                if(mlPlayTimer){clearInterval(mlPlayTimer);mlPlayTimer=null;}
+            }
+            function mlStop(){
+                mlPause(); var m=getMap();
+                if(m) Object.values(mlLayers).forEach(function(l){if(m.hasLayer(l))m.removeLayer(l);});
+                mlActiveLayer=null; mlCurrent=-1;
+            }
+
+            document.getElementById('mrmsLocalToggle').addEventListener('change',function(){
+                var ctrl=document.getElementById('mrmsLocalControls');
+                if(this.checked){ctrl.style.display='block';mlLoadIndex();mlPollTimer=setInterval(mlLoadIndex,120000);}
+                else{ctrl.style.display='none';mlStop();if(mlPollTimer){clearInterval(mlPollTimer);mlPollTimer=null;}}
+            });
+            document.getElementById('mrmsLocalDuration').addEventListener('change',function(){
+                if(document.getElementById('mrmsLocalToggle').checked) mlLoadIndex();
+            });
+            document.getElementById('mlBtnFirst').addEventListener('click',function(){mlPause();mlGoFrame(0);});
+            document.getElementById('mlBtnPrev').addEventListener('click', function(){mlPause();mlGoFrame(mlCurrent-1);});
+            document.getElementById('mlBtnPlay').addEventListener('click', function(){mlPlaying?mlPause():mlPlay();});
+            document.getElementById('mlBtnNext').addEventListener('click', function(){mlPause();mlGoFrame(mlCurrent+1);});
+            document.getElementById('mlBtnLast').addEventListener('click', function(){mlPause();mlGoFrame(mlFrames.length-1);});
+
+            // ── GLM Lightning ────────────────────────────────────────────────
+            var glmLayer=null, glmRefreshTimer=null;
+
+            function glmColor(a){return a<5?'#ff2222':a<15?'#ff8800':'#00cc44';}
+            function glmSize(a){return a<5?14:a<15?11:9;}
+
+            function loadGLM(){
+                var m=getMap(); if(!m) return;
+                var minutes=parseInt(document.getElementById('glmMinutes').value)||30;
+                var statusEl=document.getElementById('glmStatus');
+                if(statusEl) statusEl.textContent='Loading...';
+                fetch(GLM_API+'?minutes='+minutes)
+                    .then(function(r){return r.json();})
+                    .then(function(data){
+                        if(glmLayer){m.removeLayer(glmLayer);glmLayer=null;}
+                        glmLayer=L.layerGroup();
+                        var now=Date.now(), count=0;
+                        (data.features||[]).forEach(function(f){
+                            if(!f.geometry||!f.geometry.coordinates) return;
+                            var lon=f.geometry.coordinates[0], lat=f.geometry.coordinates[1];
+                            var age=(now-new Date(f.properties.flash_time).getTime())/60000;
+                            if(age<0||age>minutes) return;
+                            var sz=glmSize(age);
+                            L.marker([lat,lon],{
+                                icon:L.divIcon({className:'',
+                                    html:'<span style="font-size:'+sz+'px;color:'+glmColor(age)+';text-shadow:0 0 3px rgba(0,0,0,0.8);line-height:1;display:block;text-align:center;">⚡</span>',
+                                    iconSize:[sz,sz],iconAnchor:[sz/2,sz/2]}),
+                                interactive:false
+                            }).addTo(glmLayer);
+                            count++;
+                        });
+                        if(document.getElementById('glmToggle').checked) glmLayer.addTo(m);
+                        if(statusEl) statusEl.textContent=count+' flashes · last '+minutes+' min · '+new Date().toUTCString().slice(17,25)+'Z';
+                    })
+                    .catch(function(e){if(statusEl)statusEl.textContent='GLM load failed';console.warn(e);});
+            }
+
+            document.getElementById('glmToggle').addEventListener('change',function(){
+                var sub=document.getElementById('glmSubControls');
+                if(this.checked){sub.style.display='block';loadGLM();glmRefreshTimer=setInterval(loadGLM,60000);}
+                else{sub.style.display='none';var m=getMap();if(glmLayer&&m){m.removeLayer(glmLayer);glmLayer=null;}if(glmRefreshTimer){clearInterval(glmRefreshTimer);glmRefreshTimer=null;}}
+            });
+            document.getElementById('glmMinutes').addEventListener('change',function(){
+                if(document.getElementById('glmToggle').checked) loadGLM();
+            });
+
+        }); // DOMContentLoaded
     })();
     </script>
 
@@ -1548,16 +1795,16 @@
         </div>
     </div>
 
-    <!-- Radar status bar (IEM WMS - no player needed) -->
+    <!-- NEXRAD radar player bar -->
     <div id="mrmsPlayerBar">
-        <div id="mrmsControls" style="justify-content:center;align-items:center;height:100%;">
-            <div id="mrmsTimeDisplay" style="font-family:monospace;font-size:13px;color:#8bc4a8;">
-                NEXRAD Base Reflectivity — Iowa Environmental Mesonet (~5 min latency)
-            </div>
-            <button class="mpb" id="mBtnRefresh" title="Refresh radar"
-                onclick="document.getElementById('radarToggle').dispatchEvent(new Event('change'))"
-                style="margin-left:16px;">&#8635; Refresh</button>
-        </div>
+        <button class="mpb" id="mBtnFirst" title="Oldest">&#9198;</button>
+        <button class="mpb" id="mBtnPrev"  title="Step back">&#9664;</button>
+        <button class="mpb" id="mBtnPlay"  title="Play/Pause">&#9654;</button>
+        <button class="mpb" id="mBtnNext"  title="Step forward">&#9654;&#x7C;</button>
+        <button class="mpb" id="mBtnLast"  title="Latest">&#9197;</button>
+        <div id="mrmsFrameDisplay" style="font-family:monospace;font-size:12px;color:#ccc;min-width:55px;">— / —</div>
+        <div id="mrmsTimeDisplay"  style="font-family:monospace;font-size:13px;color:#8bc4a8;flex:1;">No data</div>
+        <span style="font-size:11px;color:#aaa;white-space:nowrap;">NEXRAD via IEM (~5 min latency)</span>
     </div>
 
 
