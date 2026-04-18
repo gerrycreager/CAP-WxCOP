@@ -51,7 +51,7 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 GLMP_BASE   = Path('/LDM/models/glmp')
 GFS_BASE    = Path('/LDM/models/gfs/0p25')
-LOCKFILE    = '/home/ldm/var/logs/ingest_glmp_impacts.lock'
+LOCKFILE    = '/var/lock/ingest_glmp_impacts.lock'
 DB_DSN      = os.environ.get('DB_DSN',
                              'dbname=avwx_data user=avwx_user host=192.168.0.60')
 
@@ -405,7 +405,7 @@ CREATE INDEX IF NOT EXISTS airport_wx_impacts_station_id_idx
 """
 
 def get_airports(conn):
-    """Fetch qualifying airports with runway headings."""
+    """Fetch qualifying airports with runway headings and Wing ICL overrides."""
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute("""
             SELECT
@@ -416,14 +416,40 @@ def get_airports(conn):
                 a.elevation_ft,
                 array_agg(
                     ARRAY[r.le_heading_degt, r.he_heading_degt]
-                ) as runway_headings
+                ) as runway_headings,
+                wm.wing_id,
+                wm.region_code,
+                -- Wind ICL overrides (NULL = use national default)
+                MAX(CASE WHEN wi.parameter = 'wind_vfr_yellow'
+                    AND (wi.expires IS NULL OR wi.expires >= CURRENT_DATE)
+                    THEN wi.threshold END) as icl_wind_vfr_yellow,
+                MAX(CASE WHEN wi.parameter = 'wind_vfr_red'
+                    AND (wi.expires IS NULL OR wi.expires >= CURRENT_DATE)
+                    THEN wi.threshold END) as icl_wind_vfr_red,
+                -- Crosswind VFR ICL overrides
+                MAX(CASE WHEN wi.parameter = 'crosswind_vfr_yellow'
+                    AND (wi.expires IS NULL OR wi.expires >= CURRENT_DATE)
+                    THEN wi.threshold END) as icl_xwind_vfr_yellow,
+                MAX(CASE WHEN wi.parameter = 'crosswind_vfr_red'
+                    AND (wi.expires IS NULL OR wi.expires >= CURRENT_DATE)
+                    THEN wi.threshold END) as icl_xwind_vfr_red,
+                -- Crosswind IFR ICL overrides
+                MAX(CASE WHEN wi.parameter = 'crosswind_ifr_yellow'
+                    AND (wi.expires IS NULL OR wi.expires >= CURRENT_DATE)
+                    THEN wi.threshold END) as icl_xwind_ifr_yellow,
+                MAX(CASE WHEN wi.parameter = 'crosswind_ifr_red'
+                    AND (wi.expires IS NULL OR wi.expires >= CURRENT_DATE)
+                    THEN wi.threshold END) as icl_xwind_ifr_red
             FROM observations.airports a
             JOIN observations.runways r ON r.airport_id = a.id
+            LEFT JOIN observations.wing_map wm ON wm.iso_region = a.iso_region
+            LEFT JOIN observations.wing_icl wi ON wi.wing_id = wm.wing_id
             WHERE a.has_paved_runway = true
               AND a.longest_runway_ft >= 2500
               AND a.station_id ~ '^[KTP]'
               AND a.location IS NOT NULL
-            GROUP BY a.id, a.station_id, a.location, a.elevation_ft
+            GROUP BY a.id, a.station_id, a.location, a.elevation_ft,
+                     wm.wing_id, wm.region_code
             ORDER BY a.station_id
         """)
         airports = cur.fetchall()
@@ -481,12 +507,20 @@ def upsert_impacts(conn, records):
 # ---------------------------------------------------------------------------
 # Stoplight evaluation
 # ---------------------------------------------------------------------------
-def evaluate_stoplights(raw, xwind_kts):
+def evaluate_stoplights(raw, xwind_kts, icl=None):
     """
     Evaluate VFR and IFR stoplights from raw extracted values.
     raw: dict with keys matching GLMP_VARS plus derived fields.
+    xwind_kts: crosswind component in knots.
+    icl: dict of Wing ICL threshold overrides (None = use national defaults).
+         Keys: wind_vfr_yellow, wind_vfr_red,
+               crosswind_vfr_yellow, crosswind_vfr_red,
+               crosswind_ifr_yellow, crosswind_ifr_red
     Returns dict with vfr_color, vfr_worst_param, ifr_color, ifr_worst_param.
     """
+    if icl is None:
+        icl = {}
+
     ceil_ft       = raw.get('ceil_ft')
     vis_m         = raw.get('vis_m')
     wind_kts      = raw.get('wind_speed_kts')
@@ -500,10 +534,41 @@ def evaluate_stoplights(raw, xwind_kts):
         v for v in [wind_kts, wind_gust_kts] if v is not None
     ) if any(v is not None for v in [wind_kts, wind_gust_kts]) else None
 
+    # Apply ICL overrides — fall back to national defaults if not set
+    # Wind thresholds
+    wind_y = icl.get('wind_vfr_yellow') or 25.0
+    wind_r = icl.get('wind_vfr_red')    or 30.0
+
+    def color_wind_icl(kts):
+        if kts is None: return 'UNKNOWN'
+        if kts < wind_y: return 'GREEN'
+        if kts < wind_r: return 'YELLOW'
+        return 'RED'
+
+    # Crosswind VFR thresholds
+    xw_vfr_y = icl.get('crosswind_vfr_yellow') or 8.0
+    xw_vfr_r = icl.get('crosswind_vfr_red')    or 15.0
+
+    def color_xwind_vfr_icl(kts):
+        if kts is None: return 'UNKNOWN'
+        if kts < xw_vfr_y: return 'GREEN'
+        if kts < xw_vfr_r: return 'YELLOW'
+        return 'RED'
+
+    # Crosswind IFR thresholds
+    xw_ifr_y = icl.get('crosswind_ifr_yellow') or 8.0
+    xw_ifr_r = icl.get('crosswind_ifr_red')    or 13.0
+
+    def color_xwind_ifr_icl(kts):
+        if kts is None: return 'UNKNOWN'
+        if kts < xw_ifr_y: return 'GREEN'
+        if kts < xw_ifr_r: return 'YELLOW'
+        return 'RED'
+
     # VFR parameters
     vfr_params = {
-        'wind':       color_wind(wind_for_limit),
-        'crosswind':  color_xwind_vfr(xwind_kts),
+        'wind':       color_wind_icl(wind_for_limit),
+        'crosswind':  color_xwind_vfr_icl(xwind_kts),
         'ceiling':    color_ceil_vfr(ceil_ft),
         'visibility': color_vis(vis_m),
         'temp_cold':  color_temp_cold(tmp_f),
@@ -514,8 +579,8 @@ def evaluate_stoplights(raw, xwind_kts):
 
     # IFR parameters
     ifr_params = {
-        'wind':       color_wind(wind_for_limit),
-        'crosswind':  color_xwind_ifr(xwind_kts),
+        'wind':       color_wind_icl(wind_for_limit),
+        'crosswind':  color_xwind_ifr_icl(xwind_kts),
         'ceiling':    color_ceil_ifr(ceil_ft),
         'visibility': color_vis(vis_m),
     }
@@ -611,7 +676,16 @@ def process_sector(airports, sector, conn, now_utc):
                 'heat_index_f': hi_f_val,
                 'wind_chill_f': wc_f_val,
             }
-            stoplights = evaluate_stoplights(derived, xwind)
+            # Build ICL override dict for this airport's wing
+            icl = {
+                'wind_vfr_yellow':      apt.get('icl_wind_vfr_yellow'),
+                'wind_vfr_red':         apt.get('icl_wind_vfr_red'),
+                'crosswind_vfr_yellow': apt.get('icl_xwind_vfr_yellow'),
+                'crosswind_vfr_red':    apt.get('icl_xwind_vfr_red'),
+                'crosswind_ifr_yellow': apt.get('icl_xwind_ifr_yellow'),
+                'crosswind_ifr_red':    apt.get('icl_xwind_ifr_red'),
+            }
+            stoplights = evaluate_stoplights(derived, xwind, icl)
 
             records.append({
                 'airport_id':    apt['id'],
