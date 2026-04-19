@@ -481,6 +481,12 @@ def update_index(product, sector, timestamp, valid_dt, zoom_min, zoom_max):
 
     with open(index_path, 'w') as f:
         json.dump(idx, f, indent=2)
+    # Update latest symlink for weather map overlay
+    if product == 'composite':
+        latest_link = TILE_ROOT / product / sector / 'latest'
+        if latest_link.is_symlink() or latest_link.exists():
+            latest_link.unlink()
+        latest_link.symlink_to(timestamp)
 
 
 def scour_old_frames(product, sector):
