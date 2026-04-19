@@ -31,7 +31,7 @@ log = logging.getLogger(__name__)
 
 # ── paths ─────────────────────────────────────────────────────────────────────
 TILE_ROOT   = Path('/LDM/radar/mrms_tiles')
-MAX_FRAMES  = 30
+MAX_FRAMES  = 60
 ZOOM_MIN    = 3
 ZOOM_MAX    = 10
 
