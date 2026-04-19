@@ -158,6 +158,13 @@ try:
 except Exception as e:
     print(f'⚠ Could not load Weather Impacts API: {e}')
 
+try:
+    from wing_icl_admin import wing_icl_admin
+    app.register_blueprint(wing_icl_admin)
+    print("✓ Wing ICL admin registered at /CAP_WxCOP/admin/wing-icl")
+except Exception as e:
+    print(f"⚠ Could not load Wing ICL admin: {e}")
+
 print("CAP Weather COP initialization complete.\n")
 
 # ============================================================================
