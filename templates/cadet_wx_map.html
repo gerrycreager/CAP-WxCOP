@@ -173,6 +173,25 @@
         <em>Marker uses more recent of the two</em>
       </div>
     </div>
+    <div class="sidebar-section">
+      <h3>⚡ GLM Lightning</h3>
+      <label style="font-size:0.8rem;cursor:pointer;">
+        <input type="checkbox" id="glmToggle" style="margin-right:4px;">
+        Show lightning flashes
+      </label>
+      <select id="glmMinutes" style="width:100%;font-size:0.78rem;margin-top:4px;
+              background:#1a2540;border:1px solid #334;color:#ccd;padding:2px;">
+        <option value="5">Last 5 min</option>
+        <option value="15" selected>Last 15 min</option>
+        <option value="30">Last 30 min</option>
+      </select>
+      <div style="margin-top:5px;font-size:0.72rem;line-height:1.7;">
+        <span style="color:#ff3333;">⚡</span> 0–5 min — Stop if within 5NM<br>
+        <span style="color:#ff8800;">⚡</span> 5–15 min — Caution<br>
+        <span style="color:#00cc44;">⚡</span> 15–30 min — Resume if clear
+      </div>
+      <div id="glmStatus" style="font-size:0.7rem;color:#778;margin-top:3px;"></div>
+    </div>
   </div>
 
   <!-- Map -->
@@ -415,6 +434,60 @@ function fmtWind(spd, gust) {
 // ---------------------------------------------------------------------------
 loadData();
 setInterval(loadData, 5 * 60 * 1000);
+
+// ── GLM Lightning ────────────────────────────────────────────────────────────
+var glmLayer = null, glmTimer = null;
+var GLM_API = '/CAP_WxCOP_DEV/api/glm/flashes';
+
+function glmColor(a){ return a<5?'#ff3333':a<15?'#ff8800':'#00cc44'; }
+function glmSize(a) { return a<5?14:a<15?11:9; }
+
+function loadGLM() {
+  var minutes = parseInt(document.getElementById('glmMinutes').value)||15;
+  var statusEl = document.getElementById('glmStatus');
+  if(statusEl) statusEl.textContent = 'Loading...';
+  fetch(GLM_API+'?minutes='+minutes)
+    .then(function(r){return r.json();})
+    .then(function(data){
+      if(glmLayer){ map.removeLayer(glmLayer); glmLayer=null; }
+      glmLayer = L.layerGroup();
+      var now=Date.now(), count=0;
+      (data.features||[]).forEach(function(f){
+        if(!f.geometry||!f.geometry.coordinates) return;
+        var age=(now-new Date(f.properties.flash_time).getTime())/60000;
+        if(age<0||age>minutes) return;
+        var sz=glmSize(age);
+        L.marker([f.geometry.coordinates[1],f.geometry.coordinates[0]],{
+          icon:L.divIcon({className:'',
+            html:'<span style="font-size:'+sz+'px;color:'+glmColor(age)+
+                 ';text-shadow:0 0 3px rgba(0,0,0,0.9);line-height:1;display:block;">⚡</span>',
+            iconSize:[sz,sz],iconAnchor:[sz/2,sz/2]}),
+          interactive:false
+        }).addTo(glmLayer);
+        count++;
+      });
+      if(document.getElementById('glmToggle').checked) glmLayer.addTo(map);
+      if(statusEl) statusEl.textContent = count+' flashes · '+
+          new Date().toUTCString().slice(17,25)+'Z';
+    })
+    .catch(function(e){
+      if(statusEl) statusEl.textContent='GLM unavailable';
+    });
+}
+
+document.getElementById('glmToggle').addEventListener('change', function(){
+  if(this.checked){
+    loadGLM();
+    glmTimer = setInterval(loadGLM, 120000);
+  } else {
+    if(glmLayer){ map.removeLayer(glmLayer); glmLayer=null; }
+    if(glmTimer){ clearInterval(glmTimer); glmTimer=null; }
+    document.getElementById('glmStatus').textContent='';
+  }
+});
+document.getElementById('glmMinutes').addEventListener('change', function(){
+  if(document.getElementById('glmToggle').checked) loadGLM();
+});
 </script>
 </body>
 </html>
