@@ -419,7 +419,7 @@ def get_airports(conn):
                 ) as runway_headings,
                 wm.wing_id,
                 wm.region_code,
-                -- Wind ICL overrides (NULL = use national default)
+                -- Wind ICL overrides
                 MAX(CASE WHEN wi.parameter = 'wind_vfr_yellow'
                     AND (wi.expires IS NULL OR wi.expires >= CURRENT_DATE)
                     THEN wi.threshold END) as icl_wind_vfr_yellow,
@@ -439,11 +439,33 @@ def get_airports(conn):
                     THEN wi.threshold END) as icl_xwind_ifr_yellow,
                 MAX(CASE WHEN wi.parameter = 'crosswind_ifr_red'
                     AND (wi.expires IS NULL OR wi.expires >= CURRENT_DATE)
-                    THEN wi.threshold END) as icl_xwind_ifr_red
+                    THEN wi.threshold END) as icl_xwind_ifr_red,
+                -- Cold temperature ICL overrides
+                MAX(CASE WHEN wi.parameter = 'temp_cold_yellow'
+                    AND (wi.expires IS NULL OR wi.expires >= CURRENT_DATE)
+                    THEN wi.threshold END) as icl_temp_cold_yellow,
+                MAX(CASE WHEN wi.parameter = 'temp_cold_red'
+                    AND (wi.expires IS NULL OR wi.expires >= CURRENT_DATE)
+                    THEN wi.threshold END) as icl_temp_cold_red,
+                -- Ceiling VFR ICL overrides
+                MAX(CASE WHEN wi.parameter = 'ceil_vfr_yellow'
+                    AND (wi.expires IS NULL OR wi.expires >= CURRENT_DATE)
+                    THEN wi.threshold END) as icl_ceil_vfr_yellow,
+                MAX(CASE WHEN wi.parameter = 'ceil_vfr_red'
+                    AND (wi.expires IS NULL OR wi.expires >= CURRENT_DATE)
+                    THEN wi.threshold END) as icl_ceil_vfr_red,
+                -- Visibility VFR ICL overrides (stored in SM)
+                MAX(CASE WHEN wi.parameter = 'vis_vfr_yellow'
+                    AND (wi.expires IS NULL OR wi.expires >= CURRENT_DATE)
+                    THEN wi.threshold END) as icl_vis_vfr_yellow,
+                MAX(CASE WHEN wi.parameter = 'vis_vfr_red'
+                    AND (wi.expires IS NULL OR wi.expires >= CURRENT_DATE)
+                    THEN wi.threshold END) as icl_vis_vfr_red
             FROM observations.airports a
             JOIN observations.runways r ON r.airport_id = a.id
             LEFT JOIN observations.wing_map wm ON wm.iso_region = a.iso_region
-            LEFT JOIN observations.wing_icl wi ON wi.wing_id = wm.wing_id
+            LEFT JOIN observations.wing_icl wi
+                ON (wi.wing_id = wm.wing_id OR wi.wing_id = wm.region_code)
             WHERE a.has_paved_runway = true
               AND a.longest_runway_ft >= 2500
               AND a.station_id ~ '^[KTP]'
@@ -516,7 +538,10 @@ def evaluate_stoplights(raw, xwind_kts, icl=None):
     icl: dict of Wing ICL threshold overrides (None = use national defaults).
          Keys: wind_vfr_yellow, wind_vfr_red,
                crosswind_vfr_yellow, crosswind_vfr_red,
-               crosswind_ifr_yellow, crosswind_ifr_red
+               crosswind_ifr_yellow, crosswind_ifr_red,
+               temp_cold_yellow, temp_cold_red,
+               ceil_vfr_yellow, ceil_vfr_red,
+               vis_vfr_yellow, vis_vfr_red
     Returns dict with vfr_color, vfr_worst_param, ifr_color, ifr_worst_param.
     """
     if icl is None:
@@ -535,9 +560,8 @@ def evaluate_stoplights(raw, xwind_kts, icl=None):
         v for v in [wind_kts, wind_gust_kts] if v is not None
     ) if any(v is not None for v in [wind_kts, wind_gust_kts]) else None
 
-    # Apply ICL overrides — fall back to national defaults if not set
-    # Wind thresholds
-    wind_y = icl.get('wind_vfr_yellow') or 25.0
+    # ── Wind thresholds (ICL or national default) ────────────────────────
+    wind_y = icl.get('wind_vfr_yellow') or 21.0
     wind_r = icl.get('wind_vfr_red')    or 30.0
 
     def color_wind_icl(kts):
@@ -546,7 +570,7 @@ def evaluate_stoplights(raw, xwind_kts, icl=None):
         if kts < wind_r: return 'YELLOW'
         return 'RED'
 
-    # Crosswind VFR thresholds
+    # ── Crosswind VFR thresholds ─────────────────────────────────────────
     xw_vfr_y = icl.get('crosswind_vfr_yellow') or 8.0
     xw_vfr_r = icl.get('crosswind_vfr_red')    or 15.0
 
@@ -556,7 +580,7 @@ def evaluate_stoplights(raw, xwind_kts, icl=None):
         if kts < xw_vfr_r: return 'YELLOW'
         return 'RED'
 
-    # Crosswind IFR thresholds
+    # ── Crosswind IFR thresholds ─────────────────────────────────────────
     xw_ifr_y = icl.get('crosswind_ifr_yellow') or 8.0
     xw_ifr_r = icl.get('crosswind_ifr_red')    or 13.0
 
@@ -566,24 +590,59 @@ def evaluate_stoplights(raw, xwind_kts, icl=None):
         if kts < xw_ifr_r: return 'YELLOW'
         return 'RED'
 
-    # VFR parameters
+    # ── Cold temperature thresholds ──────────────────────────────────────
+    # ICL can only raise these (more conservative = flag sooner)
+    tmp_cold_y = icl.get('temp_cold_yellow') or 20.0
+    tmp_cold_r = icl.get('temp_cold_red')    or -10.0
+
+    def color_temp_cold_icl(f):
+        if f is None: return 'UNKNOWN'
+        if f >= tmp_cold_y: return 'GREEN'
+        if f >= tmp_cold_r: return 'YELLOW'
+        return 'RED'
+
+    # ── Ceiling VFR thresholds ───────────────────────────────────────────
+    # ICL can only raise these (more conservative = flag at higher ceiling)
+    ceil_vfr_y = icl.get('ceil_vfr_yellow') or 800.0
+    ceil_vfr_r = icl.get('ceil_vfr_red')    or 500.0
+
+    def color_ceil_vfr_icl(ft):
+        if ft is None: return 'UNKNOWN'
+        if ft < 0 or ft == 99999: return 'GREEN'   # unlimited/clear
+        if ft > ceil_vfr_y: return 'GREEN'
+        if ft >= ceil_vfr_r: return 'YELLOW'
+        return 'RED'
+
+    # ── Visibility VFR thresholds (convert SM to metres) ─────────────────
+    # GLMP provides vis in metres; ICL is in SM — convert for comparison
+    SM_TO_M = 1609.344
+    vis_vfr_y_m = (icl.get('vis_vfr_yellow') or 2.0) * SM_TO_M
+    vis_vfr_r_m = (icl.get('vis_vfr_red')    or 1.0) * SM_TO_M
+
+    def color_vis_icl(m):
+        if m is None: return 'UNKNOWN'
+        if m > vis_vfr_y_m: return 'GREEN'
+        if m >= vis_vfr_r_m: return 'YELLOW'
+        return 'RED'
+
+    # ── VFR parameters ───────────────────────────────────────────────────
     vfr_params = {
         'wind':       color_wind_icl(wind_for_limit),
         'crosswind':  color_xwind_vfr_icl(xwind_kts),
-        'ceiling':    color_ceil_vfr(ceil_ft),
-        'visibility': color_vis(vis_m),
-        'temp_cold':  color_temp_cold(tmp_f),
-        'temp_hot':   color_temp_hot(tmp_f),
-        'wind_chill': color_wind_chill(wc_f),
-        'heat_index': color_heat_index(hi_f),
+        'ceiling':    color_ceil_vfr_icl(ceil_ft),
+        'visibility': color_vis_icl(vis_m),
+        'temp_cold':  color_temp_cold_icl(tmp_f),
+        'temp_hot':   color_temp_hot(tmp_f),    # not ICL-overridable
+        'wind_chill': color_wind_chill(wc_f),   # informational only
+        'heat_index': color_heat_index(hi_f),   # informational only
     }
 
-    # IFR parameters
+    # ── IFR parameters ───────────────────────────────────────────────────
     ifr_params = {
         'wind':       color_wind_icl(wind_for_limit),
         'crosswind':  color_xwind_ifr_icl(xwind_kts),
-        'ceiling':    color_ceil_ifr(ceil_ft),
-        'visibility': color_vis(vis_m),
+        'ceiling':    color_ceil_ifr(ceil_ft),  # IFR uses fixed regulatory mins
+        'visibility': color_vis(vis_m),         # IFR uses fixed regulatory mins
     }
 
     vfr_color = worst_color(*vfr_params.values())
@@ -685,6 +744,12 @@ def process_sector(airports, sector, conn, now_utc):
                 'crosswind_vfr_red':    apt.get('icl_xwind_vfr_red'),
                 'crosswind_ifr_yellow': apt.get('icl_xwind_ifr_yellow'),
                 'crosswind_ifr_red':    apt.get('icl_xwind_ifr_red'),
+                'temp_cold_yellow':     apt.get('icl_temp_cold_yellow'),
+                'temp_cold_red':        apt.get('icl_temp_cold_red'),
+                'ceil_vfr_yellow':      apt.get('icl_ceil_vfr_yellow'),
+                'ceil_vfr_red':         apt.get('icl_ceil_vfr_red'),
+                'vis_vfr_yellow':       apt.get('icl_vis_vfr_yellow'),
+                'vis_vfr_red':          apt.get('icl_vis_vfr_red'),
             }
             stoplights = evaluate_stoplights(derived, xwind, icl)
 

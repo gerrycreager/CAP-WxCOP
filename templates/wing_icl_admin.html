@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Wing ICL Overrides — CAP WxCOP</title>
+  <style>
+    :root {
+      --navy:    #0a1628;
+      --navy2:   #0f2044;
+      --blue:    #1a3a6b;
+      --accent:  #4fc3f7;
+      --go:      #00b33c;
+      --caution: #e6b800;
+      --stop:    #cc2200;
+      --text:    #e0e8f0;
+      --muted:   #7a9abf;
+      --border:  rgba(79,195,247,0.15);
+    }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family:'Segoe UI',sans-serif; background:var(--navy); color:var(--text); min-height:100vh; }
+
+    header {
+      background:linear-gradient(180deg,#060e1c,var(--navy));
+      border-bottom:1px solid var(--border);
+      padding:1rem 2rem;
+      display:flex; align-items:center; justify-content:space-between;
+    }
+    header h1 { font-size:1.3rem; color:var(--accent); }
+    header .sub { font-size:0.82rem; color:var(--muted); margin-top:2px; }
+    .btn-home {
+      background:rgba(79,195,247,0.1); border:1px solid var(--border);
+      color:var(--accent); padding:0.4rem 1rem; border-radius:4px;
+      text-decoration:none; font-size:0.85rem;
+    }
+    .btn-home:hover { background:rgba(79,195,247,0.2); }
+
+    .container { max-width:1200px; margin:1.5rem auto; padding:0 1.5rem; }
+
+    /* ── Alerts ── */
+    .alert { padding:0.75rem 1rem; border-radius:6px; margin-bottom:1rem; font-size:0.88rem; }
+    .alert-error   { background:rgba(204,34,0,0.15); border:1px solid rgba(204,34,0,0.4); color:#ff8866; }
+    .alert-success { background:rgba(0,179,60,0.12); border:1px solid rgba(0,179,60,0.3); color:#44dd77; }
+
+    /* ── National defaults ── */
+    .defaults-banner {
+      background:rgba(79,195,247,0.05); border:1px solid var(--border);
+      border-radius:6px; padding:0.75rem 1rem; margin-bottom:1.25rem;
+      font-size:0.82rem;
+    }
+    .defaults-banner strong { color:var(--text); }
+    .def-groups { display:flex; flex-wrap:wrap; gap:0.5rem 2rem; margin-top:0.5rem; }
+    .def-group { min-width:180px; }
+    .def-group-title { color:var(--accent); font-size:0.78rem; font-weight:600;
+                       text-transform:uppercase; letter-spacing:0.05em; margin-bottom:3px; }
+    .def-item { font-size:0.8rem; color:var(--muted); }
+    .def-item span { color:var(--text); font-weight:600; }
+
+    /* ── Conservative notice ── */
+    .conservative-notice {
+      background:rgba(230,184,0,0.08); border:1px solid rgba(230,184,0,0.25);
+      border-radius:6px; padding:0.6rem 1rem; margin-bottom:1.25rem;
+      font-size:0.82rem; color:var(--caution);
+    }
+
+    /* ── Add form ── */
+    .add-card {
+      background:var(--navy2); border:1px solid var(--border);
+      border-radius:8px; padding:1.25rem; margin-bottom:1.5rem;
+    }
+    .add-card h2 { font-size:0.95rem; color:var(--accent); margin-bottom:1rem;
+                   padding-bottom:0.5rem; border-bottom:1px solid var(--border); }
+    .form-grid {
+      display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
+      gap:0.65rem; margin-bottom:0.75rem;
+    }
+    .form-group label { display:block; font-size:0.75rem; color:var(--muted);
+                        margin-bottom:3px; font-weight:600; text-transform:uppercase;
+                        letter-spacing:0.04em; }
+    .form-group input, .form-group select, .form-group textarea {
+      width:100%; background:#0a1628; border:1px solid var(--border);
+      color:var(--text); padding:0.4rem 0.6rem; border-radius:4px;
+      font-size:0.85rem;
+    }
+    .form-group select { cursor:pointer; }
+    .form-group input:focus, .form-group select:focus {
+      outline:none; border-color:var(--accent);
+    }
+    .form-hint { font-size:0.72rem; color:var(--muted); margin-top:3px; font-style:italic; }
+    .form-group textarea { resize:vertical; min-height:56px; }
+    .form-group.wide { grid-column:1/-1; }
+
+    .btn-save {
+      background:var(--go); color:white; border:none;
+      padding:0.5rem 1.5rem; border-radius:4px;
+      cursor:pointer; font-size:0.9rem; font-weight:600;
+    }
+    .btn-save:hover { background:#00993a; }
+
+    /* ── Parameter groups in dropdown ── */
+    optgroup { font-weight:700; }
+
+    /* ── Entries table ── */
+    .entries-card {
+      background:var(--navy2); border:1px solid var(--border);
+      border-radius:8px; overflow:hidden;
+    }
+    .entries-card h2 {
+      font-size:0.95rem; color:var(--accent);
+      padding:0.9rem 1.25rem; border-bottom:1px solid var(--border);
+    }
+    .table-wrap { overflow-x:auto; }
+    table { width:100%; border-collapse:collapse; font-size:0.83rem; min-width:700px; }
+    th {
+      text-align:left; padding:0.55rem 0.9rem;
+      background:rgba(0,0,0,0.25); color:var(--muted);
+      font-size:0.72rem; font-weight:700;
+      text-transform:uppercase; letter-spacing:0.06em;
+      white-space:nowrap;
+    }
+    td { padding:0.55rem 0.9rem; border-top:1px solid rgba(255,255,255,0.04);
+         vertical-align:middle; }
+    tr:hover td { background:rgba(79,195,247,0.03); }
+
+    .wing-tag {
+      display:inline-block; background:rgba(79,195,247,0.15);
+      color:var(--accent); padding:1px 7px; border-radius:3px;
+      font-size:0.78rem; font-weight:700; letter-spacing:0.05em;
+    }
+    .group-tag {
+      display:inline-block; background:rgba(255,255,255,0.06);
+      color:var(--muted); padding:1px 6px; border-radius:3px;
+      font-size:0.72rem;
+    }
+    .threshold-val { color:var(--caution); font-weight:700; font-family:monospace; }
+    .national-val  { color:var(--muted); font-size:0.78rem; font-family:monospace; }
+    .reg-tag { font-size:0.75rem; color:var(--muted); font-family:monospace; }
+    .note-cell { max-width:180px; font-size:0.75rem; color:var(--muted);
+                 overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .expires-warn { color:var(--caution); }
+
+    .btn-delete {
+      background:rgba(204,34,0,0.12); color:#ff6644;
+      border:1px solid rgba(204,34,0,0.25);
+      padding:2px 10px; border-radius:3px;
+      cursor:pointer; font-size:0.78rem; white-space:nowrap;
+    }
+    .btn-delete:hover { background:rgba(204,34,0,0.28); }
+
+    .empty-state { padding:2rem; text-align:center; color:var(--muted); font-size:0.88rem; }
+
+    /* ── Unit indicator next to threshold input ── */
+    .threshold-wrap { position:relative; }
+    .threshold-wrap .unit-badge {
+      position:absolute; right:8px; top:50%; transform:translateY(-50%);
+      font-size:0.72rem; color:var(--muted); pointer-events:none;
+    }
+    .threshold-wrap input { padding-right:2.5rem; }
+  </style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>⚖️ Wing ICL Overrides</h1>
+    <div class="sub">CAPR 70-1 / CAPF 70-1A Individual/Command Limit management
+      {% if user.role == 'admin' %} — NHQ Admin
+      {% elif user.wing_id %} — {{ user.wing_id }}
+      {% else %} — {{ user.username }}{% endif %}
+    </div>
+  </div>
+  <a href="/" class="btn-home">← Home</a>
+</header>
+
+<div class="container">
+
+  {% if error %}
+  <div class="alert alert-error">⚠ {{ error }}</div>
+  {% endif %}
+  {% if success %}
+  <div class="alert alert-success">✓ {{ success }}</div>
+  {% endif %}
+
+  <!-- National defaults reference -->
+  <div class="defaults-banner">
+    <strong>CAPR 70-1 / CAPF 70-1A National Defaults</strong> — Wing ICLs apply per-wing; national defaults used when no ICL entry exists.
+    <div class="def-groups">
+      <div class="def-group">
+        <div class="def-group-title">Surface Wind</div>
+        <div class="def-item">Caution: <span>21 kts</span></div>
+        <div class="def-item">No-Go: <span>30 kts</span></div>
+      </div>
+      <div class="def-group">
+        <div class="def-group-title">Crosswind VFR</div>
+        <div class="def-item">Caution: <span>8 kts</span></div>
+        <div class="def-item">No-Go: <span>15 kts</span></div>
+      </div>
+      <div class="def-group">
+        <div class="def-group-title">Crosswind IFR</div>
+        <div class="def-item">Caution: <span>8 kts</span></div>
+        <div class="def-item">No-Go: <span>13 kts</span></div>
+      </div>
+      <div class="def-group">
+        <div class="def-group-title">Cold Temperature</div>
+        <div class="def-item">Caution: <span>20°F</span></div>
+        <div class="def-item">No-Go: <span>-10°F</span></div>
+      </div>
+      <div class="def-group">
+        <div class="def-group-title">Ceiling VFR</div>
+        <div class="def-item">Caution: <span>800 ft</span></div>
+        <div class="def-item">No-Go: <span>500 ft</span></div>
+      </div>
+      <div class="def-group">
+        <div class="def-group-title">Visibility VFR</div>
+        <div class="def-item">Caution: <span>2.0 SM</span></div>
+        <div class="def-item">No-Go: <span>1.0 SM</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="conservative-notice">
+    ⚠ Wing and Region DO/DOV may impose <strong>more conservative</strong> limits only — overrides cannot be more lenient than national defaults.
+    Ceiling and visibility overrides must flag conditions <em>sooner</em> (higher thresholds) than national defaults.
+  </div>
+
+  <!-- Add/Update form -->
+  <div class="add-card">
+    <h2>Add / Update Override</h2>
+    <form method="POST" action="{{ request.script_root }}/admin/wing-icl/add">
+      <div class="form-grid">
+
+        {% if user.role == 'admin' %}
+        <div class="form-group">
+          <label>Wing / Region</label>
+          <select name="wing_id" required>
+            <option value="">— select —</option>
+            <optgroup label="── Regions ──">
+              {% for region_code, wing_count in regions %}
+              <option value="{{ region_code }}">{{ region_code }} Region ({{ wing_count }} wings)</option>
+              {% endfor %}
+            </optgroup>
+            <optgroup label="── Wings ──">
+              {% for wid, region in wings %}
+              <option value="{{ wid }}">{{ wid }}</option>
+              {% endfor %}
+            </optgroup>
+          </select>
+        </div>
+        {% else %}
+        <div class="form-group">
+          <label>Wing</label>
+          <input type="text" value="{{ user.wing_id }}" readonly
+                 style="background:#060e1c;color:var(--accent);font-weight:700;">
+          <input type="hidden" name="wing_id" value="{{ user.wing_id }}">
+        </div>
+        {% endif %}
+
+        <div class="form-group">
+          <label>Parameter</label>
+          <select name="parameter" id="paramSelect" required onchange="updateUnit()">
+            <option value="">— select parameter —</option>
+            {% for group_name, params in groups.items() %}
+            <optgroup label="{{ group_name }}">
+              {% for key, meta in params %}
+              <option value="{{ key }}"
+                      data-unit="{{ meta.unit }}"
+                      data-national="{{ meta.national }}"
+                      data-conservative="{{ meta.conservative }}">
+                {{ meta.label }}
+              </option>
+              {% endfor %}
+            </optgroup>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>Threshold (<span id="unitLabel">—</span>)</label>
+          <div class="threshold-wrap">
+            <input type="number" name="threshold" id="thresholdInput"
+                   step="0.5" required placeholder="value">
+            <span class="unit-badge" id="unitBadge"></span>
+          </div>
+          <div class="form-hint" id="paramHint"></div>
+        </div>
+
+        <div class="form-group">
+          <label>Regulation / Authority</label>
+          <input type="text" name="regulation"
+                 placeholder="e.g. COWG ICL 2025-01" maxlength="80">
+        </div>
+
+        <div class="form-group">
+          <label>Effective Date</label>
+          <input type="date" name="effective">
+        </div>
+
+        <div class="form-group">
+          <label>Expires Date</label>
+          <input type="date" name="expires">
+        </div>
+
+        <div class="form-group wide">
+          <label>Notes</label>
+          <textarea name="notes"
+            placeholder="Operational justification, approving authority, etc." rows="2"></textarea>
+        </div>
+      </div>
+      <button type="submit" class="btn-save">Save Override</button>
+    </form>
+  </div>
+
+  <!-- Current entries -->
+  <div class="entries-card">
+    <h2>Current ICL Overrides
+      {% if entries %}<span style="font-size:0.82rem;color:var(--muted);font-weight:normal;">
+        ({{ entries|length }} entr{{ 'y' if entries|length == 1 else 'ies' }})</span>{% endif %}
+    </h2>
+    {% if entries %}
+    <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Wing</th>
+          <th>Group</th>
+          <th>Parameter</th>
+          <th>ICL Value</th>
+          <th>National</th>
+          <th>Regulation</th>
+          <th>Effective</th>
+          <th>Expires</th>
+          <th>Notes</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in entries %}
+        {% set meta = parameters.get(e.parameter, {}) %}
+        <tr>
+          <td><span class="wing-tag">{{ e.wing_id }}</span></td>
+          <td><span class="group-tag">{{ meta.get('group','—') }}</span></td>
+          <td style="font-size:0.8rem;">{{ meta.get('label', e.parameter) }}</td>
+          <td class="threshold-val">{{ e.threshold }} {{ meta.get('unit','') }}</td>
+          <td class="national-val">{{ meta.get('national','—') }} {{ meta.get('unit','') }}</td>
+          <td class="reg-tag">{{ e.regulation or '—' }}</td>
+          <td style="font-size:0.78rem;white-space:nowrap;">{{ e.effective or '—' }}</td>
+          <td style="font-size:0.78rem;white-space:nowrap;"
+              class="{{ 'expires-warn' if e.expires else '' }}">
+            {{ e.expires or '—' }}
+          </td>
+          <td class="note-cell" title="{{ e.notes or '' }}">{{ e.notes or '' }}</td>
+          <td>
+            <form method="POST"
+                  action="{{ request.script_root }}/admin/wing-icl/delete"
+                  onsubmit="return confirm('Delete this ICL override for {{ e.wing_id }}?')">
+              <input type="hidden" name="id" value="{{ e.id }}">
+              <button type="submit" class="btn-delete">Delete</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+      No ICL overrides configured.
+      {% if user.role == 'admin' %}All wings are using CAPR 70-1 national defaults.
+      {% elif user.wing_id %}{{ user.wing_id }} is using CAPR 70-1 national defaults.
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+
+</div>
+
+<script>
+// Parameter hints from server-side data
+const PARAM_HINTS = {
+  {% for key, meta in parameters.items() %}
+  '{{ key }}': { unit: '{{ meta.unit }}', hint: {{ meta.hint | tojson }},
+                 national: {{ meta.national }}, conservative: '{{ meta.conservative }}' },
+  {% endfor %}
+};
+
+function updateUnit() {
+  const sel = document.getElementById('paramSelect');
+  const key = sel.value;
+  const unitLabel = document.getElementById('unitLabel');
+  const unitBadge = document.getElementById('unitBadge');
+  const hintEl    = document.getElementById('paramHint');
+  const input     = document.getElementById('thresholdInput');
+
+  if (key && PARAM_HINTS[key]) {
+    const p = PARAM_HINTS[key];
+    unitLabel.textContent = p.unit;
+    unitBadge.textContent = p.unit;
+    hintEl.textContent    = p.hint;
+    // Set min/max based on conservative direction
+    if (p.conservative === 'lower') {
+      input.max = p.national;
+      input.removeAttribute('min');
+    } else {
+      input.min = p.national;
+      input.removeAttribute('max');
+    }
+    input.placeholder = p.national;
+  } else {
+    unitLabel.textContent = '—';
+    unitBadge.textContent = '';
+    hintEl.textContent    = '';
+    input.removeAttribute('min');
+    input.removeAttribute('max');
+    input.placeholder = 'value';
+  }
+}
+</script>
+</body>
+</html>
