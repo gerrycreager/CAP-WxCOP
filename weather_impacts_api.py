@@ -147,6 +147,8 @@ def get_impacts_airports():
                 wi.wind_chill_f,
                 {color_col}             AS color,
                 {worst_col}             AS worst_param,
+                wi.tstm_prob,
+                wi.tstm_color,
                 wi.model_run
             FROM observations.airport_wx_impacts wi
             JOIN observations.airports a ON a.id = wi.airport_id
@@ -171,7 +173,7 @@ def get_impacts_airports():
              fhour, valid_time, model_source,
              ceil_ft, vis_m, wind_kts, wind_dir, wind_gust,
              xwind, best_hdg, tmp_f, hi_f, wc_f,
-             color, worst_param, mr) = row
+             color, worst_param, tstm_prob, tstm_color, mr) = row
 
             if model_run is None and mr:
                 model_run = mr.strftime('%Y-%m-%dT%H:%MZ')
@@ -194,6 +196,8 @@ def get_impacts_airports():
                 'ceil_display':  fmt_ceil(ceil_ft),
                 'vis_m':         vis_m,
                 'vis_display':   fmt_vis(vis_m),
+                'tstm_prob':     int(tstm_prob) if tstm_prob is not None else None,
+                'tstm_color':    tstm_color,
                 'wind_speed_kts': float(wind_kts) if wind_kts is not None else None,
                 'wind_dir':      wind_dir,
                 'wind_gust_kts': float(wind_gust) if wind_gust is not None else None,
@@ -259,6 +263,8 @@ def get_impacts_station(station_id):
                 wi.vfr_worst_param,
                 wi.ifr_color,
                 wi.ifr_worst_param,
+                wi.tstm_prob,
+                wi.tstm_color,
                 wi.model_run,
                 a.name,
                 ST_Y(a.location) AS lat,
@@ -288,13 +294,13 @@ def get_impacts_station(station_id):
         first = rows[0]
         station = {
             'station_id':    station_id,
-            'name':          first[18],
-            'lat':           float(first[19]) if first[19] else None,
-            'lon':           float(first[20]) if first[20] else None,
-            'is_military':   bool(first[21]),
-            'elevation_ft':  first[22],
-            'longest_rwy_ft': first[23],
-            'model_run':     first[17].strftime('%Y-%m-%dT%H:%MZ') if first[17] else None,
+            'name':          first[20],
+            'lat':           float(first[21]) if first[21] else None,
+            'lon':           float(first[22]) if first[22] else None,
+            'is_military':   bool(first[23]),
+            'elevation_ft':  first[24],
+            'longest_rwy_ft': first[25],
+            'model_run':     first[19].strftime('%Y-%m-%dT%H:%MZ') if first[19] else None,
         }
 
         forecast = []
@@ -303,7 +309,7 @@ def get_impacts_station(station_id):
              ceil_ft, vis_m, wind_kts, wind_dir, wind_gust,
              xwind, best_hdg, tmp_f, hi_f, wc_f,
              vfr_color, vfr_worst, ifr_color, ifr_worst,
-             model_run, *_) = row
+             tstm_prob, tstm_color, model_run, *_) = row
 
             color      = vfr_color if op == 'vfr' else ifr_color
             worst      = vfr_worst if op == 'vfr' else ifr_worst
@@ -330,6 +336,8 @@ def get_impacts_station(station_id):
                 'tmp_f':          float(tmp_f) if tmp_f is not None else None,
                 'heat_index_f':   float(hi_f) if hi_f is not None else None,
                 'wind_chill_f':   float(wc_f) if wc_f is not None else None,
+                'tstm_prob':      int(tstm_prob) if tstm_prob is not None else None,
+                'tstm_color':     tstm_color,
             })
 
         return jsonify({
