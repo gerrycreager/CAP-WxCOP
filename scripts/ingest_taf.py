@@ -162,13 +162,15 @@ def parse_taf_file_v3(filepath, timeout_seconds=60):
             # Try pattern 1 first (with TAF prefix)
             match = pattern1.match(line)
             if match:
-                # Save previous TAF
+                # Save previous TAF — re-match current_taf[0] to get correct station_id
                 if current_taf:
                     taf_text = '\n'.join(current_taf)
-                    taf_obj = parse_taf_from_match(match)
-                    if taf_obj:
-                        taf_obj['raw_text'] = taf_text
-                        tafs.append(taf_obj)
+                    first_line_match = pattern1.match(current_taf[0]) or pattern2.match(current_taf[0])
+                    if first_line_match:
+                        taf_obj = parse_taf_from_match(first_line_match)
+                        if taf_obj:
+                            taf_obj['raw_text'] = taf_text
+                            tafs.append(taf_obj)
                 
                 # Start new TAF
                 current_taf = [line]
@@ -300,6 +302,8 @@ def ingest_taf_directory(directory, conn):
             continue
         
         for taf in tafs:
+            if taf["station_id"][0] not in ("K", "T", "P"):
+                continue
             if insert_taf(conn, taf):
                 taf_count += 1
             else:
@@ -367,16 +371,24 @@ def cleanup_old_tafs(days=7):
         return 0
 
 if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser(description='TAF Ingest')
+    parser.add_argument('--recent', type=int, default=24,
+                        help='Ingest TAFs from last N minutes (default: 24 hours = 1440 min). '
+                             'Note: treated as hours if > 60, minutes otherwise for legacy compat.')
+    args = parser.parse_args()
+
+    # --recent N: if N > 60 treat as minutes (legacy cron passes 90 meaning 90 min)
+    # otherwise treat as hours
+    hours = args.recent / 60 if args.recent <= 1440 else 24
+
     logger.info("=" * 70)
     logger.info("TAF Ingest Starting")
     logger.info("=" * 70)
-    
-    # Ingest last 24 hours
-    count = ingest_recent_tafs(hours=24)
-    
-    # Cleanup old data
+
+    count = ingest_recent_tafs(hours=hours)
     cleanup_old_tafs(days=7)
-    
+
     logger.info("=" * 70)
     logger.info(f"TAF Ingest Complete - Processed {count} TAFs")
     logger.info("=" * 70)
