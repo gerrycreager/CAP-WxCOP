@@ -57,7 +57,7 @@ GLM_FEEDS = {
 }
 
 # Retain flash records for this many minutes (2 hours)
-RETENTION_MINUTES = 120
+RETENTION_MINUTES = 240
 
 # State files — track last processed granule mtime per feed
 STATE_DIR = '/var/lib/cap_wxcop'
