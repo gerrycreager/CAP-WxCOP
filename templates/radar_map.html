@@ -446,7 +446,7 @@
         //   CONUS loop:  nexrad-n0q-900913-m05m  (no sector suffix)
         //   AK live:     nexrad-n0q-900913-ak
         //   AK loop:     nexrad-n0q-900913-ak-m05m
-        var liveName  = sec ? base+'-'+sec : base+'-conus';
+        var liveName  = sec ? base+'-'+sec : base;
         var loopInfix = sec ? base+'-'+sec : base;
         var frames=[];
         for (var m=mins; m>=5; m-=5) {
@@ -463,6 +463,7 @@
     function iemMakeTileLayer(layerName) {
         return L.tileLayer(IEM_BASE+layerName+'/{z}/{x}/{y}.png', {
             opacity:0, zIndex:400, maxZoom:18,
+            crossOrigin: true,
             attribution:'NEXRAD &copy; <a href="https://mesonet.agron.iastate.edu/">IEM</a>',
             errorTileUrl:'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
         });
