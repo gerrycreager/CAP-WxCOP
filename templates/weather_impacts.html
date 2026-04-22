@@ -292,9 +292,10 @@ const PARAM_LABELS = {
 };
 
 // Airport display tiers
-const TIER_SYM_ZOOM   = { 1:3, 2:5, 3:6, 4:7 };
-const TIER_LBL_ZOOM   = { 1:5, 2:7, 3:8, 4:999 };
-const TIER_SYM_PX     = { 1:14, 2:11, 3:9, 4:7 };
+// Tier 1=Military, 2=Major Hub(≥8000ft), 3=Regional(≥5000ft), 4=Local(≥2500ft)
+const TIER_SYM_ZOOM   = { 1:3, 2:4, 3:6, 4:8 };
+const TIER_LBL_ZOOM   = { 1:5, 2:6, 3:8, 4:999 };
+const TIER_SYM_PX     = { 1:14, 2:12, 3:10, 4:8 };
 
 // ── State ─────────────────────────────────────────────────────────────────
 var map, symbolsLayer, labelsLayer, highlightLayer, baseLayers;
@@ -386,7 +387,7 @@ function loadData() {
     ].join(',');
 
     var url = API_BASE + '/airports?hour=' + currentHour +
-              '&op=' + currentOp + '&bounds=' + bStr + '&limit=5000';
+              '&op=' + currentOp + '&bounds=' + bStr + '&min_rwy=2500&limit=3000';
 
     fetch(url)
         .then(function(r) { return r.json(); })
@@ -434,7 +435,8 @@ function updateMarkers() {
 
         var tier = apt.is_military ? 1 :
                    (apt.longest_rwy_ft >= 8000 ? 2 :
-                   (apt.longest_rwy_ft >= 4000 ? 3 : 4));
+                   (apt.longest_rwy_ft >= 5000 ? 3 : 4));
+        if (!apt.is_military && apt.longest_rwy_ft < 2500) return; // skip short/unpaved
 
         if (zoom < TIER_SYM_ZOOM[tier]) return;
 
