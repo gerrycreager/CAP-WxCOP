@@ -1,29 +1,11 @@
 """
 weather_impacts_api.py — Flask API for CAPR 70-1 Weather Impacts stoplight data.
 
-Serves pre-computed VFR/IFR stoplights from observations.airport_wx_impacts,
-populated by ingest_glmp_impacts.py from NOMADS GLMP gridded forecasts.
-
 Routes:
-  GET /api/weather-impacts/airports
-      Returns all qualifying airports with current stoplight for a given
-      forecast hour and operation type (VFR/IFR).
-      Query params:
-        hour=N          forecast hour 1-25 (default: 1)
-        op=vfr|ifr      operation type (default: vfr)
-        bounds=W,S,E,N  optional viewport filter (decimal degrees)
-        limit=N         max airports returned (default: 5000)
-
-  GET /api/weather-impacts/station/<station_id>
-      Returns full 25-hour forecast table for one airport.
-      Query params:
-        op=vfr|ifr      operation type (default: vfr)
-
+  GET /api/weather-impacts/airports       Map display — all airports for a given hour
+  GET /api/weather-impacts/station/<id>   Detail panel — full 25-hour forecast
   GET /api/weather-impacts/available-hours
-      Returns available forecast hours and model run time for current cycle.
-
   GET /api/weather-impacts/status
-      Returns pipeline status — last model run, record count, etc.
 """
 
 import os
@@ -32,104 +14,90 @@ from datetime import datetime, timezone
 from flask import Blueprint, jsonify, request
 
 log = logging.getLogger(__name__)
-
 weather_impacts_api = Blueprint('weather_impacts_api', __name__)
 
-# ---------------------------------------------------------------------------
-# DB connection
-# ---------------------------------------------------------------------------
+# ── DB connection ──────────────────────────────────────────────────────────────
 def get_connection():
     import psycopg2
-    import psycopg2.extras
     dsn = os.environ.get('DB_DSN',
                          'dbname=avwx_data user=avwx_user host=192.168.0.60')
     return psycopg2.connect(dsn)
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-def parse_bounds(bounds_str):
-    """Parse 'W,S,E,N' bounds string. Returns (west, south, east, north) or None."""
-    if not bounds_str:
+# ── Helpers ────────────────────────────────────────────────────────────────────
+def parse_bounds(s):
+    if not s:
         return None
     try:
-        parts = [float(x) for x in bounds_str.split(',')]
-        if len(parts) != 4:
-            return None
-        return tuple(parts)
+        parts = [float(x) for x in s.split(',')]
+        return tuple(parts) if len(parts) == 4 else None
     except (ValueError, TypeError):
         return None
 
-
-def color_label(color):
-    labels = {
-        'GREEN':   'Go',
-        'YELLOW':  'Caution — Marginal',
-        'RED':     'No-Go / Req. Auth.',
-    }
-    return labels.get(color, 'Unknown')
-
+def color_label(c):
+    return {'GREEN': 'Go', 'YELLOW': 'Caution — Marginal',
+            'RED': 'No-Go / Req. Auth.'}.get(c, 'Unknown')
 
 def fmt_ceil(ft):
-    if ft is None:
-        return None
-    if ft == 99999:
-        return 'Unlimited'
-    return f'{ft:,} ft'
-
+    if ft is None: return None
+    return 'Unlimited' if ft == 99999 else f'{ft:,} ft'
 
 def fmt_vis(m):
-    if m is None:
-        return None
-    sm = m / 1609.34
-    return f'{sm:.1f} SM'
+    if m is None: return None
+    return f'{m/1609.34:.1f} SM'
 
+# Source priority: GLMP > HRRR > AIGFS > LAMP > other
+SOURCE_PRIORITY = """
+    CASE model_source
+      WHEN 'GLMP_CO'  THEN 1
+      WHEN 'GLMP_AK'  THEN 1
+      WHEN 'GLMP_HI'  THEN 1
+      WHEN 'GLMP_PR'  THEN 1
+      WHEN 'HRRR'     THEN 2
+      WHEN 'AIGFS'    THEN 3
+      WHEN 'LAMP'     THEN 4
+      ELSE 5
+    END
+"""
 
-# ---------------------------------------------------------------------------
-# GET /api/weather-impacts/airports
-# ---------------------------------------------------------------------------
+# ── GET /airports ──────────────────────────────────────────────────────────────
 @weather_impacts_api.route('/airports', methods=['GET'])
 def get_impacts_airports():
-    """
-    Return all airports with stoplight for a given forecast hour.
-    This is the primary endpoint for the map display.
-    """
     try:
-        hour    = int(request.args.get('hour', 1))
-        op      = request.args.get('op', 'vfr').lower()
-        bounds  = parse_bounds(request.args.get('bounds'))
-        limit   = min(int(request.args.get('limit', 5000)), 10000)
+        hour   = int(request.args.get('hour', 1))
+        op     = request.args.get('op', 'vfr').lower()
+        bounds = parse_bounds(request.args.get('bounds'))
+        limit  = min(int(request.args.get('limit', 5000)), 10000)
 
+        min_rwy = int(request.args.get('min_rwy', 0))
         if op not in ('vfr', 'ifr'):
             return jsonify({'error': 'op must be vfr or ifr'}), 400
         if not (1 <= hour <= 25):
             return jsonify({'error': 'hour must be 1-25'}), 400
 
-        color_col  = 'wi.vfr_color'  if op == 'vfr' else 'wi.ifr_color'
-        worst_col  = 'wi.vfr_worst_param' if op == 'vfr' else 'wi.ifr_worst_param'
+        color_col = 'wi.vfr_color' if op == 'vfr' else 'wi.ifr_color'
+        worst_col = 'wi.vfr_worst_param' if op == 'vfr' else 'wi.ifr_worst_param'
 
         conn = get_connection()
         cur  = conn.cursor()
 
-        # Build bounds filter
         bounds_sql = ''
         params = [hour]
         if bounds:
-            west, south, east, north = bounds
-            bounds_sql = """
-                AND ST_Y(a.location) BETWEEN %s AND %s
-                AND ST_X(a.location) BETWEEN %s AND %s
-            """
-            params += [south, north, west, east]
+            w, s, e, n = bounds
+            bounds_sql = "AND ST_Y(a.location) BETWEEN %s AND %s AND ST_X(a.location) BETWEEN %s AND %s"
+            params += [s, n, w, e]
+        if min_rwy > 0:
+            bounds_sql += f' AND (a.is_military OR a.longest_runway_ft >= {int(min_rwy)})'
         params += [limit]
 
+        # Use DISTINCT ON to get best source per airport for this forecast hour.
+        # DISTINCT ON picks the first row per airport_id when sorted by priority + model_run DESC.
         cur.execute(f"""
             SELECT
                 wi.station_id,
-                ST_Y(a.location)        AS lat,
-                ST_X(a.location)        AS lon,
-                a.name                  AS airport_name,
+                ST_Y(a.location)    AS lat,
+                ST_X(a.location)    AS lon,
+                a.name,
                 a.is_military,
                 a.longest_runway_ft,
                 wi.forecast_hour,
@@ -145,18 +113,21 @@ def get_impacts_airports():
                 wi.tmp_f,
                 wi.heat_index_f,
                 wi.wind_chill_f,
-                {color_col}             AS color,
-                {worst_col}             AS worst_param,
+                {color_col}         AS color,
+                {worst_col}         AS worst_param,
                 wi.tstm_prob,
                 wi.tstm_color,
                 wi.model_run
-            FROM observations.airport_wx_impacts wi
+            FROM (
+                SELECT DISTINCT ON (airport_id)
+                    *
+                FROM observations.airport_wx_impacts
+                WHERE forecast_hour = %s
+                ORDER BY airport_id,
+                    {SOURCE_PRIORITY},
+                    model_run DESC
+            ) wi
             JOIN observations.airports a ON a.id = wi.airport_id
-            WHERE wi.forecast_hour = %s
-              AND wi.model_run = (
-                  SELECT MAX(model_run)
-                  FROM observations.airport_wx_impacts
-              )
             {bounds_sql}
             ORDER BY wi.station_id
             LIMIT %s
@@ -179,42 +150,41 @@ def get_impacts_airports():
                 model_run = mr.strftime('%Y-%m-%dT%H:%MZ')
 
             airports.append({
-                'station_id':    station_id,
-                'lat':           float(lat) if lat else None,
-                'lon':           float(lon) if lon else None,
-                'name':          name,
-                'is_military':   bool(is_military),
+                'station_id':     station_id,
+                'lat':            float(lat) if lat else None,
+                'lon':            float(lon) if lon else None,
+                'name':           name,
+                'is_military':    bool(is_military),
                 'longest_rwy_ft': longest_rwy,
-                'forecast_hour': fhour,
-                'valid_time':    valid_time.strftime('%Y-%m-%dT%H:%MZ') if valid_time else None,
-                'model_source':  model_source,
-                'color':         color or 'UNKNOWN',
-                'color_label':   color_label(color),
-                'worst_param':   worst_param,
-                # Raw values
-                'ceil_ft':       ceil_ft,
-                'ceil_display':  fmt_ceil(ceil_ft),
-                'vis_m':         vis_m,
-                'vis_display':   fmt_vis(vis_m),
-                'tstm_prob':     int(tstm_prob) if tstm_prob is not None else None,
-                'tstm_color':    tstm_color,
+                'forecast_hour':  fhour,
+                'valid_time':     valid_time.strftime('%Y-%m-%dT%H:%MZ') if valid_time else None,
+                'model_source':   model_source,
+                'color':          color or 'UNKNOWN',
+                'color_label':    color_label(color),
+                'worst_param':    worst_param,
+                'ceil_ft':        ceil_ft,
+                'ceil_display':   fmt_ceil(ceil_ft),
+                'vis_m':          vis_m,
+                'vis_display':    fmt_vis(vis_m),
+                'tstm_prob':      int(tstm_prob) if tstm_prob is not None else None,
+                'tstm_color':     tstm_color,
                 'wind_speed_kts': float(wind_kts) if wind_kts is not None else None,
-                'wind_dir':      wind_dir,
-                'wind_gust_kts': float(wind_gust) if wind_gust is not None else None,
-                'crosswind_kts': float(xwind) if xwind is not None else None,
+                'wind_dir':       wind_dir,
+                'wind_gust_kts':  float(wind_gust) if wind_gust is not None else None,
+                'crosswind_kts':  float(xwind) if xwind is not None else None,
                 'best_runway_hdg': best_hdg,
-                'tmp_f':         float(tmp_f) if tmp_f is not None else None,
-                'heat_index_f':  float(hi_f) if hi_f is not None else None,
-                'wind_chill_f':  float(wc_f) if wc_f is not None else None,
+                'tmp_f':          float(tmp_f) if tmp_f is not None else None,
+                'heat_index_f':   float(hi_f) if hi_f is not None else None,
+                'wind_chill_f':   float(wc_f) if wc_f is not None else None,
             })
 
         return jsonify({
-            'airports':    airports,
-            'count':       len(airports),
+            'airports':      airports,
+            'count':         len(airports),
             'forecast_hour': hour,
-            'operation':   op.upper(),
-            'model_run':   model_run,
-            'query_time':  datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%MZ'),
+            'operation':     op.upper(),
+            'model_run':     model_run,
+            'query_time':    datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%MZ'),
         })
 
     except Exception as e:
@@ -222,15 +192,9 @@ def get_impacts_airports():
         return jsonify({'error': str(e)}), 500
 
 
-# ---------------------------------------------------------------------------
-# GET /api/weather-impacts/station/<station_id>
-# ---------------------------------------------------------------------------
+# ── GET /station/<id> ──────────────────────────────────────────────────────────
 @weather_impacts_api.route('/station/<station_id>', methods=['GET'])
 def get_impacts_station(station_id):
-    """
-    Return full 25-hour forecast table for one airport.
-    Used by the right-side detail panel when an airport is clicked.
-    """
     try:
         station_id = station_id.upper()
         op         = request.args.get('op', 'vfr').lower()
@@ -238,13 +202,11 @@ def get_impacts_station(station_id):
         if op not in ('vfr', 'ifr'):
             return jsonify({'error': 'op must be vfr or ifr'}), 400
 
-        color_col = 'wi.vfr_color'  if op == 'vfr' else 'wi.ifr_color'
-        worst_col = 'wi.vfr_worst_param' if op == 'vfr' else 'wi.ifr_worst_param'
-
         conn = get_connection()
         cur  = conn.cursor()
 
-        cur.execute(f"""
+        # For station detail: use best source (priority order), latest run of that source
+        cur.execute("""
             SELECT
                 wi.forecast_hour,
                 wi.valid_time,
@@ -272,14 +234,21 @@ def get_impacts_station(station_id):
                 a.is_military,
                 a.elevation_ft,
                 a.longest_runway_ft
-            FROM observations.airport_wx_impacts wi
-            JOIN observations.airports a ON a.id = wi.airport_id
-            WHERE wi.station_id = %s
-              AND wi.model_run = (
-                  SELECT MAX(model_run)
-                  FROM observations.airport_wx_impacts
-                  WHERE station_id = %s
-              )
+            FROM (
+                SELECT DISTINCT ON (forecast_hour)
+                    *
+                FROM observations.airport_wx_impacts
+                WHERE station_id = %s
+                ORDER BY forecast_hour,
+                    CASE model_source
+                      WHEN 'GLMP_CO' THEN 1 WHEN 'GLMP_AK' THEN 1
+                      WHEN 'GLMP_HI' THEN 1 WHEN 'GLMP_PR' THEN 1
+                      WHEN 'HRRR'    THEN 2 WHEN 'AIGFS'   THEN 3
+                      WHEN 'LAMP'    THEN 4 ELSE 5
+                    END,
+                    model_run DESC
+            ) wi
+            JOIN observations.airports a ON a.station_id = %s
             ORDER BY wi.forecast_hour
         """, (station_id, station_id))
 
@@ -290,17 +259,16 @@ def get_impacts_station(station_id):
         if not rows:
             return jsonify({'error': f'No data for station {station_id}'}), 404
 
-        # Station info from first row
         first = rows[0]
         station = {
-            'station_id':    station_id,
-            'name':          first[20],
-            'lat':           float(first[21]) if first[21] else None,
-            'lon':           float(first[22]) if first[22] else None,
-            'is_military':   bool(first[23]),
-            'elevation_ft':  first[24],
+            'station_id':     station_id,
+            'name':           first[20],
+            'lat':            float(first[21]) if first[21] else None,
+            'lon':            float(first[22]) if first[22] else None,
+            'is_military':    bool(first[23]),
+            'elevation_ft':   first[24],
             'longest_rwy_ft': first[25],
-            'model_run':     first[19].strftime('%Y-%m-%dT%H:%MZ') if first[19] else None,
+            'model_run':      first[19].strftime('%Y-%m-%dT%H:%MZ') if first[19] else None,
         }
 
         forecast = []
@@ -311,8 +279,8 @@ def get_impacts_station(station_id):
              vfr_color, vfr_worst, ifr_color, ifr_worst,
              tstm_prob, tstm_color, model_run, *_) = row
 
-            color      = vfr_color if op == 'vfr' else ifr_color
-            worst      = vfr_worst if op == 'vfr' else ifr_worst
+            color = vfr_color if op == 'vfr' else ifr_color
+            worst = vfr_worst if op == 'vfr' else ifr_worst
 
             forecast.append({
                 'forecast_hour':  fhour,
@@ -323,7 +291,6 @@ def get_impacts_station(station_id):
                 'worst_param':    worst,
                 'vfr_color':      vfr_color,
                 'ifr_color':      ifr_color,
-                # Raw values
                 'ceil_ft':        ceil_ft,
                 'ceil_display':   fmt_ceil(ceil_ft),
                 'vis_m':          vis_m,
@@ -352,26 +319,22 @@ def get_impacts_station(station_id):
         return jsonify({'error': str(e)}), 500
 
 
-# ---------------------------------------------------------------------------
-# GET /api/weather-impacts/available-hours
-# ---------------------------------------------------------------------------
+# ── GET /available-hours ───────────────────────────────────────────────────────
 @weather_impacts_api.route('/available-hours', methods=['GET'])
 def get_available_hours():
-    """Return available forecast hours and model run time."""
     try:
         conn = get_connection()
         cur  = conn.cursor()
         cur.execute("""
             SELECT
-                MAX(model_run)          AS model_run,
-                MIN(forecast_hour)      AS min_hour,
-                MAX(forecast_hour)      AS max_hour,
-                COUNT(DISTINCT forecast_hour) AS hour_count,
-                COUNT(DISTINCT station_id)    AS airport_count,
-                array_agg(DISTINCT forecast_hour ORDER BY forecast_hour) AS hours
+                MAX(model_run),
+                MIN(forecast_hour),
+                MAX(forecast_hour),
+                COUNT(DISTINCT forecast_hour),
+                COUNT(DISTINCT station_id),
+                array_agg(DISTINCT forecast_hour ORDER BY forecast_hour)
             FROM observations.airport_wx_impacts
-            WHERE model_run = (SELECT MAX(model_run)
-                               FROM observations.airport_wx_impacts)
+            WHERE model_run = (SELECT MAX(model_run) FROM observations.airport_wx_impacts)
         """)
         row = cur.fetchone()
         cur.close()
@@ -380,13 +343,13 @@ def get_available_hours():
         if not row or not row[0]:
             return jsonify({'error': 'No weather impacts data available'}), 404
 
-        model_run, min_h, max_h, hour_count, apt_count, hours = row
+        mr, min_h, max_h, hcount, acount, hours = row
         return jsonify({
-            'model_run':     model_run.strftime('%Y-%m-%dT%H:%MZ'),
+            'model_run':     mr.strftime('%Y-%m-%dT%H:%MZ'),
             'min_hour':      min_h,
             'max_hour':      max_h,
-            'hour_count':    hour_count,
-            'airport_count': apt_count,
+            'hour_count':    hcount,
+            'airport_count': acount,
             'hours':         hours,
         })
 
@@ -395,40 +358,37 @@ def get_available_hours():
         return jsonify({'error': str(e)}), 500
 
 
-# ---------------------------------------------------------------------------
-# GET /api/weather-impacts/status
-# ---------------------------------------------------------------------------
+# ── GET /status ────────────────────────────────────────────────────────────────
 @weather_impacts_api.route('/status', methods=['GET'])
 def get_status():
-    """Pipeline status — last model run, record count, age."""
     try:
         conn = get_connection()
         cur  = conn.cursor()
         cur.execute("""
             SELECT
-                MAX(model_run)      AS latest_run,
-                MAX(ingested_at)    AS last_ingest,
-                COUNT(*)            AS total_records,
-                COUNT(DISTINCT station_id) AS airports,
-                COUNT(DISTINCT forecast_hour) AS forecast_hours
+                MAX(model_run),
+                MAX(ingested_at),
+                COUNT(*),
+                COUNT(DISTINCT station_id),
+                COUNT(DISTINCT forecast_hour)
             FROM observations.airport_wx_impacts
         """)
         row = cur.fetchone()
         cur.close()
         conn.close()
 
-        latest_run, last_ingest, total, airports, hours = row
+        lr, li, total, airports, hours = row
         now = datetime.now(timezone.utc)
-        age_min = round((now - latest_run).total_seconds() / 60) if latest_run else None
+        age = round((now - lr).total_seconds() / 60) if lr else None
 
         return jsonify({
-            'latest_model_run':  latest_run.strftime('%Y-%m-%dT%H:%MZ') if latest_run else None,
-            'last_ingested_at':  last_ingest.strftime('%Y-%m-%dT%H:%MZ') if last_ingest else None,
-            'model_run_age_min': age_min,
+            'latest_model_run':  lr.strftime('%Y-%m-%dT%H:%MZ') if lr else None,
+            'last_ingested_at':  li.strftime('%Y-%m-%dT%H:%MZ') if li else None,
+            'model_run_age_min': age,
             'total_records':     total,
             'airport_count':     airports,
             'forecast_hours':    hours,
-            'status':            'current' if age_min and age_min < 60 else 'stale',
+            'status':            'current' if age and age < 60 else 'stale',
         })
 
     except Exception as e:
