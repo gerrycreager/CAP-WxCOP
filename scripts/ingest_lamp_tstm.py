@@ -238,6 +238,35 @@ def main():
         log.info(f"  F{fhr:03d}: {len(rows)} upserted "
                  f"(valid {valid_time.strftime('%H:%MZ')})")
 
+
+    # Merge TSTM into GLMP rows so API returns combined data
+    log.info("Merging TSTM into GLMP rows...")
+    with conn.cursor() as cur:
+        cur.execute("""
+            UPDATE observations.airport_wx_impacts glmp
+            SET tstm_prob  = lamp.tstm_prob,
+                tstm_color = lamp.tstm_color,
+                ingested_at = NOW()
+            FROM (
+                SELECT DISTINCT ON (airport_id, forecast_hour)
+                    airport_id, forecast_hour, tstm_prob, tstm_color
+                FROM observations.airport_wx_impacts
+                WHERE model_source = 'LAMP'
+                  AND tstm_prob IS NOT NULL
+                ORDER BY airport_id, forecast_hour, model_run DESC
+            ) lamp
+            WHERE glmp.model_source LIKE 'GLMP%'
+              AND glmp.model_run = (
+                  SELECT MAX(model_run) FROM observations.airport_wx_impacts
+                  WHERE model_source LIKE 'GLMP%'
+              )
+              AND glmp.airport_id = lamp.airport_id
+              AND glmp.forecast_hour = lamp.forecast_hour
+        """)
+        merged = cur.rowcount
+    conn.commit()
+    log.info(f"Merged {merged} GLMP rows with TSTM data")
+
     elapsed = (datetime.now() - t0).total_seconds()
     log.info(f"Total: {total} records in {elapsed:.0f}s "
              f"({elapsed/MAX_FORECAST_HR:.1f}s/hr)")
