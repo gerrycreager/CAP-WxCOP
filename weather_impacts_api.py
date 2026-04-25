@@ -45,19 +45,6 @@ def fmt_vis(m):
     if m is None: return None
     return f'{m/1609.34:.1f} SM'
 
-# Source priority: GLMP > HRRR > AIGFS > LAMP > other
-SOURCE_PRIORITY = """
-    CASE model_source
-      WHEN 'GLMP_CO'  THEN 1
-      WHEN 'GLMP_AK'  THEN 1
-      WHEN 'GLMP_HI'  THEN 1
-      WHEN 'GLMP_PR'  THEN 1
-      WHEN 'HRRR'     THEN 2
-      WHEN 'AIGFS'    THEN 3
-      WHEN 'LAMP'     THEN 4
-      ELSE 5
-    END
-"""
 
 # ── GET /airports ──────────────────────────────────────────────────────────────
 @weather_impacts_api.route('/airports', methods=['GET'])
@@ -124,7 +111,7 @@ def get_impacts_airports():
                 FROM observations.airport_wx_impacts
                 WHERE forecast_hour = %s
                 ORDER BY airport_id,
-                    {SOURCE_PRIORITY},
+                    source_priority,
                     model_run DESC
             ) wi
             JOIN observations.airports a ON a.id = wi.airport_id
@@ -239,14 +226,7 @@ def get_impacts_station(station_id):
                     *
                 FROM observations.airport_wx_impacts
                 WHERE station_id = %s
-                ORDER BY forecast_hour,
-                    CASE model_source
-                      WHEN 'GLMP_CO' THEN 1 WHEN 'GLMP_AK' THEN 1
-                      WHEN 'GLMP_HI' THEN 1 WHEN 'GLMP_PR' THEN 1
-                      WHEN 'HRRR'    THEN 2 WHEN 'AIGFS'   THEN 3
-                      WHEN 'LAMP'    THEN 4 ELSE 5
-                    END,
-                    model_run DESC
+                ORDER BY forecast_hour, source_priority, model_run DESC
             ) wi
             JOIN observations.airports a ON a.station_id = %s
             ORDER BY wi.forecast_hour
