@@ -1,857 +1,786 @@
 #!/usr/bin/env python3
 """
-ingest_glmp_impacts.py — Extract GLMP forecasts for all qualifying CAP airfields
-and evaluate CAPR 70-1 weather impacts stoplights.
+ingest_glmp_impacts.py v2 — CAPR 70-1 Weather Impacts ingest from new NOMADS GLMP format.
 
-Data sources:
-  CONUS GLMP  — K airports + T airports (Caribbean/PR/USVI)
-  Alaska GLMP — PA* airports within Alaska domain
-  GFS 0.25°   — PH* (Hawaii), PG* (Guam) fallback
+Reads the new glmp.tHH30z.fcsts_*.grib2 files (one file per variable, all 25 hours)
+and glmp.tHH30z.hr00_*.grib2 (analysis fields) from /LDM/models/glmp/YYYYMMDD/.
 
-Airport filter: has_paved_runway=true AND longest_runway_ft >= 2500
-Station prefix: K, T, P (US and territories only)
+Variables ingested:
+  fcsts_cig     — ceiling height (metres, -1=unlimited)
+  fcsts_cigp3   — prob(ceil < 304.8m / 1000ft)    [VFR No-Go threshold]
+  fcsts_vis     — visibility (metres)
+  fcsts_visp2   — prob(vis < 1609m / 1SM)         [IFR No-Go threshold]
+  fcsts_wspd    — wind speed (m/s → kts)
+  fcsts_wdir    — wind direction (10s of degrees)
+  fcsts_wgst    — wind gust (m/s → kts)
+  fcsts_t       — 2m temperature (K → °F)
+  fcsts_td      — 2m dewpoint (K → °F)
 
-CAPR 70-1 thresholds evaluated:
-  VFR Fixed Wing: wind, crosswind, ceiling, visibility, temp cold/hot,
-                  wind chill, heat index
-  IFR Fixed Wing: wind, crosswind, ceiling, visibility
+CAPF 70-1A Stoplight thresholds applied per airport runway heading:
+  VFR: wind, crosswind, ceiling, visibility, temp cold, temp hot, wind chill
+  IFR: wind, crosswind, ceiling, visibility
 
-Output table: observations.airport_wx_impacts (data2/PostgreSQL)
+Wing ICL overrides applied (more conservative only).
 
-Run on data1 every 30 min (after fetch_glmp.py):
-  2,32 * * * * /var/www/cap_winds_app/venv/bin/python3 \
-    /var/www/cap_winds_app/scripts/ingest_glmp_impacts.py \
-    >> /var/log/glmp_impacts.log 2>&1
+Airport filter: has_paved_runway AND longest_runway_ft >= 2500
+
+Output: observations.airport_wx_impacts (upsert)
+
+Runs on data1 hourly, 15 min after fetch_glmp.py completes.
+Cron: 0 * * * * (top of hour, fetch runs at :45 previous hour)
 """
 
 import os
 import sys
-import math
-import fcntl
+import re
 import logging
-import argparse
+import fcntl
+import numpy as np
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
-import numpy as np
-import pygrib
+import cfgrib
 import psycopg2
-import psycopg2.extras
-from scipy.spatial import cKDTree
+from psycopg2.extras import execute_values
+from scipy.spatial import KDTree
+
+# ── Configuration ──────────────────────────────────────────────────────────────
+GLMP_DIR        = Path('/LDM/models/glmp')
+MAX_FORECAST_HR = 25
+LOCKFILE        = '/home/ldm/var/run/ingest_glmp_impacts.lock'
+CFGRIB_IDX_DIR  = '/tmp/cfgrib_glmp_idx'
+
+DB_HOST = '192.168.0.60'
+DB_NAME = 'avwx_data'
+DB_USER = 'avwx_user'
+DB_PASS = 'avwx_pass'
+
+LOG_FILE = '/home/ldm/var/logs/glmp_impacts.log'
 
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler(sys.stdout)]
+    format='%(asctime)s,%(msecs)03d - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+    handlers=[
+        logging.FileHandler(LOG_FILE),
+        logging.StreamHandler(sys.stdout)
+    ]
 )
 log = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
-GLMP_BASE   = Path('/LDM/models/glmp')
-GFS_BASE    = Path('/LDM/models/gfs/0p25')
-LOCKFILE    = '/var/lock/ingest_glmp_impacts.lock'
-DB_DSN      = os.environ.get('DB_DSN',
-                             'dbname=avwx_data user=avwx_user host=192.168.0.60')
+# ── Unit conversions ───────────────────────────────────────────────────────────
+def k_to_f(k):
+    return (k - 273.15) * 9/5 + 32 if k is not None and k > 0 else None
 
-# GLMP grid domain bounds (from grid inspection)
-CONUS_LAT_MIN, CONUS_LAT_MAX =  20.19,  52.81
-CONUS_LON_MIN, CONUS_LON_MAX = -130.10, -60.89
-AK_LAT_MIN                   =  50.0
-AK_LON_MIN, AK_LON_MAX       = -180.0, -129.0
+def ms_to_kts(ms):
+    return ms * 1.94384 if ms is not None and ms >= 0 else None
 
-# GLMP variable files and their pygrib shortName/typeOfLevel
-GLMP_VARS = {
-    'fcsts_cig':  ('ceil',   'cloudCeiling',      0),
-    'fcsts_t':    ('2t',     'heightAboveGround',  2),
-    'fcsts_td':   ('2d',     'heightAboveGround',  2),
-    'fcsts_vis':  ('vis',    'surface',            0),
-    'fcsts_wdir': ('10wdir', 'heightAboveGround', 10),
-    'fcsts_wgst': ('i10fg',  'heightAboveGround', 10),
-    'fcsts_wspd': ('10si',   'heightAboveGround', 10),
-}
+def m_to_ft(m):
+    return m * 3.28084 if m is not None and m > 0 else None
 
-# How many recent cycles to look back when finding latest complete cycle
-CYCLE_LOOKBACK = 6   # 6 × 30min = 3 hours
+def wdir_decode(raw):
+    """Wind direction is in 10s of degrees in GLMP."""
+    if raw is None or np.isnan(raw): return None
+    return int(round(raw * 10)) % 360
 
-# ---------------------------------------------------------------------------
-# CAPR 70-1 Threshold evaluation
-# ---------------------------------------------------------------------------
-def color_wind(kts):
-    if kts is None:       return 'UNKNOWN'
-    if kts < 25:          return 'GREEN'
-    if kts < 30:          return 'YELLOW'
-    return 'RED'
+def heat_index_f(tmp_f, dpt_f):
+    """Simple Rothfusz heat index."""
+    if tmp_f is None or dpt_f is None or tmp_f < 80: return None
+    rh = 100 * (112 - 0.1*tmp_f + dpt_f) / (112 + 0.9*tmp_f)
+    rh = max(0, min(100, rh))
+    hi = (-42.379 + 2.04901523*tmp_f + 10.14333127*rh
+          - 0.22475541*tmp_f*rh - 0.00683783*tmp_f**2
+          - 0.05481717*rh**2 + 0.00122874*tmp_f**2*rh
+          + 0.00085282*tmp_f*rh**2 - 0.00000199*tmp_f**2*rh**2)
+    return hi if hi > tmp_f else None
 
-def color_xwind_vfr(kts):
-    if kts is None:       return 'UNKNOWN'
-    if kts < 8:           return 'GREEN'
-    if kts < 15:          return 'YELLOW'
-    return 'RED'
+def wind_chill_f(tmp_f, wind_kts):
+    """NWS wind chill formula."""
+    if tmp_f is None or wind_kts is None or tmp_f > 50 or wind_kts < 3:
+        return None
+    wind_mph = wind_kts * 1.15078
+    return (35.74 + 0.6215*tmp_f - 35.75*(wind_mph**0.16)
+            + 0.4275*tmp_f*(wind_mph**0.16))
 
-def color_xwind_ifr(kts):
-    if kts is None:       return 'UNKNOWN'
-    if kts < 8:           return 'GREEN'
-    if kts < 13:          return 'YELLOW'
-    return 'RED'
+def crosswind_kts(wind_spd_kts, wind_dir_deg, rwy_hdg_deg):
+    """Crosswind component for a runway."""
+    if any(v is None for v in [wind_spd_kts, wind_dir_deg, rwy_hdg_deg]):
+        return None
+    import math
+    angle = math.radians(abs(wind_dir_deg - rwy_hdg_deg))
+    return abs(wind_spd_kts * math.sin(angle))
 
-def color_ceil_vfr(ft):
-    if ft is None:        return 'UNKNOWN'
-    if ft < 0 or ft == 99999: return 'GREEN'   # unlimited/clear
-    if ft > 2000:         return 'GREEN'
-    if ft >= 500:         return 'YELLOW'
-    return 'RED'
-
-def color_ceil_ifr(ft):
-    if ft is None:        return 'UNKNOWN'
-    if ft < 0 or ft == 99999: return 'GREEN'   # unlimited/clear
-    if ft > 800:          return 'GREEN'
-    if ft >= 500:         return 'YELLOW'
-    return 'RED'
-
-def color_vis(m):
-    """Visibility in metres."""
-    if m is None:         return 'UNKNOWN'
-    if m > 3200:          return 'GREEN'
-    if m >= 1600:         return 'YELLOW'
-    return 'RED'
-
-def color_temp_cold(f):
-    if f is None:         return 'UNKNOWN'
-    if f >= 20:           return 'GREEN'
-    if f >= 10:           return 'YELLOW'
-    return 'RED'
-
-def color_temp_hot(f):
-    if f is None:         return 'UNKNOWN'
-    if f < 90:            return 'GREEN'
-    if f <= 104:          return 'YELLOW'
-    return 'RED'
-
-def color_wind_chill(f):
-    if f is None:         return 'UNKNOWN'
-    if f > 40:            return 'GREEN'
-    if f >= 22:           return 'YELLOW'
-    return 'RED'
-
-def color_heat_index(f):
-    if f is None:         return 'UNKNOWN'
-    if f <= 90:           return 'GREEN'
-    if f <= 101:          return 'YELLOW'
-    return 'RED'
-
+# ── CAPR 70-1 / CAPF 70-1A Stoplight thresholds ───────────────────────────────
 COLOR_ORDER = {'RED': 0, 'YELLOW': 1, 'GREEN': 2, 'UNKNOWN': 3}
 
 def worst_color(*colors):
     return min(colors, key=lambda c: COLOR_ORDER.get(c, 3))
 
-def worst_param(params_dict):
-    """Return name of worst parameter."""
-    worst = 'GREEN'
-    worst_name = None
-    for name, color in params_dict.items():
-        if COLOR_ORDER.get(color, 3) < COLOR_ORDER.get(worst, 3):
-            worst = color
-            worst_name = name
-    return worst_name
+def worst_param_name(params_dict):
+    worst = 'GREEN'; name = None
+    for k, v in params_dict.items():
+        if COLOR_ORDER.get(v, 3) < COLOR_ORDER.get(worst, 3):
+            worst = v; name = k
+    return name
 
-# ---------------------------------------------------------------------------
-# Derived fields
-# ---------------------------------------------------------------------------
-def kelvin_to_c(k):
-    return k - 273.15 if k is not None else None
+def source_priority(src):
+    return {'GLMP_CO': 1, 'GLMP_AK': 1, 'GLMP_HI': 1, 'GLMP_PR': 1,
+            'HRRR': 2, 'AIGFS': 3, 'LAMP': 4}.get(src, 9)
 
-def c_to_f(c):
-    return c * 9/5 + 32 if c is not None else None
-
-def ms_to_kts(ms):
-    return ms * 1.94384 if ms is not None else None
-
-def heat_index_f(tmp_f, rh_pct):
-    """NWS Rothfusz — only valid when tmp_f >= 80°F."""
-    if tmp_f is None or tmp_f < 80 or rh_pct is None:
-        return None
-    hi = (-42.379 + 2.04901523*tmp_f + 10.14333127*rh_pct
-          - 0.22475541*tmp_f*rh_pct - 0.00683783*tmp_f**2
-          - 0.05481717*rh_pct**2 + 0.00122874*tmp_f**2*rh_pct
-          + 0.00085282*tmp_f*rh_pct**2 - 0.00000199*tmp_f**2*rh_pct**2)
-    return hi
-
-def wind_chill_f(tmp_f, wind_mph):
-    """NWS wind chill — only valid when tmp_f <= 50°F and wind >= 3 mph."""
-    if tmp_f is None or tmp_f > 50 or wind_mph is None or wind_mph < 3:
-        return None
-    return (35.74 + 0.6215*tmp_f - 35.75*(wind_mph**0.16)
-            + 0.4275*tmp_f*(wind_mph**0.16))
-
-def relative_humidity(tmp_c, dpt_c):
-    """Magnus formula RH %."""
-    if tmp_c is None or dpt_c is None:
-        return None
-    return 100 * math.exp((17.625*dpt_c)/(243.04+dpt_c) -
-                          (17.625*tmp_c)/(243.04+tmp_c))
-
-def crosswind(wind_dir_deg, wind_speed_kts, runway_heading_deg):
-    """Crosswind component in knots."""
-    if any(v is None for v in [wind_dir_deg, wind_speed_kts, runway_heading_deg]):
-        return None
-    angle = math.radians(wind_dir_deg - runway_heading_deg)
-    return abs(wind_speed_kts * math.sin(angle))
-
-def best_runway_crosswind(wind_dir, wind_speed_kts, runway_headings):
+def compute_colors(ceil_ft, vis_m, wind_kts, xwind_kts, tmp_f, hi_f, wc_f, icl):
     """
-    Find runway end with minimum crosswind. Returns (min_xwind, best_heading).
-    runway_headings: list of (le_heading, he_heading) tuples, either may be None.
+    Compute VFR/IFR stoplights per CAPR 70-1 / CAPF 70-1A.
+    icl dict has optional override thresholds (more conservative only).
     """
-    if not runway_headings or wind_dir is None or wind_speed_kts is None:
-        return None, None
-    best_xw = None
-    best_hdg = None
-    for le_hdg, he_hdg in runway_headings:
-        for hdg in [le_hdg, he_hdg]:
-            if hdg is None:
-                continue
-            # Also check reciprocal if only one end stored
-            xw = crosswind(wind_dir, wind_speed_kts, hdg)
-            if xw is not None and (best_xw is None or xw < best_xw):
-                best_xw = xw
-                best_hdg = hdg
-    return best_xw, best_hdg
+    # ── ICL-adjusted thresholds ───────────────────────────────────────────
+    # Wind
+    wind_y  = icl.get('wind_vfr_yellow') or 21.0
+    wind_r  = icl.get('wind_vfr_red')    or 30.0
+    # Crosswind VFR
+    xw_vfr_y = icl.get('crosswind_vfr_yellow') or 8.0
+    xw_vfr_r = icl.get('crosswind_vfr_red')    or 15.0
+    # Crosswind IFR
+    xw_ifr_y = icl.get('crosswind_ifr_yellow') or 8.0
+    xw_ifr_r = icl.get('crosswind_ifr_red')    or 13.0
+    # Ceiling VFR: GREEN>2000ft, YELLOW 1000-2000ft, RED<1000ft
+    ceil_vfr_y = icl.get('ceil_vfr_yellow') or 2000.0
+    ceil_vfr_r = icl.get('ceil_vfr_red')    or 1000.0
+    # Ceiling IFR: GREEN>800ft, YELLOW 500-800ft, RED<500ft
+    ceil_ifr_y = 800.0
+    ceil_ifr_r = 500.0
+    # Visibility VFR: GREEN>3SM, YELLOW 1-3SM, RED<1SM
+    SM = 1609.344
+    vis_vfr_y = (icl.get('vis_vfr_yellow') or 3.0) * SM
+    vis_vfr_r = (icl.get('vis_vfr_red')    or 1.0) * SM
+    # Visibility IFR: GREEN>1SM, YELLOW 0.5-1SM, RED<0.5SM
+    vis_ifr_y = 1.0 * SM
+    vis_ifr_r = 0.5 * SM
+    # Cold temp
+    tmp_cold_y = icl.get('temp_cold_yellow') or 20.0
+    tmp_cold_r = icl.get('temp_cold_red')    or -10.0
+    # Hot temp (not ICL-overridable per CAPR 70-1)
+    tmp_hot_y  = 90.0
+    tmp_hot_r  = 104.0
+    # Wind chill (CAPF 70-1A)
+    wc_y = 22.0
+    wc_r = 0.0
 
-# ---------------------------------------------------------------------------
-# Grid assignment
-# ---------------------------------------------------------------------------
-def assign_grid(lat, lon):
-    """
-    Assign airport to GLMP grid sector based on coordinates.
-    Returns 'co', 'ak', 'gfs', or None (if outside all known grids).
-    """
-    if lon > 180:
-        lon -= 360
-    if (CONUS_LAT_MIN <= lat <= CONUS_LAT_MAX and
-            CONUS_LON_MIN <= lon <= CONUS_LON_MAX):
-        return 'co'
-    if lat >= AK_LAT_MIN and AK_LON_MIN <= lon <= AK_LON_MAX:
-        return 'ak'
-    # Hawaii (~19-22°N, -155 to -160°W) and Guam (~13°N, 144°E)
-    return 'gfs'
+    def c_wind(kts):
+        if kts is None: return 'UNKNOWN'
+        return 'RED' if kts > wind_r else 'YELLOW' if kts > wind_y else 'GREEN'
 
-# ---------------------------------------------------------------------------
-# GLMP file discovery
-# ---------------------------------------------------------------------------
-def find_latest_glmp_cycle(sector):
-    """
-    Find most recent complete GLMP cycle for a given sector ('co' or 'ak').
-    Returns (cycle_dt, file_dict) where file_dict maps var_name -> Path,
-    or (None, None) if not found.
-    """
-    now_utc = datetime.now(timezone.utc)
-    # Round down to nearest 30-min boundary
-    minute = (now_utc.minute // 30) * 30
-    candidate = now_utc.replace(minute=minute, second=0, microsecond=0)
+    def c_xwind_vfr(kts):
+        if kts is None: return 'UNKNOWN'
+        return 'RED' if kts > xw_vfr_r else 'YELLOW' if kts > xw_vfr_y else 'GREEN'
 
-    for i in range(CYCLE_LOOKBACK * 2):  # 30-min steps
-        cycle_dt  = candidate - timedelta(minutes=30*i)
-        date_str  = cycle_dt.strftime('%Y%m%d')
-        cycle_str = cycle_dt.strftime('%H%Mz')
-        date_dir  = GLMP_BASE / date_str
+    def c_xwind_ifr(kts):
+        if kts is None: return 'UNKNOWN'
+        return 'RED' if kts > xw_ifr_r else 'YELLOW' if kts > xw_ifr_y else 'GREEN'
+
+    def c_ceil_vfr(ft):
+        if ft is None: return 'UNKNOWN'
+        if ft < 0 or ft > 12000: return 'GREEN'   # -1 = unlimited
+        return 'RED' if ft < ceil_vfr_r else 'YELLOW' if ft <= ceil_vfr_y else 'GREEN'
+
+    def c_ceil_ifr(ft):
+        if ft is None: return 'UNKNOWN'
+        if ft < 0 or ft > 12000: return 'GREEN'
+        return 'RED' if ft < ceil_ifr_r else 'YELLOW' if ft <= ceil_ifr_y else 'GREEN'
+
+    def c_vis_vfr(m):
+        if m is None: return 'UNKNOWN'
+        return 'RED' if m < vis_vfr_r else 'YELLOW' if m <= vis_vfr_y else 'GREEN'
+
+    def c_vis_ifr(m):
+        if m is None: return 'UNKNOWN'
+        return 'RED' if m < vis_ifr_r else 'YELLOW' if m <= vis_ifr_y else 'GREEN'
+
+    def c_tmp_cold(f):
+        if f is None: return 'UNKNOWN'
+        return 'RED' if f < tmp_cold_r else 'YELLOW' if f <= tmp_cold_y else 'GREEN'
+
+    def c_tmp_hot(f):
+        if f is None: return 'UNKNOWN'
+        return 'RED' if f > tmp_hot_r else 'YELLOW' if f >= tmp_hot_y else 'GREEN'
+
+    def c_wind_chill(f):
+        if f is None: return 'GREEN'   # no chill = no restriction
+        return 'RED' if f < wc_r else 'YELLOW' if f <= wc_y else 'GREEN'
+
+    vfr_params = {
+        'wind':       c_wind(wind_kts),
+        'crosswind':  c_xwind_vfr(xwind_kts),
+        'ceiling':    c_ceil_vfr(ceil_ft),
+        'visibility': c_vis_vfr(vis_m),
+        'temp_cold':  c_tmp_cold(tmp_f),
+        'temp_hot':   c_tmp_hot(tmp_f),
+        'wind_chill': c_wind_chill(wc_f),
+        # heat_index excluded from VFR stoplight per CAPR 70-1
+    }
+    ifr_params = {
+        'wind':       c_wind(wind_kts),
+        'crosswind':  c_xwind_ifr(xwind_kts),
+        'ceiling':    c_ceil_ifr(ceil_ft),
+        'visibility': c_vis_ifr(vis_m),
+    }
+
+    return {
+        'vfr_color':       worst_color(*vfr_params.values()),
+        'vfr_worst_param': worst_param_name(vfr_params),
+        'ifr_color':       worst_color(*ifr_params.values()),
+        'ifr_worst_param': worst_param_name(ifr_params),
+    }
+
+# ── Database ───────────────────────────────────────────────────────────────────
+def get_conn():
+    return psycopg2.connect(host=DB_HOST, dbname=DB_NAME,
+                            user=DB_USER, password=DB_PASS)
+
+def load_airports(conn):
+    """Load airports with runways and Wing ICL overrides."""
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT
+                a.id, a.station_id,
+                ST_X(a.location::geometry) AS lon,
+                ST_Y(a.location::geometry) AS lat,
+                a.is_military,
+                r.le_heading_degt, r.he_heading_degt,
+                r.le_length_ft,
+                -- Wing ICL overrides
+                MAX(CASE WHEN wi.parameter='wind_vfr_yellow'      THEN wi.threshold END) as wind_vfr_y,
+                MAX(CASE WHEN wi.parameter='wind_vfr_red'         THEN wi.threshold END) as wind_vfr_r,
+                MAX(CASE WHEN wi.parameter='crosswind_vfr_yellow' THEN wi.threshold END) as xw_vfr_y,
+                MAX(CASE WHEN wi.parameter='crosswind_vfr_red'    THEN wi.threshold END) as xw_vfr_r,
+                MAX(CASE WHEN wi.parameter='crosswind_ifr_yellow' THEN wi.threshold END) as xw_ifr_y,
+                MAX(CASE WHEN wi.parameter='crosswind_ifr_red'    THEN wi.threshold END) as xw_ifr_r,
+                MAX(CASE WHEN wi.parameter='ceil_vfr_yellow'      THEN wi.threshold END) as ceil_vfr_y,
+                MAX(CASE WHEN wi.parameter='ceil_vfr_red'         THEN wi.threshold END) as ceil_vfr_r,
+                MAX(CASE WHEN wi.parameter='vis_vfr_yellow'       THEN wi.threshold END) as vis_vfr_y,
+                MAX(CASE WHEN wi.parameter='vis_vfr_red'          THEN wi.threshold END) as vis_vfr_r,
+                MAX(CASE WHEN wi.parameter='temp_cold_yellow'     THEN wi.threshold END) as tmp_cold_y,
+                MAX(CASE WHEN wi.parameter='temp_cold_red'        THEN wi.threshold END) as tmp_cold_r
+            FROM observations.airports a
+            JOIN observations.runways r ON r.airport_id = a.id
+            LEFT JOIN observations.wing_map wm ON wm.iso_region = a.iso_region
+            LEFT JOIN observations.wing_icl wi ON (
+                wi.wing_id = wm.wing_id OR wi.wing_id = wm.region_code
+            ) AND (wi.expires IS NULL OR wi.expires > NOW())
+            WHERE a.has_paved_runway = true
+              AND r.le_length_ft >= 2500
+              AND r.surface NOT ILIKE '%water%'
+              AND r.closed = false
+              AND a.location IS NOT NULL
+            GROUP BY a.id, a.station_id, a.location, a.is_military,
+                     r.le_heading_degt, r.he_heading_degt, r.le_length_ft
+            ORDER BY a.station_id
+        """)
+        rows = cur.fetchall()
+    conn.commit()
+    log.info(f"Loaded {len(rows)} qualifying airport/runway combinations")
+    return rows
+
+# ── GLMP grid / KDTree ─────────────────────────────────────────────────────────
+def build_kdtree_from_file(grib_file):
+    """Build KDTree from a GLMP grib2 file's lat/lon grid."""
+    os.makedirs(CFGRIB_IDX_DIR, exist_ok=True)
+    idx_path = f"{CFGRIB_IDX_DIR}/{Path(grib_file).name}.idx"
+    try:
+        ds = cfgrib.open_dataset(str(grib_file), engine='cfgrib',
+                                 backend_kwargs={'squeeze': True,
+                                                 'indexing': {'filename': idx_path}})
+    except Exception:
+        ds = cfgrib.open_dataset(str(grib_file), engine='cfgrib',
+                                 backend_kwargs={'squeeze': True})
+
+    lats = ds['latitude'].values
+    lons = ds['longitude'].values
+    lons = np.where(lons > 180, lons - 360, lons)
+    ds.close()
+
+    flat_lats = lats.flatten()
+    flat_lons = lons.flatten()
+    tree = KDTree(np.column_stack([flat_lats, flat_lons]))
+    log.info(f"KDTree built: {lats.shape[0]}×{lats.shape[1]} = {lats.size:,} points")
+    return tree, flat_lats, flat_lons, lats.shape
+
+def get_airport_grid_indices(tree, airports):
+    """Map each airport to nearest grid point."""
+    coords = np.array([(lat, lon) for _, _, lon, lat, *_ in airports])
+    _, indices = tree.query(coords, workers=-1)
+    return indices
+
+def read_grib_all_hours(grib_file, n_hours=MAX_FORECAST_HR):
+    """
+    Read a fcsts_*.grib2 file containing all forecast hours.
+    Returns numpy array shape (n_hours, n_grid_points).
+    """
+    os.makedirs(CFGRIB_IDX_DIR, exist_ok=True)
+    idx_path = f"{CFGRIB_IDX_DIR}/{Path(grib_file).name}.idx"
+    try:
+        ds = cfgrib.open_dataset(str(grib_file), engine='cfgrib',
+                                 backend_kwargs={'squeeze': False,
+                                                 'indexing': {'filename': idx_path}})
+    except Exception:
+        ds = cfgrib.open_dataset(str(grib_file), engine='cfgrib',
+                                 backend_kwargs={'squeeze': False})
+
+    var = list(ds.data_vars)[0]
+    data = ds[var].values  # may be (1,25,1,ny,nx) or (ny,nx) etc.
+    ds.close()
+
+    # Squeeze out all singleton dimensions
+    data = np.squeeze(data)
+
+    # After squeeze: should be (n_steps, ny, nx) or (ny, nx)
+    if data.ndim == 2:
+        data = data[np.newaxis, :]   # add step dim
+
+    # Now (n_steps, ny, nx)
+    n_steps = data.shape[0]
+    ny      = data.shape[1]
+    nx      = data.shape[2]
+    use = min(n_hours, n_steps)
+    return data[:use].reshape(use, ny * nx)
+
+def read_grib_single(grib_file):
+    """Read a single-field grib2 file (hr00_* analysis). Returns flat array."""
+    os.makedirs(CFGRIB_IDX_DIR, exist_ok=True)
+    idx_path = f"{CFGRIB_IDX_DIR}/{Path(grib_file).name}.idx"
+    try:
+        ds = cfgrib.open_dataset(str(grib_file), engine='cfgrib',
+                                 backend_kwargs={'squeeze': True,
+                                                 'indexing': {'filename': idx_path}})
+    except Exception:
+        ds = cfgrib.open_dataset(str(grib_file), engine='cfgrib',
+                                 backend_kwargs={'squeeze': True})
+    var = list(ds.data_vars)[0]
+    data = ds[var].values.flatten()
+    ds.close()
+    return data
+
+# ── Find latest GLMP cycle ─────────────────────────────────────────────────────
+def find_latest_cycle(sector='co'):
+    """Find latest cycle with all required files present.
+    Filename pattern: glmp_tHH30z_fcsts_VAR.g.SECTOR.grib2
+    e.g. glmp_t1930z_fcsts_cig.g.co.grib2
+    Cycles run at :30 past each hour.
+    """
+    now = datetime.now(timezone.utc)
+    required_vars = [f'fcsts_cig.g.{sector}.grib2',
+                     f'fcsts_wspd.g.{sector}.grib2']
+
+    for delta in range(6):
+        candidate = now - timedelta(hours=delta)
+        date_str  = candidate.strftime('%Y%m%d')
+        cstr      = f"t{candidate.hour:02d}30z"   # e.g. t1930z
+        date_dir  = GLMP_DIR / date_str
 
         if not date_dir.exists():
             continue
 
-        # Check all 7 variable files are present
-        files = {}
-        complete = True
-        for var in GLMP_VARS:
-            fname = f'glmp_{date_str}_{cycle_str}_{sector}_{var}.grib2'
-            fpath = date_dir / fname
-            if not fpath.exists() or fpath.stat().st_size == 0:
-                complete = False
-                break
-            files[var] = fpath
+        all_present = all(
+            (date_dir / f"glmp_{cstr}_{var}").exists()
+            for var in required_vars
+        )
+        if all_present:
+            cycle_dt = candidate.replace(minute=0, second=0, microsecond=0)
+            return date_dir, cycle_dt, cstr, date_str, f'GLMP_{sector.upper()}'
 
-        if complete:
-            log.info(f'Latest complete GLMP {sector.upper()} cycle: '
-                     f'{date_str} {cycle_str}')
-            return cycle_dt, files
+    return None, None, None, None, None
 
-    log.warning(f'No complete GLMP {sector.upper()} cycle found in last '
-                f'{CYCLE_LOOKBACK} cycles')
-    return None, None
-
-# ---------------------------------------------------------------------------
-# GLMP grid extraction
-# ---------------------------------------------------------------------------
-def load_glmp_grids(file_dict):
-    """
-    Load all GLMP variable files for one sector/cycle.
-    Returns dict: var_name -> {step: numpy_array_flat}
-    Also returns (tree, lats_shape) for spatial lookup.
-    """
-    grids  = {}
-    tree   = None
-    lshape = None
-
-    for var, fpath in file_dict.items():
-        shortname, type_of_level, level = GLMP_VARS[var]
-        try:
-            grbs = pygrib.open(str(fpath))
-            msgs = grbs.select(shortName=shortname,
-                               typeOfLevel=type_of_level,
-                               level=level)
-            var_grids = {}
-            for msg in msgs:
-                step = msg.stepRange
-                if '-' in str(step):
-                    # Accumulated field — use end step
-                    step = int(str(step).split('-')[-1])
-                else:
-                    step = int(step)
-                var_grids[step] = msg.values.ravel()
-
-                # Build KDTree from first message
-                if tree is None:
-                    lats, lons = msg.latlons()
-                    lons = np.where(lons > 180, lons - 360, lons)
-                    pts  = np.column_stack([lats.ravel(), lons.ravel()])
-                    tree = cKDTree(pts)
-                    lshape = lats.shape
-
-            grids[var] = var_grids
-            grbs.close()
-        except Exception as e:
-            log.warning(f'Failed to load {var} from {fpath.name}: {e}')
-            grids[var] = {}
-
-    return grids, tree, lshape
-
-def extract_at_index(grids, idx, step):
-    """Extract all variable values at grid index for a given forecast step."""
-    result = {}
-    for var, step_dict in grids.items():
-        val = step_dict.get(step)
-        if val is not None:
-            try:
-                v = float(val[idx])
-                result[var] = None if (v > 9e20 or np.isnan(v)) else v
-            except (ValueError, TypeError):
-                result[var] = None
-        else:
-            result[var] = None
-    return result
-
-# ---------------------------------------------------------------------------
-# GFS fallback extraction (for Hawaii and Guam)
-# ---------------------------------------------------------------------------
-def find_latest_gfs_file(fhour):
-    """Find the latest GFS file for a given forecast hour."""
-    now_utc = datetime.now(timezone.utc)
-    for hours_back in range(0, 25, 6):
-        candidate  = now_utc - timedelta(hours=hours_back)
-        cycle_hour = (candidate.hour // 6) * 6
-        cycle_dt   = candidate.replace(hour=cycle_hour, minute=0,
-                                       second=0, microsecond=0)
-        date_str   = cycle_dt.strftime('%Y%m%d')
-        hour_str   = cycle_dt.strftime('%H')
-        fpath = GFS_BASE / date_str / \
-                f'gfs_0p25_{date_str}_{hour_str}z_f{fhour:03d}.grib2'
-        if fpath.exists() and fpath.stat().st_size > 0:
-            return fpath, cycle_dt
-    return None, None
-
-# ---------------------------------------------------------------------------
-# Database operations
-# ---------------------------------------------------------------------------
-CREATE_TABLE_SQL = """
-CREATE TABLE IF NOT EXISTS observations.airport_wx_impacts (
-    id              SERIAL PRIMARY KEY,
-    airport_id      INTEGER NOT NULL
-                        REFERENCES observations.airports(id) ON DELETE CASCADE,
-    station_id      VARCHAR(10) NOT NULL,
-    model_source    VARCHAR(10) NOT NULL,  -- 'GLMP_CO', 'GLMP_AK', 'GFS'
-    model_run       TIMESTAMPTZ NOT NULL,
-    valid_time      TIMESTAMPTZ NOT NULL,
-    forecast_hour   SMALLINT NOT NULL,
-    -- Raw values
-    ceil_ft         INTEGER,
-    vis_m           INTEGER,
-    wind_dir        SMALLINT,
-    wind_speed_kts  REAL,
-    wind_gust_kts   REAL,
-    tmp_c           REAL,
-    dpt_c           REAL,
-    -- Derived
-    tmp_f           REAL,
-    heat_index_f    REAL,
-    wind_chill_f    REAL,
-    crosswind_kts   REAL,
-    best_runway_hdg SMALLINT,
-    -- VFR stoplight
-    vfr_color       VARCHAR(10),
-    vfr_worst_param VARCHAR(30),
-    -- IFR stoplight
-    ifr_color       VARCHAR(10),
-    ifr_worst_param VARCHAR(30),
-    ingested_at     TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE (airport_id, model_run, forecast_hour)
-);
-CREATE INDEX IF NOT EXISTS airport_wx_impacts_airport_id_idx
-    ON observations.airport_wx_impacts (airport_id);
-CREATE INDEX IF NOT EXISTS airport_wx_impacts_valid_time_idx
-    ON observations.airport_wx_impacts (valid_time);
-CREATE INDEX IF NOT EXISTS airport_wx_impacts_station_id_idx
-    ON observations.airport_wx_impacts (station_id);
-"""
-
-def get_airports(conn):
-    """Fetch qualifying airports with runway headings and Wing ICL overrides."""
-    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-        cur.execute("""
-            SELECT
-                a.id,
-                a.station_id,
-                ST_Y(a.location) as lat,
-                ST_X(a.location) as lon,
-                a.elevation_ft,
-                array_agg(
-                    ARRAY[r.le_heading_degt, r.he_heading_degt]
-                ) as runway_headings,
-                wm.wing_id,
-                wm.region_code,
-                -- Wind ICL overrides
-                MAX(CASE WHEN wi.parameter = 'wind_vfr_yellow'
-                    AND (wi.expires IS NULL OR wi.expires >= CURRENT_DATE)
-                    THEN wi.threshold END) as icl_wind_vfr_yellow,
-                MAX(CASE WHEN wi.parameter = 'wind_vfr_red'
-                    AND (wi.expires IS NULL OR wi.expires >= CURRENT_DATE)
-                    THEN wi.threshold END) as icl_wind_vfr_red,
-                -- Crosswind VFR ICL overrides
-                MAX(CASE WHEN wi.parameter = 'crosswind_vfr_yellow'
-                    AND (wi.expires IS NULL OR wi.expires >= CURRENT_DATE)
-                    THEN wi.threshold END) as icl_xwind_vfr_yellow,
-                MAX(CASE WHEN wi.parameter = 'crosswind_vfr_red'
-                    AND (wi.expires IS NULL OR wi.expires >= CURRENT_DATE)
-                    THEN wi.threshold END) as icl_xwind_vfr_red,
-                -- Crosswind IFR ICL overrides
-                MAX(CASE WHEN wi.parameter = 'crosswind_ifr_yellow'
-                    AND (wi.expires IS NULL OR wi.expires >= CURRENT_DATE)
-                    THEN wi.threshold END) as icl_xwind_ifr_yellow,
-                MAX(CASE WHEN wi.parameter = 'crosswind_ifr_red'
-                    AND (wi.expires IS NULL OR wi.expires >= CURRENT_DATE)
-                    THEN wi.threshold END) as icl_xwind_ifr_red,
-                -- Cold temperature ICL overrides
-                MAX(CASE WHEN wi.parameter = 'temp_cold_yellow'
-                    AND (wi.expires IS NULL OR wi.expires >= CURRENT_DATE)
-                    THEN wi.threshold END) as icl_temp_cold_yellow,
-                MAX(CASE WHEN wi.parameter = 'temp_cold_red'
-                    AND (wi.expires IS NULL OR wi.expires >= CURRENT_DATE)
-                    THEN wi.threshold END) as icl_temp_cold_red,
-                -- Ceiling VFR ICL overrides
-                MAX(CASE WHEN wi.parameter = 'ceil_vfr_yellow'
-                    AND (wi.expires IS NULL OR wi.expires >= CURRENT_DATE)
-                    THEN wi.threshold END) as icl_ceil_vfr_yellow,
-                MAX(CASE WHEN wi.parameter = 'ceil_vfr_red'
-                    AND (wi.expires IS NULL OR wi.expires >= CURRENT_DATE)
-                    THEN wi.threshold END) as icl_ceil_vfr_red,
-                -- Visibility VFR ICL overrides (stored in SM)
-                MAX(CASE WHEN wi.parameter = 'vis_vfr_yellow'
-                    AND (wi.expires IS NULL OR wi.expires >= CURRENT_DATE)
-                    THEN wi.threshold END) as icl_vis_vfr_yellow,
-                MAX(CASE WHEN wi.parameter = 'vis_vfr_red'
-                    AND (wi.expires IS NULL OR wi.expires >= CURRENT_DATE)
-                    THEN wi.threshold END) as icl_vis_vfr_red
-            FROM observations.airports a
-            JOIN observations.runways r ON r.airport_id = a.id
-            LEFT JOIN observations.wing_map wm ON wm.iso_region = a.iso_region
-            LEFT JOIN observations.wing_icl wi
-                ON (wi.wing_id = wm.wing_id OR wi.wing_id = wm.region_code)
-            WHERE a.has_paved_runway = true
-              AND a.longest_runway_ft >= 2500
-              AND a.station_id ~ '^[KTP]'
-              AND a.location IS NOT NULL
-            GROUP BY a.id, a.station_id, a.location, a.elevation_ft,
-                     wm.wing_id, wm.region_code
-            ORDER BY a.station_id
-        """)
-        airports = cur.fetchall()
-    conn.commit()  # release transaction immediately after read
-    log.info(f'Loaded {len(airports)} qualifying airports with runway data')
-    return airports
-
-def upsert_impacts(conn, records):
-    """Upsert a batch of impact records."""
-    if not records:
-        return 0
-    with conn.cursor() as cur:
-        psycopg2.extras.execute_values(cur, """
-            INSERT INTO observations.airport_wx_impacts (
-                airport_id, station_id, model_source, model_run, valid_time,
-                forecast_hour, ceil_ft, vis_m, wind_dir, wind_speed_kts,
-                wind_gust_kts, tmp_c, dpt_c, tmp_f, heat_index_f,
-                wind_chill_f, crosswind_kts, best_runway_hdg,
-                vfr_color, vfr_worst_param, ifr_color, ifr_worst_param,
-                ingested_at
-            ) VALUES %s
-            ON CONFLICT (airport_id, model_run, forecast_hour)
-            DO UPDATE SET
-                model_source    = EXCLUDED.model_source,
-                valid_time      = EXCLUDED.valid_time,
-                ceil_ft         = EXCLUDED.ceil_ft,
-                vis_m           = EXCLUDED.vis_m,
-                wind_dir        = EXCLUDED.wind_dir,
-                wind_speed_kts  = EXCLUDED.wind_speed_kts,
-                wind_gust_kts   = EXCLUDED.wind_gust_kts,
-                tmp_c           = EXCLUDED.tmp_c,
-                dpt_c           = EXCLUDED.dpt_c,
-                tmp_f           = EXCLUDED.tmp_f,
-                heat_index_f    = EXCLUDED.heat_index_f,
-                wind_chill_f    = EXCLUDED.wind_chill_f,
-                crosswind_kts   = EXCLUDED.crosswind_kts,
-                best_runway_hdg = EXCLUDED.best_runway_hdg,
-                vfr_color       = EXCLUDED.vfr_color,
-                vfr_worst_param = EXCLUDED.vfr_worst_param,
-                ifr_color       = EXCLUDED.ifr_color,
-                ifr_worst_param = EXCLUDED.ifr_worst_param,
-                ingested_at     = EXCLUDED.ingested_at
-        """, [
-            (r['airport_id'], r['station_id'], r['model_source'],
-             r['model_run'], r['valid_time'], r['forecast_hour'],
-             r['ceil_ft'], r['vis_m'], r['wind_dir'], r['wind_speed_kts'],
-             r['wind_gust_kts'], r['tmp_c'], r['dpt_c'], r['tmp_f'],
-             r['heat_index_f'], r['wind_chill_f'], r['crosswind_kts'],
-             r['best_runway_hdg'], r['vfr_color'], r['vfr_worst_param'],
-             r['ifr_color'], r['ifr_worst_param'], datetime.now(timezone.utc))
-            for r in records
-        ], page_size=500)
-    conn.commit()
-    return len(records)
-
-# ---------------------------------------------------------------------------
-# Stoplight evaluation
-# ---------------------------------------------------------------------------
-def evaluate_stoplights(raw, xwind_kts, icl=None):
-    """
-    Evaluate VFR and IFR stoplights from raw extracted values.
-    raw: dict with keys matching GLMP_VARS plus derived fields.
-    xwind_kts: crosswind component in knots.
-    icl: dict of Wing ICL threshold overrides (None = use national defaults).
-         Keys: wind_vfr_yellow, wind_vfr_red,
-               crosswind_vfr_yellow, crosswind_vfr_red,
-               crosswind_ifr_yellow, crosswind_ifr_red,
-               temp_cold_yellow, temp_cold_red,
-               ceil_vfr_yellow, ceil_vfr_red,
-               vis_vfr_yellow, vis_vfr_red
-    Returns dict with vfr_color, vfr_worst_param, ifr_color, ifr_worst_param.
-    """
-    if icl is None:
-        icl = {}
-
-    ceil_ft       = raw.get('ceil_ft')
-    vis_m         = raw.get('vis_m')
-    wind_kts      = raw.get('wind_speed_kts')
-    wind_gust_kts = raw.get('wind_gust_kts')
-    tmp_f         = raw.get('tmp_f')
-    hi_f          = raw.get('heat_index_f')
-    wc_f          = raw.get('wind_chill_f')
-
-    # Use gust for wind limit check if higher than sustained
-    wind_for_limit = max(
-        v for v in [wind_kts, wind_gust_kts] if v is not None
-    ) if any(v is not None for v in [wind_kts, wind_gust_kts]) else None
-
-    # ── Wind thresholds (ICL or national default) ────────────────────────
-    wind_y = icl.get('wind_vfr_yellow') or 21.0
-    wind_r = icl.get('wind_vfr_red')    or 30.0
-
-    def color_wind_icl(kts):
-        if kts is None: return 'UNKNOWN'
-        if kts < wind_y: return 'GREEN'
-        if kts < wind_r: return 'YELLOW'
-        return 'RED'
-
-    # ── Crosswind VFR thresholds ─────────────────────────────────────────
-    xw_vfr_y = icl.get('crosswind_vfr_yellow') or 8.0
-    xw_vfr_r = icl.get('crosswind_vfr_red')    or 15.0
-
-    def color_xwind_vfr_icl(kts):
-        if kts is None: return 'UNKNOWN'
-        if kts < xw_vfr_y: return 'GREEN'
-        if kts < xw_vfr_r: return 'YELLOW'
-        return 'RED'
-
-    # ── Crosswind IFR thresholds ─────────────────────────────────────────
-    xw_ifr_y = icl.get('crosswind_ifr_yellow') or 8.0
-    xw_ifr_r = icl.get('crosswind_ifr_red')    or 13.0
-
-    def color_xwind_ifr_icl(kts):
-        if kts is None: return 'UNKNOWN'
-        if kts < xw_ifr_y: return 'GREEN'
-        if kts < xw_ifr_r: return 'YELLOW'
-        return 'RED'
-
-    # ── Cold temperature thresholds ──────────────────────────────────────
-    # ICL can only raise these (more conservative = flag sooner)
-    tmp_cold_y = icl.get('temp_cold_yellow') or 20.0
-    tmp_cold_r = icl.get('temp_cold_red')    or -10.0
-
-    def color_temp_cold_icl(f):
-        if f is None: return 'UNKNOWN'
-        if f >= tmp_cold_y: return 'GREEN'
-        if f >= tmp_cold_r: return 'YELLOW'
-        return 'RED'
-
-    # ── Ceiling VFR thresholds ───────────────────────────────────────────
-    # ICL can only raise these (more conservative = flag at higher ceiling)
-    ceil_vfr_y = icl.get('ceil_vfr_yellow') or 800.0
-    ceil_vfr_r = icl.get('ceil_vfr_red')    or 500.0
-
-    def color_ceil_vfr_icl(ft):
-        if ft is None: return 'UNKNOWN'
-        if ft < 0 or ft == 99999: return 'GREEN'   # unlimited/clear
-        if ft > ceil_vfr_y: return 'GREEN'
-        if ft >= ceil_vfr_r: return 'YELLOW'
-        return 'RED'
-
-    # ── Visibility VFR thresholds (convert SM to metres) ─────────────────
-    # GLMP provides vis in metres; ICL is in SM — convert for comparison
-    SM_TO_M = 1609.344
-    vis_vfr_y_m = (icl.get('vis_vfr_yellow') or 2.0) * SM_TO_M
-    vis_vfr_r_m = (icl.get('vis_vfr_red')    or 1.0) * SM_TO_M
-
-    def color_vis_icl(m):
-        if m is None: return 'UNKNOWN'
-        if m > vis_vfr_y_m: return 'GREEN'
-        if m >= vis_vfr_r_m: return 'YELLOW'
-        return 'RED'
-
-    # ── VFR parameters ───────────────────────────────────────────────────
-    vfr_params = {
-        'wind':       color_wind_icl(wind_for_limit),
-        'crosswind':  color_xwind_vfr_icl(xwind_kts),
-        'ceiling':    color_ceil_vfr_icl(ceil_ft),
-        'visibility': color_vis_icl(vis_m),
-        'temp_cold':  color_temp_cold_icl(tmp_f),
-        'temp_hot':   color_temp_hot(tmp_f),    # not ICL-overridable
-        'wind_chill': color_wind_chill(wc_f),   # informational only
-        'heat_index': color_heat_index(hi_f),   # informational only
-    }
-
-    # ── IFR parameters ───────────────────────────────────────────────────
-    ifr_params = {
-        'wind':       color_wind_icl(wind_for_limit),
-        'crosswind':  color_xwind_ifr_icl(xwind_kts),
-        'ceiling':    color_ceil_ifr(ceil_ft),  # IFR uses fixed regulatory mins
-        'visibility': color_vis(vis_m),         # IFR uses fixed regulatory mins
-    }
-
-    vfr_color = worst_color(*vfr_params.values())
-    ifr_color = worst_color(*ifr_params.values())
-
-    return {
-        'vfr_color':       vfr_color,
-        'vfr_worst_param': worst_param(vfr_params),
-        'ifr_color':       ifr_color,
-        'ifr_worst_param': worst_param(ifr_params),
-    }
-
-# ---------------------------------------------------------------------------
-# Main processing
-# ---------------------------------------------------------------------------
-def process_sector(airports, sector, conn, now_utc):
-    """Process all airports in a GLMP sector grid."""
-    cycle_dt, file_dict = find_latest_glmp_cycle(sector)
-    if cycle_dt is None:
-        log.warning(f'No GLMP {sector.upper()} cycle available — skipping')
-        return 0
-
-    # Check if already ingested
-    sector_airports = [a for a in airports
-                       if assign_grid(a['lat'], a['lon']) == sector]
-    if not sector_airports:
-        log.info(f'No airports assigned to {sector.upper()} grid')
-        return 0
-
-    log.info(f'Processing {len(sector_airports)} airports on '
-             f'GLMP {sector.upper()} grid')
-
-    # Load all variable grids
-    grids, tree, lshape = load_glmp_grids(file_dict)
-    if tree is None:
-        log.error(f'Failed to build KDTree for {sector.upper()} grid')
-        return 0
-
-    # Pre-compute grid indices for all sector airports (vectorized)
-    coords = np.array([[a['lat'], a['lon']] for a in sector_airports])
-    _, indices = tree.query(coords)
-
-    # Get available forecast steps
-    ref_var = next(iter(grids))
-    steps   = sorted(grids[ref_var].keys())
-    log.info(f'  Forecast steps available: F{steps[0]:03d}-F{steps[-1]:03d} '
-             f'({len(steps)} hours)')
-
-    records = []
-    for step in steps:
-        valid_time = cycle_dt + timedelta(hours=step)
-        for i, apt in enumerate(sector_airports):
-            idx  = indices[i]
-            raw  = extract_at_index(grids, idx, step)
-
-            # Unit conversions
-            cig_raw    = raw.get('fcsts_cig')
-            ceil_ft    = round(cig_raw * 3.28084) \
-                         if cig_raw is not None else None
-            # Negative ceiling = unlimited/clear sky — store as 99999
-            if ceil_ft is not None and ceil_ft < 0:
-                ceil_ft = 99999
-            vis_raw    = raw.get('fcsts_vis')
-            vis_m      = round(vis_raw) \
-                         if vis_raw is not None else None
-            wind_kts   = ms_to_kts(raw.get('fcsts_wspd'))
-            gust_kts   = ms_to_kts(raw.get('fcsts_wgst'))
-            wind_dir   = round(raw.get('fcsts_wdir')) \
-                         if raw.get('fcsts_wdir') is not None else None
-            tmp_c      = kelvin_to_c(raw.get('fcsts_t'))
-            dpt_c      = kelvin_to_c(raw.get('fcsts_td'))
-            tmp_f_val  = c_to_f(tmp_c)
-
-            # Derived
-            rh         = relative_humidity(tmp_c, dpt_c)
-            hi_f_val   = heat_index_f(tmp_f_val, rh)
-            wind_mph   = wind_kts * 1.15078 if wind_kts is not None else None
-            wc_f_val   = wind_chill_f(tmp_f_val, wind_mph)
-
-            # Crosswind
-            rwy_hdgs   = [(r[0], r[1]) for r in apt['runway_headings']
-                          if r is not None]
-            xwind, best_hdg = best_runway_crosswind(wind_dir, wind_kts, rwy_hdgs)
-
-            derived = {
-                'ceil_ft':      ceil_ft,
-                'vis_m':        vis_m,
-                'wind_speed_kts': wind_kts,
-                'wind_gust_kts':  gust_kts,
-                'tmp_f':        tmp_f_val,
-                'heat_index_f': hi_f_val,
-                'wind_chill_f': wc_f_val,
-            }
-            # Build ICL override dict for this airport's wing
-            icl = {
-                'wind_vfr_yellow':      apt.get('icl_wind_vfr_yellow'),
-                'wind_vfr_red':         apt.get('icl_wind_vfr_red'),
-                'crosswind_vfr_yellow': apt.get('icl_xwind_vfr_yellow'),
-                'crosswind_vfr_red':    apt.get('icl_xwind_vfr_red'),
-                'crosswind_ifr_yellow': apt.get('icl_xwind_ifr_yellow'),
-                'crosswind_ifr_red':    apt.get('icl_xwind_ifr_red'),
-                'temp_cold_yellow':     apt.get('icl_temp_cold_yellow'),
-                'temp_cold_red':        apt.get('icl_temp_cold_red'),
-                'ceil_vfr_yellow':      apt.get('icl_ceil_vfr_yellow'),
-                'ceil_vfr_red':         apt.get('icl_ceil_vfr_red'),
-                'vis_vfr_yellow':       apt.get('icl_vis_vfr_yellow'),
-                'vis_vfr_red':          apt.get('icl_vis_vfr_red'),
-            }
-            stoplights = evaluate_stoplights(derived, xwind, icl)
-
-            records.append({
-                'airport_id':    apt['id'],
-                'station_id':    apt['station_id'],
-                'model_source':  f'GLMP_{sector.upper()}',
-                'model_run':     cycle_dt,
-                'valid_time':    valid_time,
-                'forecast_hour': step,
-                'ceil_ft':       ceil_ft,
-                'vis_m':         vis_m,
-                'wind_dir':      wind_dir,
-                'wind_speed_kts': round(wind_kts, 1) if wind_kts else None,
-                'wind_gust_kts': round(gust_kts, 1) if gust_kts else None,
-                'tmp_c':         round(tmp_c, 1) if tmp_c is not None else None,
-                'dpt_c':         round(dpt_c, 1) if dpt_c is not None else None,
-                'tmp_f':         round(tmp_f_val, 1) if tmp_f_val is not None else None,
-                'heat_index_f':  round(hi_f_val, 1) if hi_f_val is not None else None,
-                'wind_chill_f':  round(wc_f_val, 1) if wc_f_val is not None else None,
-                'crosswind_kts': round(xwind, 1) if xwind is not None else None,
-                'best_runway_hdg': round(best_hdg) if best_hdg is not None else None,
-                **stoplights,
-            })
-
-        # Batch upsert per forecast hour
-        if records:
-            n = upsert_impacts(conn, records)
-            if step % 6 == 0:
-                log.info(f'  F{step:03d}: {n} records upserted')
-            records = []
-
-    return len(sector_airports) * len(steps)
-
-
+# ── Main ───────────────────────────────────────────────────────────────────────
 def main():
-    parser = argparse.ArgumentParser(
-        description='Extract GLMP forecasts and evaluate CAPR 70-1 impacts')
-    parser.add_argument('-v', '--verbose', action='store_true')
-    parser.add_argument('--init-db', action='store_true',
-                        help='Create DB table and exit')
-    args = parser.parse_args()
-
-    if args.verbose:
-        log.setLevel(logging.DEBUG)
-
-    # Lock file — prevent overlapping runs
+    # Lock
+    os.makedirs(os.path.dirname(LOCKFILE), exist_ok=True)
     lock_fd = open(LOCKFILE, 'w')
     try:
         fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        log.warning('Another instance is running — exiting')
-        return
+    except IOError:
+        log.warning("Another instance is running — exiting")
+        sys.exit(0)
 
-    now_utc = datetime.now(timezone.utc)
-    log.info('=' * 60)
-    log.info(f'GLMP impacts ingest started: {now_utc.strftime("%Y-%m-%d %H:%MZ")}')
+    log.info("=" * 60)
+    log.info(f"GLMP impacts ingest started: "
+             f"{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%MZ')}")
+    t0 = datetime.now()
 
-    conn = psycopg2.connect(DB_DSN)
-    conn.autocommit = False
-
-    try:
-        # Create table if needed
-        with conn.cursor() as cur:
-            cur.execute(CREATE_TABLE_SQL)
-        conn.commit()
-
-        if args.init_db:
-            log.info('DB table created/verified — exiting (--init-db)')
-            return
-
-        # Load airports
-        airports = get_airports(conn)
-        if not airports:
-            log.error('No qualifying airports found')
-            return
-
-        total = 0
-
-        # Process CONUS grid
-        total += process_sector(airports, 'co', conn, now_utc)
-
-        # Process Alaska grid (if files available)
-        total += process_sector(airports, 'ak', conn, now_utc)
-
-        # TODO: GFS fallback for PH*/PG* when needed
-        # (low airport count, low priority until GLMP AK files confirmed)
-
-        log.info(f'Total records processed: {total}')
-
-    except Exception as e:
-        conn.rollback()
-        log.error(f'Fatal error: {e}', exc_info=True)
-        raise
-    finally:
+    conn = get_conn()
+    airports = load_airports(conn)
+    if not airports:
+        log.error("No qualifying airports found")
         conn.close()
-        fcntl.flock(lock_fd, fcntl.LOCK_UN)
-        lock_fd.close()
+        sys.exit(1)
 
-    log.info('GLMP impacts ingest complete')
-    log.info('=' * 60)
+    total = 0
 
+    for sector_code, sector_name in [('co', 'GLMP_CO'), ('ak', 'GLMP_AK')]:
+        date_dir, cycle_dt, cstr, date_str, src = find_latest_cycle(sector_code)
+        if not date_dir:
+            log.warning(f"No complete {sector_name} cycle found — skipping")
+            continue
+
+        log.info(f"{sector_name}: cycle {cstr} in {date_dir}")
+
+        def f(name):
+            # Pattern: glmp_tHH30z_fcsts_VAR.g.SECTOR.grib2
+            return date_dir / f"glmp_{cstr}_{name}.g.{sector_code}.grib2"
+
+        # Build KDTree from ceiling file
+        cig_file = f('fcsts_cig')
+        if not cig_file.exists():
+            log.warning(f"Missing {cig_file} — skipping {sector_name}")
+            continue
+
+        tree, flat_lats, flat_lons, shape = build_kdtree_from_file(cig_file)
+        indices = get_airport_grid_indices(tree, airports)
+
+        # Read all variables
+        def read_var(name, multi=True):
+            fp = f(name)
+            if not fp.exists():
+                log.warning(f"Missing {fp.name}")
+                return None
+            try:
+                return read_grib_all_hours(fp) if multi else read_grib_single(fp)
+            except Exception as e:
+                log.warning(f"Error reading {fp.name}: {e}")
+                return None
+
+        cig_data  = read_var('fcsts_cig')   # metres, -1=unlimited
+        vis_data  = read_var('fcsts_vis')   # metres
+        wspd_data = read_var('fcsts_wspd')  # m/s
+        wdir_data = read_var('fcsts_wdir')  # 10s of degrees
+        wgst_data = read_var('fcsts_wgst')  # m/s
+        t_data    = read_var('fcsts_t')     # Kelvin
+        td_data   = read_var('fcsts_td')    # Kelvin
+
+        if cig_data is None or vis_data is None or wspd_data is None:
+            log.error(f"Missing critical files for {sector_name} — skipping")
+            continue
+
+        # This replaces the "Process each forecast hour" block
+        # ── Pre-extract airport arrays from the airports list ─────────────────────────
+        n_apts = len(airports)
+        apt_ids   = np.array([a[0] for a in airports], dtype=np.int64)
+        apt_sids  = [a[1] for a in airports]
+        apt_le_hdg = np.array([a[5] if a[5] is not None else np.nan for a in airports])
+        apt_he_hdg = np.array([a[6] if a[6] is not None else np.nan for a in airports])
+
+        # ICL thresholds — per airport arrays
+        def icl_arr(idx, default):
+            return np.array([a[idx] if a[idx] is not None else default for a in airports])
+
+        icl_wind_y   = icl_arr(8,  21.0)
+        icl_wind_r   = icl_arr(9,  30.0)
+        icl_xw_vfr_y = icl_arr(10,  8.0)
+        icl_xw_vfr_r = icl_arr(11, 15.0)
+        icl_xw_ifr_y = icl_arr(12,  8.0)
+        icl_xw_ifr_r = icl_arr(13, 13.0)
+        icl_ceil_y   = icl_arr(14, 2000.0)
+        icl_ceil_r   = icl_arr(15, 1000.0)
+        icl_vis_y    = icl_arr(16, 3.0) * 1609.344
+        icl_vis_r    = icl_arr(17, 1.0) * 1609.344
+        icl_tc_y     = icl_arr(18, 20.0)
+        icl_tc_r     = icl_arr(19, -10.0)
+
+        spriority = source_priority(src)
+        now_utc = datetime.now(timezone.utc)
+
+        # ── Process each forecast hour using vectorized numpy ─────────────────────────
+        for fhr_idx in range(min(MAX_FORECAST_HR, cig_data.shape[0])):
+            fhr = fhr_idx + 1
+            valid_time = cycle_dt + timedelta(hours=fhr)
+
+            # Extract all airport values in one array index operation
+            cig_v  = cig_data[fhr_idx, indices].astype(float)
+            vis_v  = vis_data[fhr_idx, indices].astype(float)
+            wspd_v = wspd_data[fhr_idx, indices].astype(float) if wspd_data is not None else np.full(n_apts, np.nan)
+            wdir_v = wdir_data[fhr_idx, indices].astype(float) if wdir_data is not None else np.full(n_apts, np.nan)
+            wgst_v = wgst_data[fhr_idx, indices].astype(float) if wgst_data is not None else np.full(n_apts, np.nan)
+            t_v    = t_data[fhr_idx, indices].astype(float)    if t_data    is not None else np.full(n_apts, np.nan)
+            td_v   = td_data[fhr_idx, indices].astype(float)   if td_data   is not None else np.full(n_apts, np.nan)
+
+            # Convert — vectorized
+            # Ceiling: NaN or <0 → 99999 (unlimited)
+            ceil_ft = np.where(np.isnan(cig_v) | (cig_v < 0), 99999.0, cig_v * 3.28084)
+            ceil_ft = np.where(ceil_ft > 50000, 99999.0, ceil_ft)
+
+            # Visibility: NaN → 99999
+            vis_m = np.where(np.isnan(vis_v), 99999.0, vis_v)
+
+            # Wind: m/s → kts
+            wind_kts = np.where(np.isnan(wspd_v), np.nan, wspd_v * 1.94384)
+            gust_kts = np.where(np.isnan(wgst_v), np.nan, wgst_v * 1.94384)
+
+            # Wind direction: 10s of degrees → degrees
+            wdir_deg = np.where(np.isnan(wdir_v), np.nan, (wdir_v * 10) % 360)
+
+            # Temperature: K → F
+            tmp_f = np.where(np.isnan(t_v),  np.nan, (t_v  - 273.15) * 9/5 + 32)
+            dpt_f = np.where(np.isnan(td_v), np.nan, (td_v - 273.15) * 9/5 + 32)
+
+            # Crosswind for le and he runway — vectorized
+            def xwind_vec(hdg_arr):
+                angle = np.deg2rad(np.abs(wdir_deg - hdg_arr))
+                return np.abs(wind_kts * np.sin(angle))
+
+            xw_le = np.where(np.isnan(apt_le_hdg) | np.isnan(wind_kts), np.nan,
+                             xwind_vec(apt_le_hdg))
+            xw_he = np.where(np.isnan(apt_he_hdg) | np.isnan(wind_kts), np.nan,
+                             xwind_vec(apt_he_hdg))
+
+            # Min crosswind = best runway; best_hdg = le if xw_le <= xw_he else he
+            xw = np.fmin(xw_le, xw_he)  # fmin ignores NaN
+            best_hdg = np.where(
+                np.isnan(xw_le) | (~np.isnan(xw_he) & (xw_he < xw_le)),
+                apt_he_hdg, apt_le_hdg
+            )
+
+            # Wind chill (NWS formula) — vectorized
+            wind_mph = wind_kts * 1.15078
+            wc_valid = (tmp_f <= 50) & (wind_mph >= 3) & ~np.isnan(tmp_f) & ~np.isnan(wind_kts)
+            wc_f = np.where(wc_valid,
+                            35.74 + 0.6215*tmp_f - 35.75*(wind_mph**0.16) + 0.4275*tmp_f*(wind_mph**0.16),
+                            np.nan)
+
+            # Heat index (simplified Rothfusz) — vectorized
+            rh = 100 * (112 - 0.1*tmp_f + dpt_f) / (112 + 0.9*tmp_f)
+            rh = np.clip(rh, 0, 100)
+            hi_raw = (-42.379 + 2.04901523*tmp_f + 10.14333127*rh
+                      - 0.22475541*tmp_f*rh - 0.00683783*tmp_f**2
+                      - 0.05481717*rh**2 + 0.00122874*tmp_f**2*rh
+                      + 0.00085282*tmp_f*rh**2 - 0.00000199*tmp_f**2*rh**2)
+            hi_valid = (tmp_f >= 80) & ~np.isnan(tmp_f) & ~np.isnan(dpt_f) & (hi_raw > tmp_f)
+            hi_f = np.where(hi_valid, hi_raw, np.nan)
+
+            # ── Vectorized stoplight colors ───────────────────────────────────────
+            # Using integer encoding: RED=0, YELLOW=1, GREEN=2, UNKNOWN=3
+            RED=0; YELLOW=1; GREEN=2; UNK=3
+
+            def c_wind(kts):
+                r = np.full(n_apts, GREEN)
+                r = np.where(kts > icl_wind_y, YELLOW, r)
+                r = np.where(kts > icl_wind_r, RED, r)
+                r = np.where(np.isnan(kts), UNK, r)
+                return r
+
+            def c_xwind_vfr(kts):
+                r = np.full(n_apts, GREEN)
+                r = np.where(kts > icl_xw_vfr_y, YELLOW, r)
+                r = np.where(kts > icl_xw_vfr_r, RED, r)
+                r = np.where(np.isnan(kts), UNK, r)
+                return r
+
+            def c_xwind_ifr(kts):
+                r = np.full(n_apts, GREEN)
+                r = np.where(kts > icl_xw_ifr_y, YELLOW, r)
+                r = np.where(kts > icl_xw_ifr_r, RED, r)
+                r = np.where(np.isnan(kts), UNK, r)
+                return r
+
+            def c_ceil_vfr(ft):
+                r = np.full(n_apts, GREEN)
+                r = np.where(ft <= icl_ceil_y, YELLOW, r)
+                r = np.where(ft < icl_ceil_r, RED, r)
+                r = np.where(ft >= 99999, GREEN, r)   # unlimited = clear
+                return r
+
+            def c_ceil_ifr(ft):
+                r = np.full(n_apts, GREEN)
+                r = np.where(ft <= 800, YELLOW, r)
+                r = np.where(ft < 500, RED, r)
+                r = np.where(ft >= 99999, GREEN, r)
+                return r
+
+            def c_vis_vfr(m):
+                r = np.full(n_apts, GREEN)
+                r = np.where(m <= icl_vis_y, YELLOW, r)
+                r = np.where(m < icl_vis_r, RED, r)
+                r = np.where(m >= 99999, GREEN, r)
+                return r
+
+            def c_vis_ifr(m):
+                sm = 1609.344
+                r = np.full(n_apts, GREEN)
+                r = np.where(m <= 1.0*sm, YELLOW, r)
+                r = np.where(m < 0.5*sm, RED, r)
+                r = np.where(m >= 99999, GREEN, r)
+                return r
+
+            def c_tmp_cold(f):
+                r = np.full(n_apts, GREEN)
+                r = np.where(f <= icl_tc_y, YELLOW, r)
+                r = np.where(f < icl_tc_r, RED, r)
+                r = np.where(np.isnan(f), UNK, r)
+                return r
+
+            def c_tmp_hot(f):
+                r = np.full(n_apts, GREEN)
+                r = np.where(f >= 90, YELLOW, r)
+                r = np.where(f > 104, RED, r)
+                r = np.where(np.isnan(f), UNK, r)
+                return r
+
+            def c_wc(f):
+                r = np.full(n_apts, GREEN)
+                r = np.where(f <= 22, YELLOW, r)
+                r = np.where(f < 0, RED, r)
+                r = np.where(np.isnan(f), GREEN, r)  # no chill = no restriction
+                return r
+
+            # VFR params array: shape (n_params, n_apts)
+            vfr_stack = np.stack([
+                c_wind(wind_kts),
+                c_xwind_vfr(xw),
+                c_ceil_vfr(ceil_ft),
+                c_vis_vfr(vis_m),
+                c_tmp_cold(tmp_f),
+                c_tmp_hot(tmp_f),
+                c_wc(wc_f),
+            ])
+            VFR_NAMES = ['wind','crosswind','ceiling','visibility','temp_cold','temp_hot','wind_chill']
+
+            ifr_stack = np.stack([
+                c_wind(wind_kts),
+                c_xwind_ifr(xw),
+                c_ceil_ifr(ceil_ft),
+                c_vis_ifr(vis_m),
+            ])
+            IFR_NAMES = ['wind','crosswind','ceiling','visibility']
+
+            # Worst color = minimum value per airport
+            vfr_worst_idx = np.argmin(vfr_stack, axis=0)
+            ifr_worst_idx = np.argmin(ifr_stack, axis=0)
+            vfr_color_int = vfr_stack[vfr_worst_idx, np.arange(n_apts)]
+            ifr_color_int = ifr_stack[ifr_worst_idx, np.arange(n_apts)]
+
+            INT_TO_COLOR = {RED:'RED', YELLOW:'YELLOW', GREEN:'GREEN', UNK:'UNKNOWN'}
+
+            # ── Build rows ─────────────────────────────────────────────────────────
+            # Deduplicate by airport: keep min crosswind row
+            # Since we computed one row per airport already (not per runway),
+            # we already have best runway selected above. No dedup needed.
+            rows = []
+            for i in range(n_apts):
+                aid = int(apt_ids[i])
+                sid = apt_sids[i]
+
+                cf  = ceil_ft[i]
+                vm  = vis_m[i]
+                wk  = wind_kts[i]
+                wd  = wdir_deg[i]
+                gk  = gust_kts[i]
+                tf  = tmp_f[i]
+                df  = dpt_f[i]
+                hf  = hi_f[i]
+                wf  = wc_f[i]
+                xwv = xw[i]
+                bh  = best_hdg[i]
+
+                def fn(v):  # float or None
+                    return None if (v is None or (isinstance(v, float) and np.isnan(v))) else float(v)
+                def rn(v, d=1):
+                    fv = fn(v)
+                    return round(fv, d) if fv is not None else None
+                def inn(v):
+                    fv = fn(v)
+                    return int(fv) if fv is not None else None
+
+                vc = INT_TO_COLOR[int(vfr_color_int[i])]
+                ic = INT_TO_COLOR[int(ifr_color_int[i])]
+                vw = VFR_NAMES[int(vfr_worst_idx[i])] if vc != 'GREEN' else None
+                iw = IFR_NAMES[int(ifr_worst_idx[i])] if ic != 'GREEN' else None
+
+                rows.append((
+                    aid, sid, src, cycle_dt, valid_time, fhr,
+                    inn(cf) if cf != 99999.0 else None,
+                    inn(vm) if vm != 99999.0 else None,
+                    rn(wk), inn(wd), rn(gk),
+                    rn(tf), rn(df), rn(tf),
+                    rn(hf), rn(wf),
+                    rn(xwv),
+                    inn(bh),
+                    vc, vw, ic, iw,
+                    spriority,
+                    now_utc
+                ))
+
+
+            with conn.cursor() as cur:
+                # Deduplicate by airport_id — keep min crosswind row
+                seen = {}
+                for row in rows:
+                    key = row[0]  # airport_id
+                    if key not in seen:
+                        seen[key] = row
+                    else:
+                        xw_new = row[16] if row[16] is not None else 9999
+                        xw_old = seen[key][16] if seen[key][16] is not None else 9999
+                        if xw_new < xw_old:
+                            seen[key] = row
+                rows = list(seen.values())
+
+                execute_values(cur, """
+                    INSERT INTO observations.airport_wx_impacts
+                        (airport_id, station_id, model_source, model_run,
+                         valid_time, forecast_hour,
+                         ceil_ft, vis_m, wind_speed_kts, wind_dir, wind_gust_kts,
+                         tmp_c, dpt_c, tmp_f, heat_index_f, wind_chill_f,
+                         crosswind_kts, best_runway_hdg,
+                         vfr_color, vfr_worst_param, ifr_color, ifr_worst_param,
+                         source_priority, ingested_at)
+                    VALUES %s
+                    ON CONFLICT (airport_id, model_run, forecast_hour)
+                    DO UPDATE SET
+                        vfr_color       = EXCLUDED.vfr_color,
+                        vfr_worst_param = EXCLUDED.vfr_worst_param,
+                        ifr_color       = EXCLUDED.ifr_color,
+                        ifr_worst_param = EXCLUDED.ifr_worst_param,
+                        ceil_ft         = EXCLUDED.ceil_ft,
+                        vis_m           = EXCLUDED.vis_m,
+                        wind_speed_kts  = EXCLUDED.wind_speed_kts,
+                        wind_dir        = EXCLUDED.wind_dir,
+                        wind_gust_kts   = EXCLUDED.wind_gust_kts,
+                        tmp_f           = EXCLUDED.tmp_f,
+                        heat_index_f    = EXCLUDED.heat_index_f,
+                        wind_chill_f    = EXCLUDED.wind_chill_f,
+                        crosswind_kts   = EXCLUDED.crosswind_kts,
+                        best_runway_hdg = EXCLUDED.best_runway_hdg,
+                        source_priority = EXCLUDED.source_priority,
+                        ingested_at     = EXCLUDED.ingested_at
+                """, rows)
+            conn.commit()
+            total += len(rows)
+            log.info(f"  {sector_name} F{fhr:03d}: {len(rows)} upserted "
+                     f"(valid {valid_time.strftime('%H:%MZ')})")
+
+    elapsed = (datetime.now() - t0).total_seconds()
+    log.info(f"Total: {total} records in {elapsed:.0f}s")
+
+    # Scour old GLMP_CO records — keep only latest 2 cycles
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                DELETE FROM observations.airport_wx_impacts
+                WHERE model_source LIKE 'GLMP%'
+                  AND model_run < (
+                      SELECT MAX(model_run) - INTERVAL '3 hours'
+                      FROM observations.airport_wx_impacts
+                      WHERE model_source LIKE 'GLMP%'
+                  )
+            """)
+            log.info(f"Scoured {cur.rowcount} old GLMP records")
+        conn.commit()
+    except Exception as e:
+        log.warning(f"Scour failed: {e}")
+
+    log.info("GLMP impacts ingest complete")
+    log.info("=" * 60)
+
+    fcntl.flock(lock_fd, fcntl.LOCK_UN)
+    lock_fd.close()
+    conn.close()
 
 if __name__ == '__main__':
     main()
