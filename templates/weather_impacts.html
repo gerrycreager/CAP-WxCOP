@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <link rel="icon" href="data:,">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CAP Weather Impacts</title>
+    <title>CAP Flight Ops Impacts</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -121,6 +121,9 @@
         .banner-YELLOW { background: #fffde7; color: #f57f17; border: 1px solid #ffe082; }
         .banner-RED    { background: #ffebee; color: #b71c1c; border: 1px solid #ef9a9a; }
         .banner-UNKNOWN{ background: #f5f5f5; color: #9e9e9e; border: 1px solid #e0e0e0; }
+        .tstm-green  { color: #2e7d32; font-weight: 600; }
+        .tstm-yellow { color: #f57f17; font-weight: 600; }
+        .tstm-red    { color: #c62828; font-weight: 700; }
 
         /* Parameter grid */
         .param-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
@@ -168,7 +171,7 @@
 
 <div id="titleBar">
     <a href="/" class="tb-home" title="Home">&#127968;</a>
-    <span class="tb-title">&#9992; CAP Weather Impacts — CAPR 70-1</span>
+    <span class="tb-title">&#9992; CAP Flight Ops Impacts — CAPR 70-1</span>
     <span class="tb-utc" id="tbUtc"></span>
 </div>
 
@@ -217,9 +220,9 @@
         <!-- Legend -->
         <div class="sb-section">
             <div class="sb-label">Impacts Legend</div>
-            <div class="leg-item"><div class="leg-dot" style="background:#43a047;"></div>Go — Within limits</div>
-            <div class="leg-item"><div class="leg-dot" style="background:#fdd835;border-color:#888;"></div>Caution — Marginal conditions</div>
-            <div class="leg-item"><div class="leg-dot" style="background:#e53935;"></div>No-Go / Requires Auth. Release</div>
+            <div class="leg-item"><div class="leg-dot" style="background:#43a047;"></div>Go</div>
+            <div class="leg-item"><div class="leg-dot" style="background:#fdd835;border-color:#888;"></div>Caution</div>
+            <div class="leg-item"><div class="leg-dot" style="background:#e53935;"></div>No-Go</div>
             <div class="leg-item"><div class="leg-dot" style="background:#bdbdbd;"></div>No data</div>
             <div style="font-size:10px;color:#888;margin-top:6px;">
                 Worst-parameter-wins per airport<br>
@@ -255,6 +258,7 @@
                         <th>Wind</th>
                         <th>XW</th>
                         <th>Tmp°F</th>
+                        <th title="LAMP 1-hr thunderstorm probability">⚡%</th>
                     </tr>
                 </thead>
                 <tbody id="fcstTbody"></tbody>
@@ -272,7 +276,7 @@
 const API_BASE    = '/CAP_WxCOP/api/weather-impacts';
 const METAR_API   = '/CAP_WxCOP/api/weather/station';
 const COLOR_HEX   = { GREEN: '#43a047', YELLOW: '#fdd835', RED: '#e53935', UNKNOWN: '#bdbdbd' };
-const COLOR_LABEL = { GREEN: 'Go', YELLOW: 'Caution — Marginal', RED: 'No-Go / Req. Auth.', UNKNOWN: 'No Data' };
+const COLOR_LABEL = { GREEN: 'Go', YELLOW: 'Caution', RED: 'No-Go', UNKNOWN: 'No Data' };
 const QUICK_HOURS = [1, 3, 6, 9, 12, 18, 24];
 
 // CAPR 70-1 parameter labels for display
@@ -288,9 +292,10 @@ const PARAM_LABELS = {
 };
 
 // Airport display tiers
-const TIER_SYM_ZOOM   = { 1:3, 2:5, 3:6, 4:7 };
-const TIER_LBL_ZOOM   = { 1:5, 2:7, 3:8, 4:999 };
-const TIER_SYM_PX     = { 1:14, 2:11, 3:9, 4:7 };
+// Tier 1=Military, 2=Major Hub(≥8000ft), 3=Regional(≥5000ft), 4=Local(≥2500ft)
+const TIER_SYM_ZOOM   = { 1:3, 2:4, 3:6, 4:8 };
+const TIER_LBL_ZOOM   = { 1:5, 2:6, 3:8, 4:999 };
+const TIER_SYM_PX     = { 1:14, 2:12, 3:10, 4:8 };
 
 // ── State ─────────────────────────────────────────────────────────────────
 var map, symbolsLayer, labelsLayer, highlightLayer, baseLayers;
@@ -382,7 +387,7 @@ function loadData() {
     ].join(',');
 
     var url = API_BASE + '/airports?hour=' + currentHour +
-              '&op=' + currentOp + '&bounds=' + bStr + '&limit=5000';
+              '&op=' + currentOp + '&bounds=' + bStr + '&min_rwy=2500&limit=3000';
 
     fetch(url)
         .then(function(r) { return r.json(); })
@@ -430,7 +435,8 @@ function updateMarkers() {
 
         var tier = apt.is_military ? 1 :
                    (apt.longest_rwy_ft >= 8000 ? 2 :
-                   (apt.longest_rwy_ft >= 4000 ? 3 : 4));
+                   (apt.longest_rwy_ft >= 5000 ? 3 : 4));
+        if (!apt.is_military && apt.longest_rwy_ft < 2500) return; // skip short/unpaved
 
         if (zoom < TIER_SYM_ZOOM[tier]) return;
 
@@ -541,6 +547,10 @@ function renderDetail(data) {
                                      ? 'Rwy ' + String(Math.round(row.best_runway_hdg/10)).padStart(2,'0')
                                      : '—',
           cls: '' },
+        { label: 'Tstm Prob', value: row.tstm_prob !== null && row.tstm_prob !== undefined
+                                     ? row.tstm_prob + '%'
+                                     : '—',
+          cls: row.tstm_color ? 'pv-' + row.tstm_color.toUpperCase() : 'pv-GREEN' },
     ];
 
     var grid = document.getElementById('paramGrid');
@@ -574,7 +584,9 @@ function renderDetail(data) {
             '<td class="' + visClass(r.vis_m) + '">' + (r.vis_display || '—') + '</td>' +
             '<td class="' + windClass(r.wind_speed_kts) + '">' + wind + '</td>' +
             '<td class="' + xwindClass(r.crosswind_kts, currentOp) + '">' + xw + '</td>' +
-            '<td>' + (r.tmp_f !== null ? r.tmp_f.toFixed(0) + '°' : '—') + '</td>';
+            '<td>' + (r.tmp_f !== null ? r.tmp_f.toFixed(0) + '°' : '—') + '</td>' +
+            '<td class="tstm-' + (r.tstm_color || 'green') + '">' +
+                (r.tstm_prob !== null && r.tstm_prob !== undefined ? r.tstm_prob + '%' : '—') + '</td>';
 
         tr.addEventListener('click', function() { onHourChange(r.forecast_hour); });
         tbody.appendChild(tr);
