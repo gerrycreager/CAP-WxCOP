@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <link rel="icon" href="data:,">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CAP Weather Impacts</title>
+    <title>CAP Flight Ops Impacts</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -171,7 +171,7 @@
 
 <div id="titleBar">
     <a href="/" class="tb-home" title="Home">&#127968;</a>
-    <span class="tb-title">&#9992; CAP Weather Impacts — CAPR 70-1</span>
+    <span class="tb-title">&#9992; CAP Flight Ops Impacts — CAPR 70-1</span>
     <span class="tb-utc" id="tbUtc"></span>
 </div>
 
@@ -220,9 +220,9 @@
         <!-- Legend -->
         <div class="sb-section">
             <div class="sb-label">Impacts Legend</div>
-            <div class="leg-item"><div class="leg-dot" style="background:#43a047;"></div>Go — Within limits</div>
-            <div class="leg-item"><div class="leg-dot" style="background:#fdd835;border-color:#888;"></div>Caution — Marginal conditions</div>
-            <div class="leg-item"><div class="leg-dot" style="background:#e53935;"></div>No-Go / Requires Auth. Release</div>
+            <div class="leg-item"><div class="leg-dot" style="background:#43a047;"></div>Go</div>
+            <div class="leg-item"><div class="leg-dot" style="background:#fdd835;border-color:#888;"></div>Caution</div>
+            <div class="leg-item"><div class="leg-dot" style="background:#e53935;"></div>No-Go</div>
             <div class="leg-item"><div class="leg-dot" style="background:#bdbdbd;"></div>No data</div>
             <div style="font-size:10px;color:#888;margin-top:6px;">
                 Worst-parameter-wins per airport<br>
@@ -276,7 +276,7 @@
 const API_BASE    = '/CAP_WxCOP_DEV/api/weather-impacts';
 const METAR_API   = '/CAP_WxCOP_DEV/api/weather/station';
 const COLOR_HEX   = { GREEN: '#43a047', YELLOW: '#fdd835', RED: '#e53935', UNKNOWN: '#bdbdbd' };
-const COLOR_LABEL = { GREEN: 'Go', YELLOW: 'Caution — Marginal', RED: 'No-Go / Req. Auth.', UNKNOWN: 'No Data' };
+const COLOR_LABEL = { GREEN: 'Go', YELLOW: 'Caution', RED: 'No-Go', UNKNOWN: 'No Data' };
 const QUICK_HOURS = [1, 3, 6, 9, 12, 18, 24];
 
 // CAPR 70-1 parameter labels for display
