@@ -270,6 +270,24 @@ def main():
     elapsed = (datetime.now() - t0).total_seconds()
     log.info(f"Total: {total} records in {elapsed:.0f}s "
              f"({elapsed/MAX_FORECAST_HR:.1f}s/hr)")
+
+    # Scour old LAMP records — keep only latest 2 cycles
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                DELETE FROM observations.airport_wx_impacts
+                WHERE model_source = 'LAMP'
+                  AND model_run < (
+                      SELECT MAX(model_run) - INTERVAL '2 hours'
+                      FROM observations.airport_wx_impacts
+                      WHERE model_source = 'LAMP'
+                  )
+            """)
+            log.info(f"Scoured {cur.rowcount} old LAMP records")
+        conn.commit()
+    except Exception as e:
+        log.warning(f"LAMP scour failed: {e}")
+
     log.info("LAMP TSTM01 ingest complete")
     log.info("=" * 60)
     conn.close()

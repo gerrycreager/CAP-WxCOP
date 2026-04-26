@@ -520,23 +520,27 @@ def main():
             tmp_f = np.where(np.isnan(t_v),  np.nan, (t_v  - 273.15) * 9/5 + 32)
             dpt_f = np.where(np.isnan(td_v), np.nan, (td_v - 273.15) * 9/5 + 32)
 
-            # Crosswind for le and he runway — vectorized
+            # Best runway: primary=max headwind, secondary=min crosswind
             def xwind_vec(hdg_arr):
-                angle = np.deg2rad(np.abs(wdir_deg - hdg_arr))
-                return np.abs(wind_kts * np.sin(angle))
-
-            xw_le = np.where(np.isnan(apt_le_hdg) | np.isnan(wind_kts), np.nan,
-                             xwind_vec(apt_le_hdg))
-            xw_he = np.where(np.isnan(apt_he_hdg) | np.isnan(wind_kts), np.nan,
-                             xwind_vec(apt_he_hdg))
-
-            # Min crosswind = best runway; best_hdg = le if xw_le <= xw_he else he
-            xw = np.fmin(xw_le, xw_he)  # fmin ignores NaN
-            best_hdg = np.where(
-                np.isnan(xw_le) | (~np.isnan(xw_he) & (xw_he < xw_le)),
-                apt_he_hdg, apt_le_hdg
+                return np.abs(wind_kts * np.sin(np.deg2rad(wdir_deg - hdg_arr)))
+            def headwind_vec(hdg_arr):
+                return wind_kts * np.cos(np.deg2rad(wdir_deg - hdg_arr))
+            nan_le = np.isnan(apt_le_hdg) | np.isnan(wind_kts)
+            nan_he = np.isnan(apt_he_hdg) | np.isnan(wind_kts)
+            xw_le = np.where(nan_le, np.nan, xwind_vec(apt_le_hdg))
+            xw_he = np.where(nan_he, np.nan, xwind_vec(apt_he_hdg))
+            hw_le = np.where(nan_le, np.nan, headwind_vec(apt_le_hdg))
+            hw_he = np.where(nan_he, np.nan, headwind_vec(apt_he_hdg))
+            # Use he_end if: more headwind, or equal HW and less crosswind
+            hw_diff = np.where(~nan_le & ~nan_he, hw_he - hw_le, np.nan)
+            use_he = (
+                (~nan_he & (np.nan_to_num(hw_diff) > 0.5)) |
+                (~nan_he & ~nan_le & (np.abs(np.nan_to_num(hw_diff)) <= 0.5) & (xw_he < xw_le)) |
+                (nan_le & ~nan_he)
             )
-
+            xw = np.where(use_he, xw_he, xw_le)
+            xw = np.where(np.isnan(xw), np.fmin(xw_le, xw_he), xw)
+            best_hdg = np.where(use_he, apt_he_hdg, apt_le_hdg)
             # Wind chill (NWS formula) — vectorized
             wind_mph = wind_kts * 1.15078
             wc_valid = (tmp_f <= 50) & (wind_mph >= 3) & ~np.isnan(tmp_f) & ~np.isnan(wind_kts)
@@ -765,7 +769,7 @@ def main():
                 DELETE FROM observations.airport_wx_impacts
                 WHERE model_source LIKE 'GLMP%'
                   AND model_run < (
-                      SELECT MAX(model_run) - INTERVAL '3 hours'
+                      SELECT MAX(model_run) - INTERVAL '2 hours'
                       FROM observations.airport_wx_impacts
                       WHERE model_source LIKE 'GLMP%'
                   )
