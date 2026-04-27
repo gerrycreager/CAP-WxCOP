@@ -71,8 +71,8 @@ def get_impacts_airports():
         params = [hour]
         if bounds:
             w, s, e, n = bounds
-            bounds_sql = "AND ST_Y(a.location) BETWEEN %s AND %s AND ST_X(a.location) BETWEEN %s AND %s"
-            params += [s, n, w, e]
+            bounds_sql = ("AND a.location && ST_MakeEnvelope(%s, %s, %s, %s, 4326)")
+            params += [w, s, e, n]
         if min_rwy > 0:
             bounds_sql += f' AND (a.is_military OR a.longest_runway_ft >= {int(min_rwy)})'
         params += [limit]
