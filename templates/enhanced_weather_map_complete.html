@@ -183,8 +183,33 @@
         }
         #mrmsPlayerBar.active { display: flex; }
         body.radar-open #map { bottom: 50px; }
+        body.radar-open .controls { max-height: calc(100vh - 124px); }
 
-        #mrmsTimeline {
+        #tstmLegend {
+            display: none; position: fixed; bottom: 60px; right: 10px;
+            background: rgba(255,255,255,0.92); border: 1px solid #ccc;
+            border-radius: 4px; padding: 6px 10px; z-index: 900;
+            font-size: 11px; font-family: sans-serif; min-width: 130px;
+        }
+        #tstmLegend.visible { display: block; }
+        #tstmLegend .tl-title { font-weight: 700; font-size: 11px; margin-bottom: 4px; }
+        #tstmLegend .tl-row { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
+        #tstmLegend .tl-swatch { width: 16px; height: 16px; border-radius: 2px; flex-shrink: 0; }
+        #glmLegend {
+            display: none; position: fixed;
+            bottom: 270px; left: 10px;
+            background: white;
+            border: 2px solid #333; border-radius: 4px;
+            padding: 6px 10px; z-index: 1050;
+            font-size: 11px; color: #111;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        }
+        #glmLegend.visible { display: block; }
+        #glmLegend .gl-row { display: flex; align-items: center; gap: 6px; margin: 2px 0; color: #111; }
+        #glmLegend .gl-title { font-weight: 700; font-size: 10px; color: #111;
+                               text-transform: uppercase; letter-spacing: 0.05em;
+                               margin-bottom: 4px; border-bottom: 1px solid #ccc; padding-bottom: 3px; }
+                #mrmsTimeline {
             position: relative; height: 22px; margin-bottom: 4px; cursor: pointer;
         }
         #mrmsTrack {
@@ -416,9 +441,9 @@
             </select>
             <div style="font-size:10px;color:#888;margin-top:3px;" id="glmStatus"></div>
             <div style="margin-top:4px;font-size:10px;line-height:1.6;">
-                <span style="color:#ff2222;">⚡</span> 0–5 min (Stop if within 5NM) &nbsp;
-                <span style="color:#ff8800;">⚡</span> 5–15 min (Caution) &nbsp;
-                <span style="color:#00cc44;">⚡</span> 15–30 min (Resume if clear)
+                <div style="display:inline-block;width:12px;height:17px;background:#ff0000;clip-path:polygon(50% 0%,100% 40%,70% 40%,100% 100%,0% 100%,30% 40%,0% 40%);margin-right:4px;vertical-align:middle;"></div> 0–5 min (Stop if within 5NM) &nbsp;
+                <div style="display:inline-block;width:12px;height:17px;background:#ffff00;clip-path:polygon(50% 0%,100% 40%,70% 40%,100% 100%,0% 100%,30% 40%,0% 40%);margin-right:4px;vertical-align:middle;"></div> 5–15 min (Caution) &nbsp;
+                <div style="display:inline-block;width:12px;height:17px;background:#00cc00;clip-path:polygon(50% 0%,100% 40%,70% 40%,100% 100%,0% 100%,30% 40%,0% 40%);margin-right:4px;vertical-align:middle;"></div> 15–30 min (Resume if clear)
             </div>
         </div>
 
@@ -428,37 +453,11 @@
         <div class="divider"></div>
         <h3>Radar</h3>
         <label class="checkbox-label">
-            <input type="checkbox" id="radarToggle"> NEXRAD Radar (IEM loop)
+            <input type="checkbox" id="mrmsLocalToggle"> MRMS_Composite Refl
         </label>
-        <div id="radarSubControls" style="display:none; margin-top:6px;">
-            <div style="font-size:11px;color:#555;margin-bottom:3px;">Opacity</div>
-            <input type="range" id="mrmsOpacity" min="20" max="100" value="70"
-                style="width:100%;accent-color:#2c5f41;">
-            <div style="font-size:10px;color:#888;margin-top:3px;" id="mrmsStatus">
-                NEXRAD via Iowa Environmental Mesonet (~5 min latency)
-            </div>
-        </div>
-        <label class="checkbox-label" style="margin-top:6px;">
-            <input type="checkbox" id="mrmsLocalToggle"> MRMS Composite (local)
+        <label class="checkbox-label">
+            <input type="checkbox" id="tstmToggle"> TRW Probability (LAMP)
         </label>
-        <div id="mrmsLocalControls" style="display:none; margin-top:4px; margin-left:4px;">
-            <div style="font-size:11px;color:#555;margin-bottom:3px;">Duration</div>
-            <select id="mrmsLocalDuration" style="width:100%;font-size:12px;padding:2px;">
-                <option value="60">1 hour</option>
-                <option value="120" selected>2 hours</option>
-                <option value="180">3 hours</option>
-                <option value="240">4 hours</option>
-            </select>
-            <div style="display:flex;gap:4px;margin-top:4px;">
-                <button id="mlBtnFirst" style="flex:1;font-size:11px;padding:2px;">⏮</button>
-                <button id="mlBtnPrev"  style="flex:1;font-size:11px;padding:2px;">◀</button>
-                <button id="mlBtnPlay"  style="flex:1;font-size:11px;padding:2px;">▶</button>
-                <button id="mlBtnNext"  style="flex:1;font-size:11px;padding:2px;">▶|</button>
-                <button id="mlBtnLast"  style="flex:1;font-size:11px;padding:2px;">⏭</button>
-            </div>
-            <div id="mrmsLocalTime" style="font-size:10px;color:#8bc4a8;margin-top:3px;font-family:monospace;">—</div>
-            <div style="font-size:10px;color:#888;margin-top:2px;">Local MRMS · 2-min updates</div>
-        </div>
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -1233,205 +1232,6 @@
             }
             tick(); setInterval(tick, 1000);
         })();
-
-        // ── IEM NEXRAD WMS Radar with time-step player ────────────────────────
-        (function() {
-            var IEM_BASE = 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/';
-
-            var OCONUS_BOXES = [
-                { name: 'ak', latMin: 50.0, latMax: 72.0,  lonMin: -180.0, lonMax: -129.0 },
-                { name: 'hi', latMin: 17.0, latMax: 23.5,  lonMin: -161.0, lonMax: -154.0 },
-                { name: 'gu', latMin:  9.0, latMax: 22.0,  lonMin:  139.0, lonMax:  148.0 },
-                { name: 'pr', latMin: 16.0, latMax: 19.5,  lonMin:  -68.0, lonMax:  -64.0 },
-            ];
-            var SECTOR_SUFFIX = { 'ak': '-ak', 'hi': '-hi', 'gu': '-gu', 'pr': '-pr' };
-
-            function getSector() {
-                if (!map) return '';
-                var c = map.getCenter(), lat = c.lat;
-                var lon = ((c.lng + 180) % 360 + 360) % 360 - 180;
-                for (var i = 0; i < OCONUS_BOXES.length; i++) {
-                    var s = OCONUS_BOXES[i];
-                    if (lat>=s.latMin&&lat<=s.latMax&&lon>=s.lonMin&&lon<=s.lonMax) return s.name;
-                }
-                return '';
-            }
-
-            function buildFrames(sector) {
-                var durSel = document.getElementById('mrmsDuration');
-                var maxMin = durSel ? parseInt(durSel.value) : 60;
-                var suf = SECTOR_SUFFIX[sector] || '';
-                var frames = [];
-                for (var m = maxMin; m >= 5; m -= 5) {
-                    var mm = String(m).padStart(2, '0');
-                    frames.push({ layer: 'nexrad-n0q-900913-m'+mm+'m'+suf, label: '-'+m+' min' });
-                }
-                frames.push({ layer: 'nexrad-n0q-900913'+suf, label: 'LIVE' });
-                return frames;
-            }
-
-            function makeTileLayer(layerName) {
-                return L.tileLayer(IEM_BASE + layerName + '/{z}/{x}/{y}.png', {
-                    opacity: 0, attribution: 'NEXRAD &copy; <a href="https://mesonet.agron.iastate.edu/">IEM</a>',
-                    zIndex: 400, maxZoom: 18,
-                    errorTileUrl: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
-                });
-            }
-
-            var radarVisible = false, radarLayers = {}, radarLayer = null;
-            var frames = [], currentFrame = -1, playing = false, playTimer = null, pollTimer = null;
-            var _curSector = 'init';
-
-            function getOpacity() {
-                var el = document.getElementById('mrmsOpacity');
-                return el ? parseInt(el.value,10)/100 : 0.7;
-            }
-
-            function ensureLayer(name) {
-                if (!radarLayers[name]) radarLayers[name] = makeTileLayer(name);
-                return radarLayers[name];
-            }
-
-            function goToFrame(idx) {
-                if (!frames.length) return;
-                idx = Math.max(0, Math.min(frames.length-1, idx));
-                currentFrame = idx;
-                var next = ensureLayer(frames[idx].layer);
-                var prev = radarLayer;
-                next.setOpacity(getOpacity());
-                if (!map.hasLayer(next)) next.addTo(map);
-                if (prev && prev !== next) {
-                    setTimeout(function(){ if(map.hasLayer(prev)) map.removeLayer(prev); }, 400);
-                }
-                radarLayer = next;
-                updateUI();
-            }
-
-            function updateUI() {
-                var fd = document.getElementById('mrmsFrameDisplay');
-                var td = document.getElementById('mrmsTimeDisplay');
-                var pb = document.getElementById('mBtnPlay');
-                if (fd) fd.textContent = frames.length ? (currentFrame+1)+' / '+frames.length : '— / —';
-                if (td) td.textContent = frames.length ? frames[currentFrame].label : 'No data';
-                if (pb) pb.textContent = playing ? '⏸' : '▶';
-                var f=currentFrame, l=frames.length-1;
-                var bF=document.getElementById('mBtnFirst'), bP=document.getElementById('mBtnPrev');
-                var bN=document.getElementById('mBtnNext'),  bL=document.getElementById('mBtnLast');
-                if(bF) bF.disabled=f===0; if(bP) bP.disabled=f===0;
-                if(bN) bN.disabled=f===l; if(bL) bL.disabled=f===l;
-            }
-
-            function stopPlay() {
-                playing = false;
-                if (playTimer) { clearTimeout(playTimer); playTimer = null; }
-                updateUI();
-            }
-
-            function startPlay() {
-                if (!frames.length) return;
-                playing = true;
-                updateUI();
-                (function tick() {
-                    if (!playing) return;
-                    var next = currentFrame + 1 >= frames.length ? 0 : currentFrame + 1;
-                    goToFrame(next);
-                    playTimer = setTimeout(tick, 600);
-                })();
-            }
-
-            function buildAndShow() {
-                var sector = getSector();
-                if (sector !== _curSector) {
-                    Object.keys(radarLayers).forEach(function(k){
-                        if(map.hasLayer(radarLayers[k])) map.removeLayer(radarLayers[k]);
-                    });
-                    radarLayers = {}; radarLayer = null; _curSector = sector;
-                }
-                frames = buildFrames(sector);
-                goToFrame(frames.length - 1);
-            }
-
-            function drawNexradColorbar() {
-                var canvas = document.getElementById('mrmsCbCanvas');
-                if (!canvas) return;
-                var ctx = canvas.getContext('2d'), W = canvas.width;
-                var stops = [
-                    [-30,[0,0,0,0]],[5,[4,233,231,200]],[10,[1,159,244,220]],
-                    [15,[3,0,244,220]],[20,[3,0,244,220]],[25,[2,253,2,220]],
-                    [30,[0,200,0,220]],[35,[0,144,0,220]],[40,[255,255,0,220]],
-                    [45,[231,192,0,220]],[50,[255,144,0,220]],[55,[255,0,0,220]],
-                    [60,[214,0,0,220]],[65,[192,0,0,220]],[70,[255,0,255,230]],
-                    [75,[192,0,192,230]],[80,[255,255,255,240]]
-                ];
-                var vmin=-30, vmax=80;
-                for (var x=0; x<W; x++) {
-                    var v = vmin + (x/W)*(vmax-vmin), c=[0,0,0,0];
-                    for (var i=0; i<stops.length-1; i++) {
-                        if (v>=stops[i][0] && v<=stops[i+1][0]) {
-                            var f2 = stops[i+1][0]>stops[i][0] ? (v-stops[i][0])/(stops[i+1][0]-stops[i][0]) : 0;
-                            c=[0,1,2,3].map(function(j){return Math.round(stops[i][1][j]+f2*(stops[i+1][1][j]-stops[i][1][j]));});
-                            break;
-                        }
-                    }
-                    ctx.fillStyle='rgba('+c[0]+','+c[1]+','+c[2]+','+(c[3]/255).toFixed(2)+')';
-                    ctx.fillRect(x,0,1,canvas.height);
-                }
-                var labels = document.getElementById('mrmsCbLabels');
-                if (labels) labels.innerHTML = ['-30','0','20','40','60','80']
-                    .map(function(l){return '<span>'+l+'</span>';}).join('');
-            }
-
-            document.addEventListener('DOMContentLoaded', function() {
-                document.getElementById('radarToggle').addEventListener('change', function(e) {
-                    var sub=document.getElementById('radarSubControls');
-                    var cb=document.getElementById('mrmsColorbar');
-                    var bar=document.getElementById('mrmsPlayerBar');
-                    if (e.target.checked) {
-                        radarVisible=true;
-                        sub.style.display='block'; cb.style.display='block';
-                        bar.classList.add('active');
-                        document.body.classList.add('radar-open');
-                        drawNexradColorbar();
-                        buildAndShow();
-                        pollTimer = setInterval(function(){
-                            var wp=playing; if(playing) stopPlay();
-                            buildAndShow(); if(wp) startPlay();
-                        }, 5*60*1000);
-                    } else {
-                        radarVisible=false; stopPlay();
-                        sub.style.display='none'; cb.style.display='none';
-                        bar.classList.remove('active');
-                        document.body.classList.remove('radar-open');
-                        Object.keys(radarLayers).forEach(function(k){
-                            if(map.hasLayer(radarLayers[k])) map.removeLayer(radarLayers[k]);
-                        });
-                        radarLayers={}; radarLayer=null;
-                        if(pollTimer){clearInterval(pollTimer);pollTimer=null;}
-                    }
-                });
-
-                document.getElementById('mrmsOpacity').addEventListener('input', function(){
-                    if(radarLayer) radarLayer.setOpacity(this.value/100);
-                });
-
-                var btnPlay=document.getElementById('mBtnPlay');
-                var btnFirst=document.getElementById('mBtnFirst');
-                var btnLast=document.getElementById('mBtnLast');
-                var btnPrev=document.getElementById('mBtnPrev');
-                var btnNext=document.getElementById('mBtnNext');
-                if(btnPlay)  btnPlay.addEventListener('click',  function(){playing?stopPlay():startPlay();});
-                if(btnFirst) btnFirst.addEventListener('click', function(){stopPlay();goToFrame(0);});
-                if(btnLast)  btnLast.addEventListener('click',  function(){stopPlay();goToFrame(frames.length-1);});
-                if(btnPrev)  btnPrev.addEventListener('click',  function(){stopPlay();goToFrame(currentFrame-1);});
-                if(btnNext)  btnNext.addEventListener('click',  function(){stopPlay();goToFrame(currentFrame+1);});
-            });
-
-            map && map.on('moveend', function(){
-                if(!radarVisible) return;
-                if(getSector()!==_curSector) buildAndShow();
-            });
-
-        })();
     </script>
 
     <!-- ── Airspace GeoJSON layers ────────────────────────────────────────── -->
@@ -1691,6 +1491,14 @@
                                 attribution:'MRMS &copy; NOAA/NSSL — Local'
                             });
                         });
+                        // Preload all frames at opacity 0 for smooth playback
+                        var m=getMap();
+                        if(m) mlFrames.forEach(function(f){
+                            if(mlLayers[f.timestamp]&&!m.hasLayer(mlLayers[f.timestamp])){
+                                mlLayers[f.timestamp].setOpacity(0);
+                                mlLayers[f.timestamp].addTo(m);
+                            }
+                        });
                         mlGoFrame(mlFrames.length-1);
                     })
                     .catch(function(e){console.warn('MRMS local index error:',e);});
@@ -1700,20 +1508,56 @@
                 var m=getMap(); if(!m||!mlFrames.length) return;
                 idx=Math.max(0,Math.min(idx,mlFrames.length-1));
                 var ts=mlFrames[idx].timestamp;
-                if(mlActiveLayer&&m.hasLayer(mlActiveLayer)){mlActiveLayer.setOpacity(0);m.removeLayer(mlActiveLayer);}
-                mlCurrent=idx; mlActiveLayer=mlLayers[ts];
-                if(mlActiveLayer){if(!m.hasLayer(mlActiveLayer))mlActiveLayer.addTo(m);mlActiveLayer.setOpacity(0.75);}
-                var el=document.getElementById('mrmsLocalTime');
-                if(el) el.textContent=ts.slice(0,4)+'/'+ts.slice(4,6)+'/'+ts.slice(6,8)+' '+ts.slice(9,11)+':'+ts.slice(11,13)+'Z · F '+(idx+1)+'/'+mlFrames.length;
+                var prevLayer=mlActiveLayer;
+                mlCurrent=idx;
+                mlActiveLayer=mlLayers[ts];
+                // Add new layer first at opacity 0, then fade in once loaded
+                if(mlActiveLayer){
+                    if(!m.hasLayer(mlActiveLayer)){
+                        mlActiveLayer.setOpacity(0);
+                        mlActiveLayer.addTo(m);
+                        // Fade in on load — remove previous after new is visible
+                        mlActiveLayer.once('load', function(){
+                            mlActiveLayer.setOpacity(0.75);
+                            if(prevLayer&&prevLayer!==mlActiveLayer&&m.hasLayer(prevLayer)){
+                                m.removeLayer(prevLayer);
+                            }
+                        });
+                        // Fallback: if tiles already cached, show immediately
+                        setTimeout(function(){
+                            if(mlActiveLayer&&m.hasLayer(mlActiveLayer)){
+                                mlActiveLayer.setOpacity(0.75);
+                                if(prevLayer&&prevLayer!==mlActiveLayer&&m.hasLayer(prevLayer)){
+                                    m.removeLayer(prevLayer);
+                                }
+                            }
+                        }, 300);
+                    } else {
+                        mlActiveLayer.setOpacity(0.75);
+                        if(prevLayer&&prevLayer!==mlActiveLayer&&m.hasLayer(prevLayer)){
+                            m.removeLayer(prevLayer);
+                        }
+                    }
+                }
+                var el=document.getElementById('mrmsTimeDisplay');
+                if(el) el.textContent=ts.slice(0,4)+'/'+ts.slice(4,6)+'/'+ts.slice(6,8)+' '+ts.slice(9,11)+':'+ts.slice(11,13)+'Z';
+                var fd=document.getElementById('mrmsFrameDisplay');
+                if(fd) fd.textContent=(idx+1)+' / '+mlFrames.length;
+                var pct = mlFrames.length > 1 ? (idx/(mlFrames.length-1))*100 : 0;
+                var fill=document.getElementById('mrmsFill');
+                var thumb=document.getElementById('mrmsThumb');
+                if(fill) fill.style.width=pct+'%';
+                if(thumb) thumb.style.left=pct+'%';
             }
 
             function mlPlay(){
                 if(mlPlaying) return; mlPlaying=true;
-                document.getElementById('mlBtnPlay').textContent='⏸';
-                mlPlayTimer=setInterval(function(){mlGoFrame((mlCurrent+1)%mlFrames.length);},600);
+                document.getElementById('mBtnPlay').innerHTML='&#9646;&#9646;';
+                var spd=parseInt(document.getElementById('mrmsPlaySpeed').value)||500;
+                mlPlayTimer=setInterval(function(){mlGoFrame((mlCurrent+1)%mlFrames.length);},spd);
             }
             function mlPause(){
-                mlPlaying=false; document.getElementById('mlBtnPlay').textContent='▶';
+                mlPlaying=false; document.getElementById('mBtnPlay').innerHTML='&#9654;';
                 if(mlPlayTimer){clearInterval(mlPlayTimer);mlPlayTimer=null;}
             }
             function mlStop(){
@@ -1722,24 +1566,81 @@
                 mlActiveLayer=null; mlCurrent=-1;
             }
 
+
+            // ── MRMS Composite colorbar ──────────────────────────────────────
+            function drawNexradColorbar() {
+                var canvas = document.getElementById('mrmsCbCanvas');
+                var labelsEl = document.getElementById('mrmsCbLabels');
+                if (!canvas) return;
+                var ctx = canvas.getContext('2d');
+                var w = canvas.width, h = canvas.height;
+                // Standard NWS reflectivity color scale
+                var stops = [
+                    {v:-30,c:'#cccccc'},{v:0,c:'#04e9e7'},{v:5,c:'#019ff4'},
+                    {v:10,c:'#0300f4'},{v:15,c:'#02fd02'},{v:20,c:'#01c501'},
+                    {v:25,c:'#008e00'},{v:30,c:'#fdf802'},{v:35,c:'#e5bc00'},
+                    {v:40,c:'#fd9500'},{v:45,c:'#fd0000'},{v:50,c:'#d40000'},
+                    {v:55,c:'#bc0000'},{v:60,c:'#f800fd'},{v:65,c:'#9854c6'},{v:75,c:'#ffffff'}
+                ];
+                var grad = ctx.createLinearGradient(0,0,w,0);
+                stops.forEach(function(s) {
+                    grad.addColorStop((s.v+30)/105, s.c);
+                });
+                ctx.fillStyle = grad;
+                ctx.fillRect(0,0,w,h);
+                if (labelsEl) labelsEl.innerHTML =
+                    '<span>-30</span><span>0</span><span>20</span><span>40</span><span>60</span><span>75</span>';
+            }
+
             document.getElementById('mrmsLocalToggle').addEventListener('change',function(){
-                var ctrl=document.getElementById('mrmsLocalControls');
-                if(this.checked){ctrl.style.display='block';mlLoadIndex();mlPollTimer=setInterval(mlLoadIndex,120000);}
-                else{ctrl.style.display='none';mlStop();if(mlPollTimer){clearInterval(mlPollTimer);mlPollTimer=null;}}
+                var bar=document.getElementById('mrmsPlayerBar');
+                var cb=document.getElementById('mrmsColorbar');
+                if(this.checked){
+                    bar.classList.add('active');
+                    document.body.classList.add('radar-open');
+                    if(cb) cb.style.display='block';
+                    drawNexradColorbar();
+                    mlLoadIndex();
+                    mlPollTimer=setInterval(mlLoadIndex,120000);
+                } else {
+                    bar.classList.remove('active');
+                    document.body.classList.remove('radar-open');
+                    if(cb) cb.style.display='none';
+                    mlStop();
+                    if(mlPollTimer){clearInterval(mlPollTimer);mlPollTimer=null;}
+                    document.getElementById('mrmsTimeDisplay').textContent='MRMS — select duration and enable';
+                    document.getElementById('mrmsFrameDisplay').textContent='— / —';
+                }
             });
+
+            // Timeline click-to-seek
+            var timeline = document.getElementById('mrmsTimeline');
+            if(timeline) {
+                timeline.addEventListener('click', function(e) {
+                    if(!mlFrames.length) return;
+                    var rect = this.getBoundingClientRect();
+                    var pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+                    var targetFrame = Math.round(pct * (mlFrames.length - 1));
+                    mlPause();
+                    mlGoFrame(targetFrame);
+                });
+            }
             document.getElementById('mrmsLocalDuration').addEventListener('change',function(){
                 if(document.getElementById('mrmsLocalToggle').checked) mlLoadIndex();
             });
-            document.getElementById('mlBtnFirst').addEventListener('click',function(){mlPause();mlGoFrame(0);});
-            document.getElementById('mlBtnPrev').addEventListener('click', function(){mlPause();mlGoFrame(mlCurrent-1);});
-            document.getElementById('mlBtnPlay').addEventListener('click', function(){mlPlaying?mlPause():mlPlay();});
-            document.getElementById('mlBtnNext').addEventListener('click', function(){mlPause();mlGoFrame(mlCurrent+1);});
-            document.getElementById('mlBtnLast').addEventListener('click', function(){mlPause();mlGoFrame(mlFrames.length-1);});
+            document.getElementById('mrmsPlaySpeed').addEventListener('change',function(){
+                if(mlPlaying){ mlPause(); mlPlay(); }
+            });
+            document.getElementById('mBtnFirst').addEventListener('click',function(){mlPause();mlGoFrame(0);});
+            document.getElementById('mBtnPrev').addEventListener('click', function(){mlPause();mlGoFrame(mlCurrent-1);});
+            document.getElementById('mBtnPlay').addEventListener('click', function(){mlPlaying?mlPause():mlPlay();});
+            document.getElementById('mBtnNext').addEventListener('click', function(){mlPause();mlGoFrame(mlCurrent+1);});
+            document.getElementById('mBtnLast').addEventListener('click', function(){mlPause();mlGoFrame(mlFrames.length-1);});
 
             // ── GLM Lightning ────────────────────────────────────────────────
             var glmLayer=null, glmRefreshTimer=null;
 
-            function glmColor(a){return a<5?'#ff2222':a<15?'#ff8800':'#00cc44';}
+            function glmColor(a){return a<5?'#ff0000':a<15?'#ffff00':'#00cc00';}
             function glmSize(a){return a<5?14:a<15?11:9;}
 
             function loadGLM(){
@@ -1753,17 +1654,24 @@
                         if(glmLayer){m.removeLayer(glmLayer);glmLayer=null;}
                         glmLayer=L.layerGroup();
                         var now=Date.now(), count=0;
-                        (data.features||[]).forEach(function(f){
+                        // Sort oldest first so newest (red) renders on top
+                    var sorted=(data.features||[]).slice().sort(function(a,b){
+                        return a.properties.flash_time<b.properties.flash_time?-1:1;
+                    });
+                    sorted.forEach(function(f){
                             if(!f.geometry||!f.geometry.coordinates) return;
                             var lon=f.geometry.coordinates[0], lat=f.geometry.coordinates[1];
-                            var age=(now-new Date(f.properties.flash_time).getTime())/60000;
+                            var ft=f.properties.flash_time.replace(/(\\.\\d{3})\\d+/,'$1');
+                var age=(now-new Date(ft).getTime())/60000;
                             if(age<0||age>minutes) return;
                             var sz=glmSize(age);
+                            var zOff=age<5?2000:age<15?1000:500;
                             L.marker([lat,lon],{
                                 icon:L.divIcon({className:'',
-                                    html:'<span style="font-size:'+sz+'px;color:'+glmColor(age)+';text-shadow:0 0 3px rgba(0,0,0,0.8);line-height:1;display:block;text-align:center;">⚡</span>',
-                                    iconSize:[sz,sz],iconAnchor:[sz/2,sz/2]}),
-                                interactive:false
+                                    html:'<div style="width:'+sz+'px;height:'+(sz*1.4)+'px;background:'+glmColor(age)+';clip-path:polygon(50% 0%,100% 40%,70% 40%,100% 100%,0% 100%,30% 40%,0% 40%);filter:drop-shadow(0 0 3px rgba(0,0,0,0.9));"></div>',
+                                    iconSize:[sz+6,sz+6],iconAnchor:[(sz+6)/2,(sz+6)/2]}),
+                                interactive:false,
+                                zIndexOffset:zOff
                             }).addTo(glmLayer);
                             count++;
                         });
@@ -1789,7 +1697,7 @@
     <!-- MRMS colorbar -->
     <div id="mrmsColorbar">
         <div class="cb-panel">
-            <div class="cb-title">Base Reflectivity (dBZ) — NEXRAD</div>
+            <div class="cb-title">Base Reflectivity (dBZ) — MRMS Composite</div>
             <canvas id="mrmsCbCanvas" width="160" height="12"></canvas>
             <div class="cb-labels" id="mrmsCbLabels"></div>
         </div>
@@ -1802,11 +1710,106 @@
         <button class="mpb" id="mBtnPlay"  title="Play/Pause">&#9654;</button>
         <button class="mpb" id="mBtnNext"  title="Step forward">&#9654;&#x7C;</button>
         <button class="mpb" id="mBtnLast"  title="Latest">&#9197;</button>
+        <div id="mrmsTimeline" style="flex:1;position:relative;height:22px;cursor:pointer;"
+             title="Click to jump to frame">
+            <div id="mrmsTrack" style="position:absolute;top:50%;left:0;right:0;
+                 transform:translateY(-50%);height:4px;background:#444;border-radius:2px;">
+                <div id="mrmsFill" style="height:100%;background:#4a9c6f;
+                     border-radius:2px;width:0%;transition:width 0.1s;"></div>
+            </div>
+            <div id="mrmsThumb" style="position:absolute;top:50%;width:12px;height:12px;
+                 background:#8bc4a8;border-radius:50%;transform:translate(-50%,-50%);
+                 left:0%;transition:left 0.1s;pointer-events:none;"></div>
+        </div>
         <div id="mrmsFrameDisplay" style="font-family:monospace;font-size:12px;color:#ccc;min-width:55px;">— / —</div>
-        <div id="mrmsTimeDisplay"  style="font-family:monospace;font-size:13px;color:#8bc4a8;flex:1;">No data</div>
-        <span style="font-size:11px;color:#aaa;white-space:nowrap;">NEXRAD via IEM (~5 min latency)</span>
+        <div id="mrmsTimeDisplay"  style="font-family:monospace;font-size:13px;color:#8bc4a8;flex:1;">Enable MRMS Composite above</div>
+        <select id="mrmsLocalDuration" title="Loop duration"
+                style="background:#1a1a2e;border:1px solid #444;color:#ccc;
+                       font-size:11px;padding:2px 4px;border-radius:3px;cursor:pointer;">
+            <option value="60">1 hr</option>
+            <option value="120" selected>2 hr</option>
+            <option value="180">3 hr</option>
+            <option value="240">4 hr</option>
+        </select>
+        <select id="mrmsPlaySpeed" title="Playback speed"
+                style="background:#1a1a2e;border:1px solid #444;color:#ccc;
+                       font-size:11px;padding:2px 4px;border-radius:3px;cursor:pointer;">
+            <option value="800">Slow</option>
+            <option value="500" selected>Normal</option>
+            <option value="250">Fast</option>
+            <option value="100">Max</option>
+        </select>
+        <span style="font-size:11px;color:#aaa;white-space:nowrap;">MRMS_Composite Refl</span>
     </div>
 
+
+    <!-- GLM Legend -->
+    <div id="glmLegend">
+        <div class="gl-title" style="color:#111;">⚡ GLM Lightning (DAFMAN 91-203)</div>
+        <div class="gl-row"><div style="display:inline-block;width:14px;height:20px;background:#ff0000;clip-path:polygon(50% 0%,100% 40%,70% 40%,100% 100%,0% 100%,30% 40%,0% 40%);margin-right:4px;vertical-align:middle;"></div> 0–5 min — Stop if within 5NM</div>
+        <div class="gl-row"><div style="display:inline-block;width:11px;height:16px;background:#ffff00;clip-path:polygon(50% 0%,100% 40%,70% 40%,100% 100%,0% 100%,30% 40%,0% 40%);margin-right:4px;vertical-align:middle;"></div> 5–15 min — Caution within 5NM</div>
+        <div class="gl-row"><div style="display:inline-block;width:9px;height:13px;background:#00cc00;clip-path:polygon(50% 0%,100% 40%,70% 40%,100% 100%,0% 100%,30% 40%,0% 40%);margin-right:4px;vertical-align:middle;"></div> 15–30 min — Resume if 30-min clear</div>
+        <div id="glmLegendStatus" style="font-size:10px;color:#555;margin-top:4px;"></div>
+    </div>
+
+
+    <!-- TSTM Probability Legend -->
+    <div id="tstmLegend">
+        <div class="tl-title">&#9928; TRW Probability</div>
+        <div class="tl-row"><div class="tl-swatch" style="background:rgba(255,220,50,0.63);border:1px solid #ccc;"></div>40% chance</div>
+        <div class="tl-row"><div class="tl-swatch" style="background:rgba(255,140,0,0.71);border:1px solid #ccc;"></div>60% chance</div>
+        <div class="tl-row"><div class="tl-swatch" style="background:rgba(220,30,30,0.78);border:1px solid #ccc;"></div>80% chance</div>
+        <div style="margin-top:4px;font-size:10px;color:#666;">Source: NOAA LAMP</div>
+    </div>
+
+    <script>
+    // TSTM Probability Tile Overlay
+    (function() {
+        var TSTM_BASE = '/tstm/tiles';
+        var tstmLayer = null;
+        var tstmFhr   = 1;
+
+        function getMap() { return window._capMap; }
+
+        function fhrStr(h) {
+            return 'F' + (h < 10 ? '0' : '') + h;
+        }
+
+        function loadTstmLayer(fhr) {
+            var map = getMap();
+            if (!map) return;
+            if (tstmLayer) { map.removeLayer(tstmLayer); tstmLayer = null; }
+            var tog = document.getElementById('tstmToggle');
+            if (!tog || !tog.checked) return;
+            var url = TSTM_BASE + '/' + fhrStr(fhr) + '/{z}/{x}/{y}.png';
+            tstmLayer = L.tileLayer(url, {
+                opacity: 0.75,
+                tms: false,
+                minZoom: 3,
+                maxZoom: 8,
+                attribution: 'TRW: NOAA LAMP'
+            });
+            tstmLayer.addTo(map);
+            document.getElementById('tstmLegend').classList.add('visible');
+        }
+
+        function removeTstmLayer() {
+            var map = getMap();
+            if (map && tstmLayer) { map.removeLayer(tstmLayer); tstmLayer = null; }
+            var leg = document.getElementById('tstmLegend');
+            if (leg) leg.classList.remove('visible');
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            var tog = document.getElementById('tstmToggle');
+            if (!tog) return;
+            tog.addEventListener('change', function() {
+                if (this.checked) { loadTstmLayer(tstmFhr); }
+                else { removeTstmLayer(); }
+            });
+        });
+    })();
+    </script>
 
 </body>
 </html>
