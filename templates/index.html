@@ -3,325 +3,161 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CAP WxCOP</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow:wght@400;600;700&family=Barlow+Condensed:wght@600;700&display=swap" rel="stylesheet">
+  <title>CAP WxCOP — Weather Common Operating Picture</title>
   <style>
-    :root {
-      --navy:    #0a1628;
-      --navy2:   #0f2044;
-      --blue:    #1a3a6b;
-      --accent:  #4fc3f7;
-      --accent2: #e94560;
-      --go:      #00b33c;
-      --caution: #e6b800;
-      --stop:    #cc2200;
-      --text:    #e0e8f0;
-      --muted:   #7a9abf;
-      --border:  rgba(79,195,247,0.15);
-    }
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
     body {
-      font-family: 'Barlow', sans-serif;
-      background: var(--navy);
-      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+      background: #f4f6f8;
+      color: #1a1a2e;
       min-height: 100vh;
-      overflow-x: hidden;
     }
 
-    /* ---- Scanline texture overlay ---- */
-    body::before {
-      content: '';
-      position: fixed; inset: 0;
-      background: repeating-linear-gradient(
-        0deg,
-        transparent,
-        transparent 2px,
-        rgba(0,0,0,0.03) 2px,
-        rgba(0,0,0,0.03) 4px
-      );
-      pointer-events: none;
-      z-index: 0;
-    }
-
-    /* ---- Header ---- */
+    /* ── Header ── */
     header {
-      position: relative; z-index: 1;
-      background: linear-gradient(180deg, #060e1c 0%, var(--navy) 100%);
-      border-bottom: 1px solid var(--border);
+      background: #1a2744;
+      color: #fff;
       padding: 0 2rem;
-    }
-    .header-inner {
-      max-width: 1300px; margin: 0 auto;
-      display: flex; align-items: stretch;
+      display: flex;
+      align-items: center;
       justify-content: space-between;
+      height: 60px;
+      border-bottom: 3px solid #c8a951;
     }
-    .brand {
-      padding: 1.2rem 0;
-      display: flex; flex-direction: column; justify-content: center;
-    }
-    .brand-top {
-      font-family: 'Barlow Condensed', sans-serif;
-      font-size: 0.65rem; font-weight: 600;
-      letter-spacing: 0.2em; text-transform: uppercase;
-      color: var(--muted); margin-bottom: 2px;
-    }
-    .brand-name {
-      font-family: 'Barlow Condensed', sans-serif;
-      font-size: 1.6rem; font-weight: 700;
-      color: #fff; letter-spacing: 0.05em;
-      line-height: 1;
-    }
-    .brand-name span { color: var(--accent); }
-    .brand-sub {
-      font-family: 'Share Tech Mono', monospace;
-      font-size: 0.68rem; color: var(--muted);
-      margin-top: 4px; letter-spacing: 0.05em;
-    }
-    .dev-badge {
-      align-self: center;
-      background: var(--accent2);
-      color: #fff; font-family: 'Share Tech Mono', monospace;
-      font-size: 0.7rem; font-weight: 700;
-      padding: 3px 10px; border-radius: 3px;
-      letter-spacing: 0.1em;
-      animation: pulse-badge 3s ease-in-out infinite;
-    }
-    @keyframes pulse-badge {
-      0%,100% { opacity: 1; }
-      50% { opacity: 0.7; }
-    }
-    .header-right {
-      display: flex; align-items: center; gap: 1.5rem;
-    }
-    .clock {
-      font-family: 'Share Tech Mono', monospace;
-      font-size: 0.85rem; color: var(--accent);
-      text-align: right; line-height: 1.5;
-    }
-    .clock-label { font-size: 0.6rem; color: var(--muted); letter-spacing: 0.1em; }
+    .header-left { display: flex; align-items: center; gap: 12px; }
+    .cap-emblem { font-size: 1.6rem; }
+    .header-title { font-size: 1.1rem; font-weight: 700; letter-spacing: 0.02em; }
+    .header-sub { font-size: 0.72rem; color: #a8b8d0; letter-spacing: 0.05em; text-transform: uppercase; }
+    .header-clock { font-family: 'Courier New', monospace; font-size: 0.95rem; color: #c8d8e8; text-align: right; }
+    .header-clock .date { font-size: 0.72rem; color: #a8b8d0; }
 
-    /* ---- Main content ---- */
-    main {
-      position: relative; z-index: 1;
-      max-width: 1300px; margin: 0 auto;
-      padding: 2.5rem 2rem 3rem;
-    }
+    /* ── Main ── */
+    main { max-width: 1200px; margin: 0 auto; padding: 2rem 1.5rem; }
 
-    /* ---- Section headers ---- */
-    .section-header {
-      display: flex; align-items: center; gap: 12px;
-      margin-bottom: 1.2rem; margin-top: 2.5rem;
+    /* ── Section headings ── */
+    .section-heading {
+      font-size: 0.7rem; font-weight: 700; letter-spacing: 0.12em;
+      text-transform: uppercase; color: #5a6a80;
+      border-bottom: 1px solid #d0d8e4;
+      padding-bottom: 6px; margin: 2rem 0 1rem;
     }
-    .section-header:first-child { margin-top: 0; }
-    .section-tag {
-      font-family: 'Share Tech Mono', monospace;
-      font-size: 0.65rem; color: var(--accent);
-      letter-spacing: 0.15em; text-transform: uppercase;
-      border: 1px solid var(--border);
-      padding: 2px 8px; border-radius: 2px;
-    }
-    .section-line {
-      flex: 1; height: 1px;
-      background: linear-gradient(90deg, var(--border), transparent);
-    }
+    .section-heading:first-child { margin-top: 0; }
 
-    /* ---- Card grid ---- */
+    /* ── Card grid ── */
     .card-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
       gap: 1rem;
     }
-    .card-grid.wide {
-      grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
-    }
 
-    /* ---- App card ---- */
+    /* ── App card ── */
     .app-card {
-      background: var(--navy2);
-      border: 1px solid var(--border);
+      background: #fff;
+      border: 1px solid #d4dce8;
       border-radius: 6px;
-      padding: 1.4rem;
+      padding: 1.1rem 1.2rem;
       text-decoration: none;
       color: inherit;
-      display: flex; flex-direction: column; gap: 0.6rem;
-      transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
-      cursor: pointer;
-      position: relative; overflow: hidden;
-    }
-    .app-card::before {
-      content: '';
-      position: absolute; top: 0; left: 0; right: 0;
-      height: 2px;
-      background: var(--accent);
-      transform: scaleX(0); transform-origin: left;
-      transition: transform 0.25s;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      transition: box-shadow 0.15s, border-color 0.15s;
+      border-left: 3px solid #c8a951;
     }
     .app-card:hover {
-      border-color: rgba(79,195,247,0.4);
-      transform: translateY(-2px);
-      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+      box-shadow: 0 3px 12px rgba(0,0,0,0.1);
+      border-left-color: #1a2744;
     }
-    .app-card:hover::before { transform: scaleX(1); }
-    .app-card.new::before { background: var(--go); }
-    .app-card.new { border-color: rgba(0,179,60,0.25); }
-    .app-card.new:hover { border-color: rgba(0,179,60,0.5); }
+    .app-card.priority { border-left-color: #1a2744; }
+    .app-card.external { border-left-color: #2e7d4a; }
+    .app-card.info { border-left-color: #888; cursor: default; }
 
-    .card-header {
-      display: flex; align-items: flex-start;
-      justify-content: space-between; gap: 8px;
-    }
-    .card-icon { font-size: 1.5rem; line-height: 1; flex-shrink: 0; }
+    .card-header { display: flex; align-items: center; justify-content: space-between; }
+    .card-icon { font-size: 1.4rem; }
     .card-badges { display: flex; gap: 5px; flex-wrap: wrap; }
+
     .badge {
-      font-family: 'Share Tech Mono', monospace;
-      font-size: 0.6rem; padding: 1px 6px;
-      border-radius: 2px; letter-spacing: 0.05em;
+      font-size: 0.62rem; font-weight: 700; letter-spacing: 0.06em;
+      text-transform: uppercase; padding: 2px 6px; border-radius: 3px;
     }
-    .badge-new  { background: rgba(0,179,60,0.2);  color: #00e64d; border: 1px solid rgba(0,179,60,0.3); }
-    .badge-dev  { background: rgba(233,69,96,0.2); color: #ff6b87; border: 1px solid rgba(233,69,96,0.3); }
-    .badge-live { background: rgba(79,195,247,0.15); color: var(--accent); border: 1px solid var(--border); }
-    .badge-ext  { background: rgba(100,200,100,0.15); color: #6dc86d; border: 1px solid rgba(100,200,100,0.3); }
+    .badge-live  { background: #e8f4fd; color: #1565c0; border: 1px solid #bbdefb; }
+    .badge-new   { background: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; }
+    .badge-met   { background: #fff3e0; color: #e65100; border: 1px solid #ffe0b2; }
+    .badge-ext   { background: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; }
+    .badge-info  { background: #f5f5f5; color: #616161; border: 1px solid #e0e0e0; }
 
     .card-title {
-      font-family: 'Barlow Condensed', sans-serif;
-      font-size: 1.1rem; font-weight: 700;
-      color: #fff; letter-spacing: 0.03em;
+      font-size: 0.95rem; font-weight: 700; color: #1a2744;
     }
     .card-desc {
-      font-size: 0.82rem; color: var(--muted);
-      line-height: 1.5;
+      font-size: 0.78rem; color: #4a5568; line-height: 1.5;
     }
+    .card-desc a { color: #1565c0; }
     .card-meta {
-      margin-top: auto; padding-top: 0.6rem;
-      border-top: 1px solid var(--border);
-      display: flex; align-items: center;
-      justify-content: space-between;
-      font-family: 'Share Tech Mono', monospace;
-      font-size: 0.65rem; color: var(--muted);
+      font-size: 0.68rem; color: #7a8898; margin-top: auto;
+      display: flex; justify-content: space-between; align-items: center;
+      padding-top: 6px; border-top: 1px solid #eef0f4;
     }
-    .card-arrow { color: var(--accent); font-size: 0.9rem; }
-    .app-card.new .card-arrow { color: var(--go); }
+    .card-arrow { color: #c8a951; font-weight: 700; }
 
-    /* ---- Status row ---- */
-    .status-row {
-      display: flex; gap: 1rem; flex-wrap: wrap;
-      margin-bottom: 2rem;
-    }
-    .status-pill {
-      font-family: 'Share Tech Mono', monospace;
-      font-size: 0.68rem; padding: 4px 12px;
-      border-radius: 3px; display: flex;
-      align-items: center; gap: 6px;
-    }
-    .status-pill .dot {
-      width: 6px; height: 6px; border-radius: 50%;
-      animation: blink 2s ease-in-out infinite;
-    }
-    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
-    .status-ok   { background: rgba(0,179,60,0.1);  color: #00e64d; border: 1px solid rgba(0,179,60,0.2); }
-    .status-ok .dot   { background: #00e64d; }
-    .status-warn { background: rgba(230,184,0,0.1); color: #ffd700; border: 1px solid rgba(230,184,0,0.2); }
-    .status-warn .dot { background: #ffd700; }
-
-    /* ---- Footer ---- */
+    /* ── Footer ── */
     footer {
-      position: relative; z-index: 1;
-      border-top: 1px solid var(--border);
-      padding: 1rem 2rem;
-      font-family: 'Share Tech Mono', monospace;
-      font-size: 0.65rem; color: var(--muted);
-      display: flex; justify-content: space-between;
-      flex-wrap: wrap; gap: 0.5rem;
+      background: #1a2744; color: #8898aa;
+      padding: 1rem 2rem; font-size: 0.72rem;
+      display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px;
+      margin-top: 3rem;
     }
   </style>
 </head>
 <body>
 
 <header>
-  <div class="header-inner">
-    <div class="brand">
-      <div class="brand-top">Civil Air Patrol · National Headquarters</div>
-      <div class="brand-name">CAP <span>Wx</span>COP</div>
-      <div class="brand-sub">Weather Common Operating Picture — Development</div>
+  <div class="header-left">
+    <div class="cap-emblem">🏛️</div>
+    <div>
+      <div class="header-title">CAP Weather Common Operating Picture</div>
+      <div class="header-sub">Civil Air Patrol · National Headquarters · Wx Team</div>
     </div>
-    <div class="header-right">
-      <div class="dev-badge">DEV</div>
-      <div class="clock">
-        <div class="clock-label">UTC</div>
-        <div id="clock">--:--:--Z</div>
-        <div id="clock-date" style="font-size:0.7rem;color:var(--muted)"></div>
-      </div>
-    </div>
+  </div>
+  <div class="header-clock">
+    <div id="clock">--:--:--Z</div>
+    <div class="date" id="clock-date"></div>
   </div>
 </header>
 
 <main>
 
-  <!-- Status row -->
-  <div class="status-row" id="status-row">
-    <div class="status-pill status-ok"><div class="dot"></div>LDM INGEST NOMINAL</div>
-    <div class="status-pill status-ok"><div class="dot"></div>DB AVWX_DATA ONLINE</div>
-    <div class="status-pill status-ok"><div class="dot"></div>GLM LIGHTNING ACTIVE</div>
-    <div class="status-pill status-ok"><div class="dot"></div>GLMP IMPACTS CURRENT</div>
-    <div class="status-pill status-warn"><div class="dot"></div>DEV ENVIRONMENT</div>
-  </div>
+  <div class="section-heading">Flight Operations</div>
+  <div class="card-grid">
 
-  <!-- NEW CAPABILITIES -->
-  <div class="section-header">
-    <div class="section-tag">New Capabilities</div>
-    <div class="section-line"></div>
-  </div>
-  <div class="card-grid wide">
-
-    <a class="app-card new" href="/CAP_WxCOP/weather-impacts">
+    <a class="app-card priority" href="/CAP_WxCOP/weather-impacts">
       <div class="card-header">
         <div class="card-icon">🚦</div>
         <div class="card-badges">
-          <span class="badge badge-new">NEW</span>
           <span class="badge badge-live">LIVE</span>
+          <span class="badge badge-new">NEW</span>
         </div>
       </div>
       <div class="card-title">Flight Ops Impacts</div>
-      <div class="card-desc">CAPR 70-1 / CAPF 70-1A Go/Caution/No-Go assessment for 8,500+ qualified CAP airfields. Ceiling, visibility, wind, crosswind, temperature, wind chill, and thunderstorm probability evaluated per airport per forecast hour. 25-hour horizon from NOAA GLMP. Wing ICL overrides applied.</div>
+      <div class="card-desc">CAPR 70-1 / CAPF 70-1A Go/Caution/No-Go assessment for 8,500+ qualified CAP airfields. Ceiling, visibility, wind, crosswind, temperature, wind chill, and thunderstorm probability per forecast hour. Wing ICL overrides applied.</div>
       <div class="card-meta">
         <span>CAPR 70-1 · GLMP · 8,500+ airports · F01–F25</span>
         <span class="card-arrow">→</span>
       </div>
     </a>
 
-    <a class="app-card new" href="/CAP_WxCOP/wbgt">
-  <div class="card-header">
-    <div class="card-icon">🌡️</div>
-    <div class="card-badges">
-      <span class="badge badge-new">NEW</span>
-      <span class="badge badge-live">LIVE</span>
-    </div>
-  </div>
-  <div class="card-title">WBGT Calculator</div>
-  <div class="card-desc">Interactive Wet Bulb Globe Temperature calculator per DAFI 48-151 Ch.4. Solar elevation computed from lat/lon, date, and UTC time. Load live conditions from any cadet site. Displays DAFI flag color and CAPR 60-2 activity guidance.</div>
-  <div class="card-meta">
-    <span>CAPR 60-2 · DAFI 48-151 · Liljegren/USARIEM</span>
-    <span class="card-arrow">→</span>
-  </div>
-</a>
-
-  </div>
-  <div class="section-header">
-    <div class="section-tag">Operational Tools</div>
-    <div class="section-line"></div>
-  </div>
-  <div class="card-grid">
-
     <a class="app-card" href="/CAP_WxCOP/enhanced-weather-map">
       <div class="card-header">
         <div class="card-icon">🌦️</div>
-        <div class="card-badges"><span class="badge badge-live">LIVE</span></div>
+        <div class="card-badges">
+          <span class="badge badge-live">LIVE</span>
+        </div>
       </div>
       <div class="card-title">Enhanced Weather Map</div>
-      <div class="card-desc">METAR, TAF, SIGMET, AIRMET, TFR, NEXRAD radar, and NWS alerts on an interactive map. Military and civil airport overlays with popup observations.</div>
+      <div class="card-desc">METAR, TAF, SIGMET, AIRMET, TFR, MRMS composite radar, TRW probability, and NWS alerts on an interactive map. Military and civil airport overlays with popup observations and GLM lightning.</div>
       <div class="card-meta">
-        <span>METAR · TAF · SIGMET · AIRMET</span>
+        <span>METAR · TAF · SIGMET · MRMS · GLM · TRW</span>
         <span class="card-arrow">→</span>
       </div>
     </a>
@@ -329,12 +165,14 @@
     <a class="app-card" href="/CAP_WxCOP/wind-map">
       <div class="card-header">
         <div class="card-icon">💨</div>
-        <div class="card-badges"><span class="badge badge-live">LIVE</span></div>
+        <div class="card-badges">
+          <span class="badge badge-live">LIVE</span>
+        </div>
       </div>
       <div class="card-title">Wind Constraints Map</div>
-      <div class="card-desc">HRRR-derived wind constraint analysis for CAP aircraft operations. GO/CAUTION/STOP by airport with CAPR 70-1 wind thresholds. Temporal slider for 18-hour forecast.</div>
+      <div class="card-desc">HRRR-derived wind constraint analysis for CAP aircraft operations. Go/Caution/Stop by airport with CAPR 70-1 wind thresholds. 18-hour forecast horizon.</div>
       <div class="card-meta">
-        <span>HRRR · CAPR 70-1</span>
+        <span>HRRR · CAPR 70-1 · CONUS · 18hr</span>
         <span class="card-arrow">→</span>
       </div>
     </a>
@@ -342,37 +180,45 @@
     <a class="app-card" href="/CAP_WxCOP/legacy-wind-generator">
       <div class="card-header">
         <div class="card-icon">🗺️</div>
-        <div class="card-badges"><span class="badge badge-live">LIVE</span></div>
+        <div class="card-badges">
+          <span class="badge badge-live">LIVE</span>
+        </div>
       </div>
       <div class="card-title">Wind Constraints Generator</div>
       <div class="card-desc">On-demand wind constraint map generation by state, region, or CONUS. Downloads shapefile and PNG outputs for mission planning and briefing.</div>
       <div class="card-meta">
-        <span>HRRR · Shapefile · PNG</span>
+        <span>HRRR · State · Region · CONUS</span>
         <span class="card-arrow">→</span>
       </div>
     </a>
 
   </div>
 
-  <!-- DATA & INGEST -->
-  <div class="section-header">
-    <div class="section-tag">Data Infrastructure</div>
-    <div class="section-line"></div>
-  </div>
+  <div class="section-heading">Ground &amp; Personnel Operations</div>
   <div class="card-grid">
 
-    <div class="app-card" style="cursor:default;">
+    <a class="app-card priority" href="/CAP_WxCOP/wbgt">
       <div class="card-header">
-        <div class="card-icon">⚡</div>
-        <div class="card-badges"><span class="badge badge-live">LIVE</span></div>
+        <div class="card-icon">🌡️</div>
+        <div class="card-badges">
+          <span class="badge badge-live">LIVE</span>
+          <span class="badge badge-new">NEW</span>
+        </div>
       </div>
-      <div class="card-title">GLM Lightning</div>
-      <div class="card-desc">GOES-16/18 Geostationary Lightning Mapper flash data. Updated every minute. 1.5M+ flash records in 2-hour rolling window. Displayed on Cadet Weather COP.</div>
-      <div class="card-meta"><span>G16 · G18 · 1-min update</span></div>
-    </div>
+      <div class="card-title">WBGT Calculator</div>
+      <div class="card-desc">Wet Bulb Globe Temperature calculator per DAFI 48-151. Solar elevation computed from lat/lon, date, and UTC time. Load live conditions from cadet sites. Displays DAFI flag color and CAPR 60-2 activity guidance.</div>
+      <div class="card-meta">
+        <span>DAFI 48-151 · CAPR 60-2 · Cadet sites</span>
+        <span class="card-arrow">→</span>
+      </div>
+    </a>
 
+  </div>
 
-    <a class="app-card" href="https://m4b-hk-web.us.af.mil/" target="_blank" rel="noopener" style="text-decoration:none;color:inherit;">
+  <div class="section-heading">Observational Data &amp; Imagery</div>
+  <div class="card-grid">
+
+    <a class="app-card external" href="https://m4b-hk-web.us.af.mil/" target="_blank" rel="noopener">
       <div class="card-header">
         <div class="card-icon">🛰️</div>
         <div class="card-badges">
@@ -381,36 +227,71 @@
         </div>
       </div>
       <div class="card-title">Satellite Imagery</div>
-      <div class="card-desc">USAF MARK IV-B satellite viewer — GOES visible, IR, and water vapor imagery. Two servers available: <a href="https://m4b-hk-web.us.af.mil/" target="_blank">HK</a> · <a href="https://m4b-gu-web.us.af.mil/" target="_blank">GU</a>. NIPRNET accessible.</div>
+      <div class="card-desc">USAF MARK IV-B satellite viewer — GOES visible, IR, and water vapor imagery. Two servers available: <a href="https://m4b-hk-web.us.af.mil/" target="_blank">HK server</a> · <a href="https://m4b-gu-web.us.af.mil/" target="_blank">GU server</a>. NIPRNET accessible.</div>
       <div class="card-meta">
-        <span>GOES · MARK IV-B · USAF</span>
+        <span>GOES · MARK IV-B · USAF NIPRNET</span>
         <span class="card-arrow">↗</span>
       </div>
     </a>
-    <a class="app-card" href="/CAP_WxCOP/mrms" style="text-decoration:none;color:inherit;">
+
+    <a class="app-card met" href="/CAP_WxCOP/mrms" style="border-left-color:#e65100;">
       <div class="card-header">
-        <div class="card-icon">🛰️</div>
+        <div class="card-icon">📡</div>
         <div class="card-badges">
           <span class="badge badge-live">LIVE</span>
-          <span class="badge badge-dev">MET</span>
+          <span class="badge badge-met">MET</span>
         </div>
       </div>
       <div class="card-title">MRMS Reflectivity</div>
-      <div class="card-desc">Multi-Radar Multi-Sensor composite reflectivity tiles. Expert/meteorologist tool — radar and GLM are integrated into the operational weather map for general use. CONUS, Alaska, Hawaii, Caribbean, and Guam domains, updated every 2 minutes.</div>
+      <div class="card-desc">Multi-Radar Multi-Sensor composite reflectivity tiles. Expert/meteorologist tool — radar and GLM are integrated into the operational weather map for general use. CONUS, Alaska, Hawaii, Caribbean, and Guam.</div>
       <div class="card-meta">
         <span>CONUS · AK · HI · PR · GU · 2-min</span>
         <span class="card-arrow">→</span>
       </div>
     </a>
 
-    <div class="app-card" style="cursor:default;">
+    <div class="app-card info">
+      <div class="card-header">
+        <div class="card-icon">⚡</div>
+        <div class="card-badges">
+          <span class="badge badge-live">LIVE</span>
+        </div>
+      </div>
+      <div class="card-title">GLM Lightning</div>
+      <div class="card-desc">GOES-16/18 Geostationary Lightning Mapper flash data. Updated every minute. 2-hour rolling window. Integrated into Enhanced Weather Map and Cadet Weather COP.</div>
+      <div class="card-meta"><span>G16 · G18 · 1-min update</span></div>
+    </div>
+
+  </div>
+
+  <div class="section-heading">Administration</div>
+  <div class="card-grid">
+
+    <a class="app-card" href="/CAP_WxCOP/admin/wing-icl">
+      <div class="card-header">
+        <div class="card-icon">⚙️</div>
+        <div class="card-badges">
+          <span class="badge badge-live">LIVE</span>
+        </div>
+      </div>
+      <div class="card-title">Wing ICL Administration</div>
+      <div class="card-desc">Wing-level Individual/Command Limit overrides for CAPR 70-1 weather thresholds. Wing Directors of Operations and Stan/Eval may adjust limits for their Wing. MFA-protected.</div>
+      <div class="card-meta">
+        <span>CAPR 70-1 · Wing DO · Stan/Eval · MFA</span>
+        <span class="card-arrow">→</span>
+      </div>
+    </a>
+
+    <div class="app-card info">
       <div class="card-header">
         <div class="card-icon">🔢</div>
-        <div class="card-badges"><span class="badge badge-live">LIVE</span></div>
+        <div class="card-badges">
+          <span class="badge badge-info">INFRA</span>
+        </div>
       </div>
       <div class="card-title">Model Ingest</div>
-      <div class="card-desc">HRRR (3-km, hourly) for CONUS aviation and cadet sites. AIGFS for all OCONUS sites. GLMP (Gridded LAMP, 2.5-km) for Weather Impacts — ceiling, visibility, wind, temp for 3,566 airports every 30 minutes, 25-hour horizon.</div>
-      <div class="card-meta"><span>HRRR · AIGFS · GLMP · LDM · NOMADS</span></div>
+      <div class="card-desc">HRRR (3-km, hourly) for CONUS. AIGFS for OCONUS sites. GLMP (2.5-km) for Flight Ops Impacts — ceiling, visibility, wind for 8,500+ airports, 25-hour horizon. LAMP CTSTM01 for TRW probability.</div>
+      <div class="card-meta"><span>HRRR · AIGFS · GLMP · LAMP · LDM · NOMADS</span></div>
     </div>
 
   </div>
@@ -418,8 +299,8 @@
 </main>
 
 <footer>
-  <span>CAP WxCOP · Development Environment · r815 / data1 / data2</span>
-  <span>All data from US Government sources only · Not for operational use without verification</span>
+  <span>CAP WxCOP · Civil Air Patrol National Headquarters · r815 / data1 / data2</span>
+  <span>All data from US Government sources · Not for operational use without verification</span>
 </footer>
 
 <script>
@@ -440,4 +321,3 @@ setInterval(updateClock, 1000);
 
 </body>
 </html>
-
