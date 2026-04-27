@@ -769,7 +769,7 @@ def main():
                 DELETE FROM observations.airport_wx_impacts
                 WHERE model_source LIKE 'GLMP%'
                   AND model_run < (
-                      SELECT MAX(model_run) - INTERVAL '2 hours'
+                      SELECT MAX(model_run) - INTERVAL '90 minutes'
                       FROM observations.airport_wx_impacts
                       WHERE model_source LIKE 'GLMP%'
                   )
