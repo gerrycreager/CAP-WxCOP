@@ -185,6 +185,16 @@
         body.radar-open #map { bottom: 50px; }
         body.radar-open .controls { max-height: calc(100vh - 124px); }
 
+        #tstmLegend {
+            display: none; position: fixed; bottom: 60px; right: 10px;
+            background: rgba(255,255,255,0.92); border: 1px solid #ccc;
+            border-radius: 4px; padding: 6px 10px; z-index: 900;
+            font-size: 11px; font-family: sans-serif; min-width: 130px;
+        }
+        #tstmLegend.visible { display: block; }
+        #tstmLegend .tl-title { font-weight: 700; font-size: 11px; margin-bottom: 4px; }
+        #tstmLegend .tl-row { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
+        #tstmLegend .tl-swatch { width: 16px; height: 16px; border-radius: 2px; flex-shrink: 0; }
         #glmLegend {
             display: none; position: fixed;
             bottom: 270px; left: 10px;
@@ -444,6 +454,9 @@
         <h3>Radar</h3>
         <label class="checkbox-label">
             <input type="checkbox" id="mrmsLocalToggle"> MRMS_Composite Refl
+        </label>
+        <label class="checkbox-label">
+            <input type="checkbox" id="tstmToggle"> TRW Probability (LAMP)
         </label>
     </div>
 
@@ -851,10 +864,6 @@
                     }
                 });
             }
-
-            // Clear existing markers before redraw to prevent accumulation
-            metatMarkers.forEach(function(m) { if (m._map) map.removeLayer(m); });
-            metatMarkers = [];
 
             // METAR airport labels — respect tier zoom and toggle state
             var showMilitary = document.getElementById('showMilitary').checked;
@@ -1742,6 +1751,65 @@
         <div class="gl-row"><div style="display:inline-block;width:9px;height:13px;background:#00cc00;clip-path:polygon(50% 0%,100% 40%,70% 40%,100% 100%,0% 100%,30% 40%,0% 40%);margin-right:4px;vertical-align:middle;"></div> 15–30 min — Resume if 30-min clear</div>
         <div id="glmLegendStatus" style="font-size:10px;color:#555;margin-top:4px;"></div>
     </div>
+
+
+    <!-- TSTM Probability Legend -->
+    <div id="tstmLegend">
+        <div class="tl-title">&#9928; TRW Probability</div>
+        <div class="tl-row"><div class="tl-swatch" style="background:rgba(255,220,50,0.63);border:1px solid #ccc;"></div>40% chance</div>
+        <div class="tl-row"><div class="tl-swatch" style="background:rgba(255,140,0,0.71);border:1px solid #ccc;"></div>60% chance</div>
+        <div class="tl-row"><div class="tl-swatch" style="background:rgba(220,30,30,0.78);border:1px solid #ccc;"></div>80% chance</div>
+        <div style="margin-top:4px;font-size:10px;color:#666;">Source: NOAA LAMP</div>
+    </div>
+
+    <script>
+    // TSTM Probability Tile Overlay
+    (function() {
+        var TSTM_BASE = '/tstm/tiles';
+        var tstmLayer = null;
+        var tstmFhr   = 1;
+
+        function getMap() { return window._capMap; }
+
+        function fhrStr(h) {
+            return 'F' + (h < 10 ? '0' : '') + h;
+        }
+
+        function loadTstmLayer(fhr) {
+            var map = getMap();
+            if (!map) return;
+            if (tstmLayer) { map.removeLayer(tstmLayer); tstmLayer = null; }
+            var tog = document.getElementById('tstmToggle');
+            if (!tog || !tog.checked) return;
+            var url = TSTM_BASE + '/' + fhrStr(fhr) + '/{z}/{x}/{y}.png';
+            tstmLayer = L.tileLayer(url, {
+                opacity: 0.75,
+                tms: false,
+                minZoom: 3,
+                maxZoom: 8,
+                attribution: 'TRW: NOAA LAMP'
+            });
+            tstmLayer.addTo(map);
+            document.getElementById('tstmLegend').classList.add('visible');
+        }
+
+        function removeTstmLayer() {
+            var map = getMap();
+            if (map && tstmLayer) { map.removeLayer(tstmLayer); tstmLayer = null; }
+            var leg = document.getElementById('tstmLegend');
+            if (leg) leg.classList.remove('visible');
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            var tog = document.getElementById('tstmToggle');
+            if (!tog) return;
+            tog.addEventListener('change', function() {
+                if (this.checked) { loadTstmLayer(tstmFhr); }
+                else { removeTstmLayer(); }
+            });
+        });
+    })();
+    </script>
 
 </body>
 </html>
