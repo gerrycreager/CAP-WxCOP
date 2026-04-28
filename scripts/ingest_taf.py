@@ -289,6 +289,11 @@ def ingest_taf_directory(directory, conn):
     error_count = 0
     
     for filepath in sorted(Path(directory).glob('*.txt')):
+        # Only process files from K (CONUS), P (Pacific), T (Caribbean) stations
+        # Excludes KWBC bulk international bulletins and foreign station files
+        if filepath.name[0] not in ('K', 'P', 'T'):
+            skipped_count += 1
+            continue
         file_count += 1
         
         # Log progress every 100 files
