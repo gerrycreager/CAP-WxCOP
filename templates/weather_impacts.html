@@ -647,17 +647,37 @@ function searchAirport() {
     var raw = document.getElementById('aptInput').value.trim().toUpperCase();
     var msg = document.getElementById('aptMsg');
     if (!raw) return;
-
+    // First check allData (fast path)
     var found = allData.find(function(a) { return a.station_id === raw; });
     if (found) {
         msg.style.color = '#2c5f41';
         msg.textContent = found.name || raw;
-        map.setView([found.lat, found.lon], Math.max(map.getZoom(), 9), { animate: true });
+        map.setView([found.lat, found.lon], Math.max(map.getZoom(), 8), { animate: true });
         loadStationDetail(found.station_id);
-    } else {
-        msg.style.color = '#c00';
-        msg.textContent = raw + ' not in current view — try zooming out';
+        return;
     }
+    // Not in current view — query API directly
+    msg.style.color = '#888';
+    msg.textContent = 'Searching...';
+    fetch(API_BASE + '/station/' + raw + '?op=' + currentOp)
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            if (d.station && d.station.lat && d.station.lon) {
+                msg.style.color = '#2c5f41';
+                msg.textContent = d.station.name || raw;
+                map.setView([d.station.lat, d.station.lon],
+                            Math.max(map.getZoom(), 8), { animate: true });
+                loadStationDetail(raw);
+            } else {
+                msg.style.color = '#c00';
+                msg.textContent = raw + ' not found';
+            }
+        })
+        .catch(function() {
+            msg.style.color = '#c00';
+            msg.textContent = raw + ' not found';
+        });
+}
 }
 
 // ── Hour change ───────────────────────────────────────────────────────────
