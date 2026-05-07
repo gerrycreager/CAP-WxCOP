@@ -62,7 +62,6 @@ logging.basicConfig(
     format='%(asctime)s,%(msecs)03d - %(levelname)s - %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S',
     handlers=[
-        logging.FileHandler(LOG_FILE),
         logging.StreamHandler(sys.stdout)
     ]
 )
@@ -433,7 +432,21 @@ def main():
             continue
 
         tree, flat_lats, flat_lons, shape = build_kdtree_from_file(cig_file)
-        indices = get_airport_grid_indices(tree, airports)
+
+        # Define grid bounds per sector (with 1-degree buffer)
+        SECTOR_BOUNDS = {
+            'co': (19.0, 53.5, -131.0, -60.0),   # CONUS
+            'ak': (51.0, 72.0, -180.0, -129.0),   # Alaska
+        }
+        lat_min, lat_max, lon_min, lon_max = SECTOR_BOUNDS.get(
+            sector_code, (19.0, 53.5, -131.0, -60.0))
+
+        # Filter airports to those within grid bounds
+        valid_airports = [a for a in airports
+                         if lat_min <= a[3] <= lat_max and lon_min <= a[2] <= lon_max]
+        log.info(f"{sector_name}: {len(valid_airports)}/{len(airports)} airports within grid bounds")
+
+        indices = get_airport_grid_indices(tree, valid_airports)
 
         # Read all variables
         def read_var(name, multi=True):
@@ -461,15 +474,15 @@ def main():
 
         # This replaces the "Process each forecast hour" block
         # ── Pre-extract airport arrays from the airports list ─────────────────────────
-        n_apts = len(airports)
-        apt_ids   = np.array([a[0] for a in airports], dtype=np.int64)
-        apt_sids  = [a[1] for a in airports]
-        apt_le_hdg = np.array([a[5] if a[5] is not None else np.nan for a in airports])
-        apt_he_hdg = np.array([a[6] if a[6] is not None else np.nan for a in airports])
+        n_apts = len(valid_airports)
+        apt_ids   = np.array([a[0] for a in valid_airports], dtype=np.int64)
+        apt_sids  = [a[1] for a in valid_airports]
+        apt_le_hdg = np.array([a[5] if a[5] is not None else np.nan for a in valid_airports])
+        apt_he_hdg = np.array([a[6] if a[6] is not None else np.nan for a in valid_airports])
 
         # ICL thresholds — per airport arrays
         def icl_arr(idx, default):
-            return np.array([a[idx] if a[idx] is not None else default for a in airports])
+            return np.array([a[idx] if a[idx] is not None else default for a in valid_airports])
 
         icl_wind_y   = icl_arr(8,  21.0)
         icl_wind_r   = icl_arr(9,  30.0)
