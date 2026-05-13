@@ -160,6 +160,25 @@
         .cell-RED    { color: #c62828; font-weight: 700; }
         .cell-YELLOW { color: #f57f17; font-weight: 600; }
 
+        /* PDF button */
+        .pdf-btn {
+            padding: 4px 10px; background: #c8a000; color: white; border: none;
+            border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 700;
+            letter-spacing: 0.03em; flex-shrink: 0; white-space: nowrap;
+        }
+        .pdf-btn:hover { background: #e0b800; }
+        .pdf-btn:disabled { background: #888; cursor: wait; }
+        #pdfOverlay {
+            display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.45); z-index: 3000;
+            align-items: center; justify-content: center;
+        }
+        #pdfOverlay.active { display: flex; }
+        #pdfOverlay .po-box {
+            background: white; padding: 24px 40px; border-radius: 8px;
+            font-size: 15px; color: #333; box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+
         /* Loading overlay */
         #loading { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
                    background: white; padding: 20px 40px; border-radius: 8px;
@@ -173,7 +192,10 @@
     <a href="/CAP_WxCOP/" class="tb-home" title="Home">&#127968;</a>
     <span class="tb-title">&#9992; CAP Flight Ops Impacts — CAPR 70-1</span>
     <span class="tb-utc" id="tbUtc"></span>
+    <button class="pdf-btn" id="pdfBtn" onclick="generatePDF()" title="Download PDF report">&#128196; PDF</button>
 </div>
+
+<div id="pdfOverlay"><div class="po-box">&#9881; Generating PDF…</div></div>
 
 <div id="main">
 
@@ -240,6 +262,8 @@
     <div id="detailPanel">
         <div id="detailHeader">
             <button id="detailClose" onclick="closeDetail()">&#x2715;</button>
+            <button class="pdf-btn" id="detailPdfBtn" onclick="generatePDF()" title="Download PDF for this station"
+                    style="float:right;margin-right:28px;margin-top:2px;">&#128196; PDF</button>
             <div id="detailStation">—</div>
             <div id="detailName">—</div>
         </div>
@@ -271,6 +295,8 @@
 <div id="loading">Loading weather impacts…</div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script>
 // ── Constants ─────────────────────────────────────────────────────────────
 const API_BASE    = '/CAP_WxCOP/api/weather-impacts';
@@ -755,6 +781,289 @@ document.addEventListener('DOMContentLoaded', function() {
     // Auto-refresh every 5 min
     pollTimer = setInterval(function() { loadData(); }, 5 * 60 * 1000);
 });
+
+// ── PDF Generation ────────────────────────────────────────────────────────
+async function generatePDF() {
+    var overlay = document.getElementById('pdfOverlay');
+    var pdfBtn  = document.getElementById('pdfBtn');
+    var detBtn  = document.getElementById('detailPdfBtn');
+
+    overlay.classList.add('active');
+    pdfBtn.disabled = true;
+    if (detBtn) detBtn.disabled = true;
+
+    try {
+        var { jsPDF } = window.jspdf;
+        // Landscape letter: 279 x 216 mm, 10 mm margins
+        var PW = 279, PH = 216, M = 10;
+        var usableW = PW - 2 * M;
+
+        var doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'letter' });
+
+        // Shared helpers
+        function pad2(n) { return String(n).padStart(2, '0'); }
+        var now   = new Date();
+        var utcTs = now.getUTCFullYear() + '-' + pad2(now.getUTCMonth()+1) + '-' +
+                    pad2(now.getUTCDate()) + ' ' + pad2(now.getUTCHours()) + ':' +
+                    pad2(now.getUTCMinutes()) + 'Z';
+        var opLabel   = currentOp === 'ifr' ? 'IFR Fixed Wing' : 'VFR Fixed Wing';
+        var hourLabel = document.getElementById('hourLabel').textContent ||
+                        ('F+' + pad2(currentHour));
+
+        function drawPageHeader(d, pageNum, stationId) {
+            d.setFontSize(14); d.setFont(undefined,'bold'); d.setTextColor(0,0,0);
+            d.text('CAP Flight Ops Impacts \u2014 CAPR 70-1', M, M+6);
+            d.setFontSize(9); d.setFont(undefined,'normal');
+            var meta = 'Generated: ' + utcTs +
+                       '   Operation: ' + opLabel +
+                       '   Forecast Hour: ' + hourLabel +
+                       (modelRun ? '   Model Run: ' + fmtTime(modelRun) + 'Z' : '');
+            if (stationId) meta += '   Station: ' + stationId;
+            d.text(meta, M, M+11);
+            d.setDrawColor(44,95,65); d.setLineWidth(0.5);
+            d.line(M, M+14, PW-M, M+14);
+            if (pageNum) {
+                d.setFontSize(7); d.setTextColor(150,150,150);
+                d.text('Page ' + pageNum, PW-M, M+6, { align:'right' });
+                d.setTextColor(0,0,0);
+            }
+            return M + 18;
+        }
+
+        function drawPageFooter(d) {
+            d.setFontSize(7); d.setTextColor(150,150,150);
+            d.text('Civil Air Patrol \u2014 WxCOP \u2014 CAPR 70-1 Flight Ops Impacts \u2014 ' + utcTs,
+                   PW/2, PH-4, { align:'center' });
+            d.setTextColor(0,0,0);
+        }
+
+        // ── Page 1: Map ────────────────────────────────────────────────────
+        var yPos = drawPageHeader(doc, selectedStation ? 1 : null, null);
+
+        var mapEl     = document.getElementById('map');
+        var mapCanvas = await html2canvas(mapEl, {
+            useCORS: true, allowTaint: true, logging: false, scale: 1.5
+        });
+        var mapImgData = mapCanvas.toDataURL('image/jpeg', 0.85);
+
+        var mapW = usableW;
+        var mapH = Math.round(mapW * mapEl.offsetHeight / mapEl.offsetWidth);
+        mapH = Math.min(mapH, PH - yPos - M - 8);
+        doc.addImage(mapImgData, 'JPEG', M, yPos, mapW, mapH);
+
+        // Legend strip below map
+        var ly = yPos + mapH + 3;
+        if (ly < PH - M) {
+            var legItems = [
+                { color:[67,160,71],   label:'Go' },
+                { color:[253,216,53],  label:'Caution' },
+                { color:[229,57,53],   label:'No-Go' },
+                { color:[189,189,189], label:'No Data' },
+            ];
+            var lx = M;
+            doc.setFontSize(7);
+            legItems.forEach(function(li) {
+                doc.setFillColor(li.color[0], li.color[1], li.color[2]);
+                doc.circle(lx+2, ly+1.5, 2, 'F');
+                doc.setTextColor(60,60,60);
+                doc.text(li.label, lx+5.5, ly+2.5);
+                lx += 22;
+            });
+            doc.setFontSize(7); doc.setTextColor(150,150,150);
+            doc.text('Source: NOAA GLMP \u00b7 CAPR 70-1 \u00b7 Worst-parameter-wins per airport',
+                     PW-M, ly+2.5, { align:'right' });
+        }
+        drawPageFooter(doc);
+
+        // ── Page 2: Station detail ─────────────────────────────────────────
+        if (selectedStation) {
+            var detResp = await fetch(API_BASE + '/station/' + selectedStation + '?op=' + currentOp);
+            var detData = await detResp.json();
+            var station  = detData.station  || {};
+            var forecast = detData.forecast || [];
+            var curRow   = forecast.find(function(r) { return r.forecast_hour === currentHour; })
+                           || forecast[0];
+
+            doc.addPage();
+            var ry = drawPageHeader(doc, 2, selectedStation);
+
+            // Station name / meta
+            doc.setFontSize(13); doc.setFont(undefined,'bold'); doc.setTextColor(26,58,42);
+            doc.text(selectedStation + (station.name ? ' \u2014 ' + station.name : ''), M, ry+6);
+            doc.setFontSize(8); doc.setFont(undefined,'normal'); doc.setTextColor(80,80,80);
+            var stMeta = [];
+            if (station.is_military) stMeta.push('\u2605 Military');
+            if (station.elevation_ft) stMeta.push(station.elevation_ft + ' ft MSL');
+            if (stMeta.length) doc.text(stMeta.join(' \u00b7 '), M, ry+11);
+            doc.setTextColor(0,0,0);
+            ry += 14;
+
+            // Status banner
+            if (curRow) {
+                var bannerBg = { GREEN:[232,245,233], YELLOW:[255,253,231],
+                                 RED:[255,235,238],   UNKNOWN:[245,245,245] };
+                var bannerTc = { GREEN:[27,94,32],    YELLOW:[180,100,0],
+                                 RED:[183,28,28],     UNKNOWN:[100,100,100] };
+                var bc = bannerBg[curRow.color] || bannerBg.UNKNOWN;
+                var tc = bannerTc[curRow.color] || bannerTc.UNKNOWN;
+                doc.setFillColor(bc[0],bc[1],bc[2]);
+                doc.roundedRect(M, ry, usableW, 9, 1.5, 1.5, 'F');
+                doc.setFontSize(10); doc.setFont(undefined,'bold');
+                doc.setTextColor(tc[0],tc[1],tc[2]);
+                var bannerTxt = COLOR_LABEL[curRow.color] || curRow.color || '\u2014';
+                if (curRow.worst_param) bannerTxt += ' \u2014 ' + (PARAM_LABELS[curRow.worst_param] || curRow.worst_param);
+                if (curRow.valid_time)  bannerTxt += ' \u00b7 Valid ' + fmtTime(curRow.valid_time) + 'Z';
+                doc.text(bannerTxt, M + usableW/2, ry+6.2, { align:'center' });
+                doc.setTextColor(0,0,0);
+                ry += 12;
+            }
+
+            // Parameter grid (4 columns x 2 rows)
+            if (curRow) {
+                var paramDefs = [
+                    { label:'Ceiling',
+                      value: curRow.ceil_display || '\u2014' },
+                    { label:'Visibility',
+                      value: curRow.vis_display  || '\u2014' },
+                    { label:'Wind',
+                      value: (curRow.wind_dir !== null && curRow.wind_speed_kts !== null)
+                             ? curRow.wind_dir + '\u00b0 / ' + curRow.wind_speed_kts.toFixed(0) + ' kt'
+                             : '\u2014' },
+                    { label:'Crosswind',
+                      value: curRow.crosswind_kts !== null
+                             ? curRow.crosswind_kts.toFixed(1) + ' kt' : '\u2014' },
+                    { label:'Temp \u00b0F',
+                      value: curRow.tmp_f !== null ? curRow.tmp_f.toFixed(1) + '\u00b0F' : '\u2014' },
+                    { label:'Heat Index',
+                      value: curRow.heat_index_f !== null ? curRow.heat_index_f.toFixed(1) + '\u00b0F' : '\u2014' },
+                    { label:'Wind Chill',
+                      value: curRow.wind_chill_f !== null ? curRow.wind_chill_f.toFixed(1) + '\u00b0F' : '\u2014' },
+                    { label:'Tstm Prob',
+                      value: (curRow.tstm_prob !== null && curRow.tstm_prob !== undefined)
+                             ? curRow.tstm_prob + '%' : '\u2014' },
+                ];
+                var nCols  = 4;
+                var cellW  = (usableW - (nCols-1)*2) / nCols;
+                var cellH  = 10;
+                var cellGap = 2.5;
+                paramDefs.forEach(function(p, pi) {
+                    var col = pi % nCols;
+                    var row2 = Math.floor(pi / nCols);
+                    var px = M + col * (cellW + 2);
+                    var py = ry + row2 * (cellH + cellGap);
+                    doc.setFillColor(248,248,248);
+                    doc.roundedRect(px, py, cellW, cellH, 1, 1, 'F');
+                    doc.setFontSize(7); doc.setFont(undefined,'normal'); doc.setTextColor(120,120,120);
+                    doc.text(p.label, px + cellW/2, py+3.5, { align:'center' });
+                    doc.setFontSize(9); doc.setFont(undefined,'bold'); doc.setTextColor(40,40,40);
+                    doc.text(p.value, px + cellW/2, py+8.2, { align:'center' });
+                });
+                doc.setTextColor(0,0,0);
+                ry += Math.ceil(paramDefs.length / nCols) * (cellH + cellGap) + 4;
+            }
+
+            // 25-hour forecast table
+            doc.setFontSize(9); doc.setFont(undefined,'bold'); doc.setTextColor(44,95,65);
+            doc.text('25-Hour Forecast', M, ry+4);
+            ry += 7;
+            doc.setTextColor(0,0,0);
+
+            var tCols = [
+                { label:'Hr',         w:12 },
+                { label:'Valid Z',    w:20 },
+                { label:'Status',     w:28 },
+                { label:'Ceiling',    w:24 },
+                { label:'Vis',        w:20 },
+                { label:'Wind',       w:26 },
+                { label:'XWind',      w:20 },
+                { label:'Tmp \u00b0F', w:18 },
+                { label:'Tstm%',      w:16 },
+            ];
+            var tTotalW = tCols.reduce(function(s,c){ return s+c.w; }, 0);
+            var tScale  = usableW / tTotalW;
+            tCols.forEach(function(c){ c.w *= tScale; });
+
+            var rowH = 6;
+            doc.setFillColor(44,95,65);
+            doc.rect(M, ry, usableW, rowH+1, 'F');
+            doc.setFontSize(7.5); doc.setFont(undefined,'bold'); doc.setTextColor(255,255,255);
+            var hx = M;
+            tCols.forEach(function(c) {
+                doc.text(c.label, hx + c.w/2, ry + rowH - 0.5, { align:'center' });
+                hx += c.w;
+            });
+            ry += rowH + 1;
+
+            var statusColors = {
+                GREEN:[67,160,71], YELLOW:[253,216,53],
+                RED:[229,57,53],   UNKNOWN:[189,189,189]
+            };
+            doc.setFont(undefined,'normal'); doc.setFontSize(7.5);
+
+            forecast.forEach(function(fr, idx) {
+                if (ry + rowH > PH - M - 6) return;
+                var isSel = fr.forecast_hour === currentHour;
+                if (isSel) {
+                    doc.setFillColor(232,245,233);
+                    doc.rect(M, ry, usableW, rowH, 'F');
+                } else if (idx % 2 === 0) {
+                    doc.setFillColor(250,250,250);
+                    doc.rect(M, ry, usableW, rowH, 'F');
+                }
+                var windTxt = fr.wind_speed_kts !== null
+                    ? fr.wind_speed_kts.toFixed(0) +
+                      (fr.wind_gust_kts ? 'G'+fr.wind_gust_kts.toFixed(0) : '') + ' kt'
+                    : '\u2014';
+                var cells = [
+                    'F' + pad2(fr.forecast_hour),
+                    fr.valid_time ? fmtTime(fr.valid_time) : '\u2014',
+                    COLOR_LABEL[fr.color] || '\u2014',
+                    fr.ceil_display  || '\u2014',
+                    fr.vis_display   || '\u2014',
+                    windTxt,
+                    fr.crosswind_kts !== null ? fr.crosswind_kts.toFixed(1)+' kt' : '\u2014',
+                    fr.tmp_f !== null ? fr.tmp_f.toFixed(0)+'\u00b0' : '\u2014',
+                    (fr.tstm_prob !== null && fr.tstm_prob !== undefined) ? fr.tstm_prob+'%' : '\u2014',
+                ];
+                var sc  = statusColors[fr.color] || statusColors.UNKNOWN;
+                var cx3 = M;
+                cells.forEach(function(cell, ci) {
+                    var cw = tCols[ci].w;
+                    if (ci === 2) {
+                        doc.setFillColor(sc[0],sc[1],sc[2]);
+                        doc.circle(cx3+2.5, ry+rowH/2, 1.5, 'F');
+                        doc.setTextColor(0,0,0);
+                        doc.text(cell, cx3+5.5, ry+rowH-1);
+                    } else {
+                        doc.setTextColor(0,0,0);
+                        doc.text(cell, cx3+cw/2, ry+rowH-1, { align:'center' });
+                    }
+                    cx3 += cw;
+                });
+                doc.setDrawColor(220,220,220); doc.setLineWidth(0.1);
+                doc.line(M, ry+rowH, M+usableW, ry+rowH);
+                ry += rowH;
+            });
+
+            drawPageFooter(doc);
+        }
+
+        // Save
+        var fname = 'CAP_FlightOpsImpacts_' +
+            (selectedStation ? selectedStation + '_' : '') +
+            utcTs.replace(/[-: ]/g,'').replace('Z','') + 'Z.pdf';
+        doc.save(fname);
+
+    } catch(err) {
+        console.error('PDF generation failed:', err);
+        alert('PDF generation failed: ' + err.message);
+    } finally {
+        overlay.classList.remove('active');
+        pdfBtn.disabled = false;
+        var detBtn2 = document.getElementById('detailPdfBtn');
+        if (detBtn2) detBtn2.disabled = false;
+    }
+}
 
 window.addEventListener('error', function(e) {
     if (e.message && e.message.includes('message channel closed')) return true;
