@@ -1755,7 +1755,13 @@
 
     <!-- TSTM Probability Legend -->
     <div id="tstmLegend">
-        <div class="tl-title">&#9928; TRW Probability</div>
+        <div class="tl-title">&#9928; TRW Probability
+            <span style="float:right;font-weight:normal;line-height:1;">
+                <button id="tstmPrev" style="padding:0 4px;cursor:pointer;font-size:10px;">&#9664;</button>
+                <span id="tstmFhrLabel" style="font-size:10px;font-family:monospace;">F02</span>
+                <button id="tstmNext" style="padding:0 4px;cursor:pointer;font-size:10px;">&#9654;</button>
+            </span>
+        </div>
         <div class="tl-row"><div class="tl-swatch" style="background:rgba(255,220,50,0.63);border:1px solid #ccc;"></div>40% chance</div>
         <div class="tl-row"><div class="tl-swatch" style="background:rgba(255,140,0,0.71);border:1px solid #ccc;"></div>60% chance</div>
         <div class="tl-row"><div class="tl-swatch" style="background:rgba(220,30,30,0.78);border:1px solid #ccc;"></div>80% chance</div>
@@ -1765,14 +1771,20 @@
     <script>
     // TSTM Probability Tile Overlay
     (function() {
-        var TSTM_BASE = '/tstm/tiles';
-        var tstmLayer = null;
-        var tstmFhr   = 1;
+        var TSTM_BASE  = '/tstm/tiles';
+        var EMPTY_TILE = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+        var tstmLayer  = null;
+        var tstmFhr    = 2;   // F01 not produced by LAMP; start at F02
 
         function getMap() { return window._capMap; }
 
         function fhrStr(h) {
             return 'F' + (h < 10 ? '0' : '') + h;
+        }
+
+        function updateLabel() {
+            var lbl = document.getElementById('tstmFhrLabel');
+            if (lbl) lbl.textContent = fhrStr(tstmFhr);
         }
 
         function loadTstmLayer(fhr) {
@@ -1781,12 +1793,15 @@
             if (tstmLayer) { map.removeLayer(tstmLayer); tstmLayer = null; }
             var tog = document.getElementById('tstmToggle');
             if (!tog || !tog.checked) return;
+            tstmFhr = fhr;
+            updateLabel();
             var url = TSTM_BASE + '/' + fhrStr(fhr) + '/{z}/{x}/{y}.png';
             tstmLayer = L.tileLayer(url, {
                 opacity: 0.75,
                 tms: false,
                 minZoom: 3,
                 maxZoom: 8,
+                errorTileUrl: EMPTY_TILE,
                 attribution: 'TRW: NOAA LAMP'
             });
             tstmLayer.addTo(map);
@@ -1801,12 +1816,26 @@
         }
 
         document.addEventListener('DOMContentLoaded', function() {
-            var tog = document.getElementById('tstmToggle');
-            if (!tog) return;
-            tog.addEventListener('change', function() {
-                if (this.checked) { loadTstmLayer(tstmFhr); }
-                else { removeTstmLayer(); }
-            });
+            var tog  = document.getElementById('tstmToggle');
+            var prev = document.getElementById('tstmPrev');
+            var next = document.getElementById('tstmNext');
+
+            if (tog) {
+                tog.addEventListener('change', function() {
+                    if (this.checked) { loadTstmLayer(tstmFhr); }
+                    else { removeTstmLayer(); }
+                });
+            }
+            if (prev) {
+                prev.addEventListener('click', function() {
+                    if (tstmFhr > 2) loadTstmLayer(tstmFhr - 1);
+                });
+            }
+            if (next) {
+                next.addEventListener('click', function() {
+                    if (tstmFhr < 25) loadTstmLayer(tstmFhr + 1);
+                });
+            }
         });
     })();
     </script>
