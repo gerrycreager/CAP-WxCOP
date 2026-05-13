@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CAP WxCOP — Cadet Weather COP</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: Arial, sans-serif; background: #1a1a2e; color: #e0e0e0; height: 100vh; display: flex; flex-direction: column; }
+
+  /* ---- Header ---- */
+  #header {
+    background: #0f3460; padding: 8px 16px;
+    display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 2px solid #e94560; flex-shrink: 0;
+  }
+  #header h1 { font-size: 1.1rem; color: #fff; letter-spacing: 0.05em; }
+  #header .subtitle { font-size: 0.75rem; color: #aac; margin-top: 2px; }
+  #last-updated { font-size: 0.7rem; color: #8af; text-align: right; }
+  #refresh-btn {
+    background: #e94560; border: none; color: #fff; padding: 5px 12px;
+    border-radius: 4px; cursor: pointer; font-size: 0.8rem; margin-left: 12px;
+  }
+  #refresh-btn:hover { background: #c73450; }
+
+  /* ---- Main layout ---- */
+  #main { display: flex; flex: 1; overflow: hidden; }
+
+  /* ---- Controls sidebar ---- */
+  #sidebar {
+    width: 260px; background: #16213e; padding: 12px;
+    overflow-y: auto; flex-shrink: 0; border-right: 1px solid #0f3460;
+  }
+  .sidebar-section { margin-bottom: 16px; }
+  .sidebar-section h3 { font-size: 0.75rem; text-transform: uppercase;
+    color: #8af; letter-spacing: 0.08em; margin-bottom: 8px;
+    border-bottom: 1px solid #0f3460; padding-bottom: 4px; }
+
+  /* Legend */
+  .legend-item { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 0.8rem; }
+  .dot { width: 18px; height: 18px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.3); flex-shrink: 0; }
+  .dot-green  { background: #00b33c; }
+  .dot-yellow { background: #e6b800; }
+  .dot-red    { background: #cc2200; }
+  .dot-gray   { background: #555; }
+
+  /* Site list */
+  .site-item {
+    display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+    border-radius: 4px; cursor: pointer; margin-bottom: 4px; font-size: 0.8rem;
+    background: #1a2a4a; transition: background 0.15s;
+  }
+  .site-item:hover { background: #1e3a5f; }
+  .site-item.active { background: #0f4c8a; border-left: 3px solid #4af; }
+  .site-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+
+  /* ---- Map ---- */
+  #map { flex: 1; }
+
+  /* ---- Detail panel ---- */
+  #detail-panel {
+    width: 320px; background: #16213e; padding: 12px;
+    overflow-y: auto; flex-shrink: 0; border-left: 1px solid #0f3460;
+    display: none;
+  }
+  #detail-panel.visible { display: block; }
+  #detail-close {
+    float: right; background: none; border: none; color: #8af;
+    font-size: 1.1rem; cursor: pointer; line-height: 1;
+  }
+  #detail-name { font-size: 1rem; font-weight: bold; color: #fff; margin-bottom: 2px; }
+  #detail-unit { font-size: 0.75rem; color: #aac; margin-bottom: 10px; }
+  #detail-source {
+    font-size: 0.7rem; padding: 3px 8px; border-radius: 10px;
+    background: #0f3460; color: #8af; display: inline-block; margin-bottom: 12px;
+  }
+
+  .category-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 14px; }
+  .cat-box {
+    border-radius: 6px; padding: 8px; text-align: center;
+    background: #1a2a4a; border: 1px solid #0f3460;
+  }
+  .cat-box .cat-label { font-size: 0.65rem; text-transform: uppercase; color: #aac; margin-bottom: 4px; }
+  .cat-box .cat-color { font-size: 0.8rem; font-weight: bold; }
+  .cat-GREEN  { color: #00dd55; }
+  .cat-YELLOW { color: #ffcc00; }
+  .cat-RED    { color: #ff4422; }
+  .cat-UNKNOWN{ color: #888; }
+
+  .conditions-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+  .conditions-table td { padding: 4px 6px; border-bottom: 1px solid #0f3460; }
+  .conditions-table td:first-child { color: #8af; width: 55%; }
+
+  .wwa-list { margin-top: 8px; }
+  .wwa-item { font-size: 0.75rem; padding: 4px 8px; border-radius: 4px; margin-bottom: 4px; }
+  .wwa-RED    { background: #440000; color: #ff8888; }
+  .wwa-YELLOW { background: #332200; color: #ffcc66; }
+
+  /* Composite banner */
+  #detail-banner {
+    padding: 10px; border-radius: 6px; text-align: center;
+    font-size: 1rem; font-weight: bold; margin-bottom: 12px;
+    letter-spacing: 0.06em;
+  }
+  .banner-GREEN  { background: #004d1a; color: #00ff66; border: 1px solid #00aa44; }
+  .banner-YELLOW { background: #332d00; color: #ffcc00; border: 1px solid #aa8800; }
+  .banner-RED    { background: #440000; color: #ff4422; border: 1px solid #aa2200; }
+  .banner-UNKNOWN{ background: #222; color: #888; border: 1px solid #444; }
+
+  /* Map markers */
+  .wx-marker {
+    border-radius: 50%; border: 2.5px solid rgba(255,255,255,0.6);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: bold; color: #fff; cursor: pointer;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.6);
+    text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+  }
+  .marker-GREEN  { background: #00b33c; }
+  .marker-YELLOW { background: #e6b800; color: #222; text-shadow: none; }
+  .marker-RED    { background: #cc2200; }
+  .marker-UNKNOWN{ background: #555; }
+
+  .loading-overlay {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    background: rgba(15,52,96,0.9); padding: 20px 32px; border-radius: 8px;
+    font-size: 0.9rem; color: #8af; z-index: 9999;
+  }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <div>
+    <h1>☁ CAP WxCOP — Cadet Weather COP</h1>
+    <div class="subtitle">Current Conditions · CAPR 60-2 / DAFMAN 91-203</div>
+  </div>
+  <div style="display:flex;align-items:center;gap:12px;">
+    <div id="last-updated">Loading…</div>
+    <button id="refresh-btn" onclick="loadData()">↻ Refresh</button>
+    <a href="/CAP_WxCOP_DEV/cadet-wx-plan" style="color:#8af;font-size:0.8rem;text-decoration:none;">📅 Planning →</a>
+    <a href="/CAP_WxCOP_DEV/" style="color:#8af;font-size:0.8rem;text-decoration:none;">← Home</a>
+  </div>
+</div>
+
+<div id="main">
+
+  <!-- Sidebar -->
+  <div id="sidebar">
+    <div class="sidebar-section">
+      <h3>Legend</h3>
+      <div class="legend-item"><div class="dot dot-green"></div> GO — No restrictions</div>
+      <div class="legend-item"><div class="dot dot-yellow"></div> CAUTION — Monitor; adjust</div>
+      <div class="legend-item"><div class="dot dot-red"></div> STOP — Suspend / shelter</div>
+      <div class="legend-item"><div class="dot dot-gray"></div> No data</div>
+    </div>
+    <div class="sidebar-section">
+      <h3>Categories</h3>
+      <div style="font-size:0.72rem;color:#aac;line-height:1.7;">
+        Heat · Cold · Lightning · Wind · Precip · NWS Hazards<br>
+        <em>Site = worst single category</em>
+      </div>
+    </div>
+    <div class="sidebar-section">
+      <h3>Sites</h3>
+      <div id="site-list"></div>
+    </div>
+    <div class="sidebar-section">
+      <h3>Data Sources</h3>
+      <div style="font-size:0.72rem;color:#aac;line-height:1.6;">
+        <strong>METAR</strong> — observed, from nearest reporting station<br>
+        <strong>Model F00</strong> — analysis hour (HRRR/GFS)<br>
+        <em>Marker uses more recent of the two</em>
+      </div>
+    </div>
+    <div class="sidebar-section">
+      <h3>⚡ GLM Lightning</h3>
+      <label style="font-size:0.8rem;cursor:pointer;">
+        <input type="checkbox" id="glmToggle" style="margin-right:4px;">
+        Show lightning flashes
+      </label>
+      <select id="glmMinutes" style="width:100%;font-size:0.78rem;margin-top:4px;
+              background:#1a2540;border:1px solid #334;color:#ccd;padding:2px;">
+        <option value="5">Last 5 min</option>
+        <option value="15" selected>Last 15 min</option>
+        <option value="30">Last 30 min</option>
+      </select>
+      <div style="margin-top:5px;font-size:0.72rem;line-height:1.7;">
+        <span style="color:#ff3333;">⚡</span> 0–5 min — Stop if within 5NM<br>
+        <span style="color:#ff8800;">⚡</span> 5–15 min — Caution<br>
+        <span style="color:#00cc44;">⚡</span> 15–30 min — Resume if clear
+      </div>
+      <div id="glmStatus" style="font-size:0.7rem;color:#778;margin-top:3px;"></div>
+    </div>
+  </div>
+
+  <!-- Map -->
+  <div id="map"></div>
+
+  <!-- Detail panel -->
+  <div id="detail-panel">
+    <button id="detail-close" onclick="closeDetail()">✕</button>
+    <div id="detail-name">—</div>
+    <div id="detail-unit">—</div>
+    <div id="detail-source">—</div>
+    <div id="detail-banner" class="banner-UNKNOWN">UNKNOWN</div>
+    <div class="category-grid" id="detail-cats"></div>
+    <h4 style="font-size:0.75rem;color:#8af;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.06em;">Conditions</h4>
+    <table class="conditions-table" id="detail-conditions"></table>
+    <div class="wwa-list" id="detail-wwa"></div>
+  </div>
+
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ---------------------------------------------------------------------------
+// Map init
+// ---------------------------------------------------------------------------
+const map = L.map('map', {
+  center: [38.5, -96.5],
+  zoom: 4,
+  zoomControl: true,
+});
+// Base layers
+const baseLayers = {
+  'Streets': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+    attribution: 'Tiles © Esri — Source: Esri, HERE, DeLorme, USGS, Intermap, NRCAN, METI, TomTom',
+    maxZoom: 19
+  }),
+  'Topo': L.tileLayer('https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}', {
+    attribution: 'Tiles © USGS National Map',
+    maxZoom: 16
+  }),
+  'Dark': L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '© OpenStreetMap contributors © CARTO',
+    maxZoom: 19
+  }),
+};
+baseLayers['Streets'].addTo(map);
+L.control.layers(baseLayers, {}, {position: 'topright'}).addTo(map);
+
+
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+let siteData     = [];
+let markers      = {};
+let selectedSite = null;
+
+// ---------------------------------------------------------------------------
+// Color helpers
+// ---------------------------------------------------------------------------
+const COLOR_LABEL = { GREEN: 'GO', YELLOW: 'CAUTION', RED: 'STOP', UNKNOWN: 'N/A' };
+
+function markerIcon(color, label) {
+  const bg = { GREEN:'#00b33c', YELLOW:'#e6b800', RED:'#cc2200', UNKNOWN:'#555' }[color] || '#555';
+  const fc = color === 'YELLOW' ? '#222' : '#fff';
+  const initials = (label || '').substring(0,3).toUpperCase();
+  return L.divIcon({
+    className: '',
+    html: `<div class="wx-marker marker-${color}" style="width:36px;height:36px;background:${bg};color:${fc};">${initials}</div>`,
+    iconSize: [36, 36],
+    iconAnchor: [18, 18],
+    popupAnchor: [0, -20],
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Data loading
+// ---------------------------------------------------------------------------
+async function loadData() {
+  document.getElementById('last-updated').textContent = 'Loading…';
+  try {
+    const resp = await fetch('/CAP_WxCOP_DEV/api/cadet_wx/current');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    siteData = data.sites || [];
+    renderMap();
+    renderSidebarList();
+    const now = new Date();
+    document.getElementById('last-updated').textContent =
+      `Updated ${now.toLocaleTimeString()} Z`;
+  } catch (err) {
+    document.getElementById('last-updated').textContent = 'Error loading data';
+    console.error('loadData error:', err);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Map rendering
+// ---------------------------------------------------------------------------
+function renderMap() {
+  // Remove old markers
+  Object.values(markers).forEach(m => map.removeLayer(m));
+  markers = {};
+
+  siteData.forEach(site => {
+    if (!site.lat || !site.lon) return;
+    const color  = site.color || 'UNKNOWN';
+    const label  = (site.site_name || '').substring(0,3);
+    const icon   = markerIcon(color, label);
+    const marker = L.marker([site.lat, site.lon], { icon })
+      .on('click', () => showDetail(site));
+    marker.addTo(map);
+    markers[site.site_id] = marker;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Sidebar site list
+// ---------------------------------------------------------------------------
+function renderSidebarList() {
+  const el = document.getElementById('site-list');
+  el.innerHTML = '';
+  siteData.forEach(site => {
+    const color = site.color || 'UNKNOWN';
+    const dotBg = { GREEN:'#00b33c', YELLOW:'#e6b800', RED:'#cc2200', UNKNOWN:'#555' }[color];
+    const div = document.createElement('div');
+    div.className = 'site-item' + (selectedSite === site.site_id ? ' active' : '');
+    div.innerHTML = `
+      <div class="site-dot" style="background:${dotBg};"></div>
+      <div>
+        <div style="font-weight:bold;">${site.site_name}</div>
+        <div style="font-size:0.68rem;color:#8af;">${site.unit || ''} · ${site.cap_region || ''}</div>
+      </div>`;
+    div.addEventListener('click', () => {
+      showDetail(site);
+      if (site.lat && site.lon) map.setView([site.lat, site.lon], 8, {animate:true});
+    });
+    el.appendChild(div);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Detail panel
+// ---------------------------------------------------------------------------
+const CAT_LABELS = {
+  heat_stress:   'Heat Stress',
+  cold_stress:   'Cold Stress',
+  lightning:     'Lightning',
+  surface_wind:  'Surface Wind',
+  precipitation: 'Precip',
+  severe_wx:     'NWS Hazards',
+};
+
+function showDetail(site) {
+  selectedSite = site.site_id;
+  renderSidebarList();
+
+  const panel = document.getElementById('detail-panel');
+  panel.classList.add('visible');
+
+  document.getElementById('detail-name').textContent = site.site_name;
+  document.getElementById('detail-unit').textContent =
+    (site.unit || '') + (site.cap_region ? ' · ' + site.cap_region : '');
+
+  // Source badge
+  const srcMap = { METAR: '📡 METAR (observed)', MODEL_F00: '🔢 Model F00 (analysis)' };
+  const srcTime = site.obs_time ? ' · ' + new Date(site.obs_time).toUTCString().slice(17,22) + 'Z' : '';
+  document.getElementById('detail-source').textContent =
+    (srcMap[site.data_source] || site.data_source || 'Unknown source') + srcTime;
+
+  // Banner
+  const color = site.color || 'UNKNOWN';
+  const banner = document.getElementById('detail-banner');
+  banner.className = `banner-${color}`;
+  banner.textContent = `${COLOR_LABEL[color] || color} — Cadet Activities`;
+
+  // Category grid
+  const cats = site.categories || {};
+  const grid = document.getElementById('detail-cats');
+  grid.innerHTML = '';
+  Object.entries(CAT_LABELS).forEach(([key, label]) => {
+    const c = cats[key] || 'UNKNOWN';
+    grid.innerHTML += `
+      <div class="cat-box">
+        <div class="cat-label">${label}</div>
+        <div class="cat-color cat-${c}">${COLOR_LABEL[c] || c}</div>
+      </div>`;
+  });
+
+  // Conditions table
+  const cond = site.conditions || {};
+  const rows = [
+    ['Temperature',   fmtTemp(cond.tmp_c)],
+    ['Dewpoint',      fmtTemp(cond.dpt_c)],
+    ['Heat Index',    cond.heat_index_c != null ? fmtTemp(cond.heat_index_c) : '—'],
+    ['Wind Chill',    cond.wind_chill_c != null ? fmtTemp(cond.wind_chill_c) : '—'],
+    ['Wind',          fmtWind(cond.wind_speed_kts, cond.wind_gust_kts)],
+    ['Precip Rate',   cond.precip_rate_mmhr != null ? (cond.precip_rate_mmhr / 25.4).toFixed(2) + ' in/hr' : '—'],
+    ['WBGT (Liljgr)', cond.wbgt_c != null ? fmtTemp(cond.wbgt_c) : '—'],
+  ];
+  const tbl = document.getElementById('detail-conditions');
+  tbl.innerHTML = rows.map(([k,v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+
+  // WWA alerts
+  const wwaEl = document.getElementById('detail-wwa');
+  const wwas = site.wwa || [];
+  if (wwas.length) {
+    const sigColor = sig => sig === 'W' ? 'RED' : 'YELLOW';
+    const sigLabel = sig => sig === 'W' ? 'WARNING' : sig === 'A' ? 'WATCH' : 'ADVISORY';
+    wwaEl.innerHTML = '<div style="font-size:0.72rem;color:#8af;margin-bottom:4px;text-transform:uppercase;">Active NWS Alerts</div>' +
+      wwas.map(w => `<div class="wwa-item wwa-${sigColor(w.significance)}">${w.phenom} ${sigLabel(w.significance)}</div>`).join('');
+  } else {
+    wwaEl.innerHTML = '<div style="font-size:0.72rem;color:#4a8;margin-top:8px;">✓ No active NWS alerts</div>';
+  }
+}
+
+function closeDetail() {
+  selectedSite = null;
+  document.getElementById('detail-panel').classList.remove('visible');
+  renderSidebarList();
+}
+
+// ---------------------------------------------------------------------------
+// Formatting helpers
+// ---------------------------------------------------------------------------
+function fmtTemp(c) {
+  if (c == null) return '—';
+  const f = (c * 9/5 + 32).toFixed(0);
+  return `${c.toFixed(1)} °C / ${f} °F`;
+}
+function fmtWind(spd, gust) {
+  if (spd == null) return '—';
+  let s = `${spd.toFixed(0)} kt`;
+  if (gust) s += ` G${gust.toFixed(0)}`;
+  return s;
+}
+
+// ---------------------------------------------------------------------------
+// Auto-refresh every 5 min
+// ---------------------------------------------------------------------------
+loadData();
+setInterval(loadData, 5 * 60 * 1000);
+
+// ── GLM Lightning ────────────────────────────────────────────────────────────
+var glmLayer = null, glmTimer = null;
+var GLM_API = '/CAP_WxCOP_DEV/api/glm/flashes';
+
+function glmColor(a){ return a<5?'#ff3333':a<15?'#ffff00':'#00cc00'; }
+function glmSize(a) { return a<5?14:a<15?11:9; }
+
+function loadGLM() {
+  var minutes = parseInt(document.getElementById('glmMinutes').value)||15;
+  var statusEl = document.getElementById('glmStatus');
+  if(statusEl) statusEl.textContent = 'Loading...';
+  fetch(GLM_API+'?minutes='+minutes)
+    .then(function(r){return r.json();})
+    .then(function(data){
+      if(glmLayer){ map.removeLayer(glmLayer); glmLayer=null; }
+      glmLayer = L.layerGroup();
+      var now=Date.now(), count=0;
+      (data.features||[]).forEach(function(f){
+        if(!f.geometry||!f.geometry.coordinates) return;
+        var age=(now-new Date(f.properties.flash_time).getTime())/60000;
+        if(age<0||age>minutes) return;
+        var sz=glmSize(age);
+        L.marker([f.geometry.coordinates[1],f.geometry.coordinates[0]],{
+          icon:L.divIcon({className:'',
+            html:'<span style="font-size:'+sz+'px;color:'+glmColor(age)+
+                 ';text-shadow:0 0 3px rgba(0,0,0,0.9);line-height:1;display:block;">⚡</span>',
+            iconSize:[sz,sz],iconAnchor:[sz/2,sz/2]}),
+          interactive:false
+        }).addTo(glmLayer);
+        count++;
+      });
+      if(document.getElementById('glmToggle').checked) glmLayer.addTo(map);
+      if(statusEl) statusEl.textContent = count+' flashes · '+
+          new Date().toUTCString().slice(17,25)+'Z';
+    })
+    .catch(function(e){
+      if(statusEl) statusEl.textContent='GLM unavailable';
+    });
+}
+
+document.getElementById('glmToggle').addEventListener('change', function(){
+  if(this.checked){
+    loadGLM();
+    glmTimer = setInterval(loadGLM, 120000);
+  } else {
+    if(glmLayer){ map.removeLayer(glmLayer); glmLayer=null; }
+    if(glmTimer){ clearInterval(glmTimer); glmTimer=null; }
+    document.getElementById('glmStatus').textContent='';
+  }
+});
+document.getElementById('glmMinutes').addEventListener('change', function(){
+  if(document.getElementById('glmToggle').checked) loadGLM();
+});
+</script>
+</body>
+</html>
+

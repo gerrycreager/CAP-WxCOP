@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CAP WxCOP — Cadet Weather Planning</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: Arial, sans-serif; background: #1a1a2e; color: #e0e0e0; height: 100vh; display: flex; flex-direction: column; }
+
+  /* ---- Header ---- */
+  #header {
+    background: #0f3460; padding: 8px 16px;
+    display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 2px solid #c47a00; flex-shrink: 0;
+  }
+  #header h1 { font-size: 1.1rem; color: #fff; letter-spacing: 0.05em; }
+  #header .subtitle { font-size: 0.75rem; color: #aac; margin-top: 2px; }
+  #last-updated { font-size: 0.7rem; color: #8af; text-align: right; }
+  #refresh-btn {
+    background: #c47a00; border: none; color: #fff; padding: 5px 12px;
+    border-radius: 4px; cursor: pointer; font-size: 0.8rem; margin-left: 12px;
+  }
+  #refresh-btn:hover { background: #a06000; }
+
+  /* ---- Main layout ---- */
+  #main { display: flex; flex: 1; overflow: hidden; }
+
+  /* ---- Controls sidebar ---- */
+  #sidebar {
+    width: 280px; background: #16213e; padding: 12px;
+    overflow-y: auto; flex-shrink: 0; border-right: 1px solid #0f3460;
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  .sidebar-section h3 {
+    font-size: 0.75rem; text-transform: uppercase;
+    color: #8af; letter-spacing: 0.08em; margin-bottom: 8px;
+    border-bottom: 1px solid #0f3460; padding-bottom: 4px;
+  }
+
+  /* Hour selector */
+  #hour-selector { display: flex; flex-direction: column; gap: 8px; }
+  #hour-label { font-size: 1rem; font-weight: bold; color: #fff; text-align: center; }
+  #hour-sub   { font-size: 0.72rem; color: #8af; text-align: center; }
+  #hour-slider {
+    -webkit-appearance: none; width: 100%; height: 6px;
+    border-radius: 3px; background: #0f3460; outline: none;
+  }
+  #hour-slider::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 18px; height: 18px;
+    border-radius: 50%; background: #c47a00; cursor: pointer;
+  }
+  .hour-ticks {
+    display: flex; justify-content: space-between;
+    font-size: 0.65rem; color: #668; margin-top: -4px;
+  }
+
+  /* Quick-select buttons */
+  .hour-btns { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+  .hour-btn {
+    font-size: 0.72rem; padding: 3px 8px; border-radius: 3px;
+    background: #1a2a4a; border: 1px solid #0f3460; color: #aac;
+    cursor: pointer; transition: background 0.15s;
+  }
+  .hour-btn:hover { background: #1e3a5f; color: #fff; }
+  .hour-btn.active { background: #c47a00; color: #fff; border-color: #a06000; }
+
+  /* Legend */
+  .legend-item { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 0.8rem; }
+  .dot { width: 16px; height: 16px; border-radius: 50%; flex-shrink: 0; }
+  .dot-green  { background: #00b33c; }
+  .dot-yellow { background: #e6b800; }
+  .dot-red    { background: #cc2200; }
+  .dot-gray   { background: #555; }
+
+  /* Site list */
+  .site-item {
+    display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+    border-radius: 4px; cursor: pointer; margin-bottom: 4px; font-size: 0.8rem;
+    background: #1a2a4a; transition: background 0.15s;
+  }
+  .site-item:hover { background: #1e3a5f; }
+  .site-item.active { background: #0f4c8a; border-left: 3px solid #4af; }
+  .site-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+
+  /* ---- Map ---- */
+  #map { flex: 1; }
+
+  /* ---- Detail panel ---- */
+  #detail-panel {
+    width: 360px; background: #16213e; padding: 12px;
+    overflow-y: auto; flex-shrink: 0; border-left: 1px solid #0f3460;
+    display: none;
+  }
+  #detail-panel.visible { display: block; }
+  #detail-close {
+    float: right; background: none; border: none; color: #8af;
+    font-size: 1.1rem; cursor: pointer; line-height: 1;
+  }
+  #detail-name { font-size: 1rem; font-weight: bold; color: #fff; margin-bottom: 2px; }
+  #detail-sub  { font-size: 0.72rem; color: #aac; margin-bottom: 10px; }
+
+  #detail-banner {
+    padding: 10px; border-radius: 6px; text-align: center;
+    font-size: 1rem; font-weight: bold; margin-bottom: 12px;
+    letter-spacing: 0.06em;
+  }
+  .banner-GREEN  { background: #004d1a; color: #00ff66; border: 1px solid #00aa44; }
+  .banner-YELLOW { background: #332d00; color: #ffcc00; border: 1px solid #aa8800; }
+  .banner-RED    { background: #440000; color: #ff4422; border: 1px solid #aa2200; }
+  .banner-UNKNOWN{ background: #222; color: #888; border: 1px solid #444; }
+
+  .category-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 14px; }
+  .cat-box { border-radius: 6px; padding: 8px; text-align: center; background: #1a2a4a; border: 1px solid #0f3460; }
+  .cat-box .cat-label { font-size: 0.65rem; text-transform: uppercase; color: #aac; margin-bottom: 4px; }
+  .cat-box .cat-color { font-size: 0.8rem; font-weight: bold; }
+  .cat-GREEN  { color: #00dd55; }
+  .cat-YELLOW { color: #ffcc00; }
+  .cat-RED    { color: #ff4422; }
+  .cat-UNKNOWN{ color: #888; }
+
+  /* 24-hour forecast table */
+  #forecast-table-wrap { overflow-x: auto; }
+  .fcst-table {
+    width: 100%; border-collapse: collapse; font-size: 0.72rem;
+    min-width: 300px;
+  }
+  .fcst-table th {
+    background: #0f3460; padding: 5px 6px; text-align: center;
+    font-weight: bold; color: #8af; white-space: nowrap;
+    border-bottom: 1px solid #1a4a7a;
+  }
+  .fcst-table td {
+    padding: 4px 6px; border-bottom: 1px solid #1a2a4a;
+    text-align: center; white-space: nowrap;
+  }
+  .fcst-table tr.selected-hour { background: #1a3a6a; }
+  .fcst-table tr:hover { background: #1e2e4e; cursor: pointer; }
+  .color-chip {
+    display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+    vertical-align: middle; margin-right: 3px;
+  }
+  .chip-GREEN  { background: #00b33c; }
+  .chip-YELLOW { background: #e6b800; }
+  .chip-RED    { background: #cc2200; }
+  .chip-UNKNOWN{ background: #555; }
+
+  /* Per-cell parameter coloring */
+  .cell-YELLOW { color: #e6b800; font-weight: 600; }
+  .cell-RED    { color: #ff4422; font-weight: 700; }
+  .cell-GREEN  { color: inherit; }
+  .cell-UNKNOWN{ color: inherit; }
+  /* DAFI 48-151 Ch.4 flag colors for WBGT column */
+  .wbgt-WHITE  { color: #cce8ff; font-weight: 600; }
+  .wbgt-GREEN  { color: #00cc44; }
+  .wbgt-YELLOW { color: #e6b800; font-weight: 600; }
+  .wbgt-RED    { color: #ff4422; font-weight: 700; }
+  .wbgt-BLACK  { color: #ff2200; font-weight: 700; background: rgba(255,34,0,0.15);
+                 border-radius: 3px; padding: 0 4px; }
+
+  /* Marker */
+  .wx-marker {
+    border-radius: 50%; border: 2.5px solid rgba(255,255,255,0.6);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: bold; color: #fff; cursor: pointer;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.6);
+    text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+  }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <div>
+    <h1>📅 CAP WxCOP — Cadet Weather Planning</h1>
+    <div class="subtitle">Forecast Conditions · F01–F18 · CAPR 60-2 / DAFMAN 91-203</div>
+  </div>
+  <div style="display:flex;align-items:center;gap:12px;">
+    <div id="last-updated">Loading…</div>
+    <button id="refresh-btn" onclick="loadData()">↻ Refresh</button>
+    <a href="/cadet_wx" style="color:#8af;font-size:0.8rem;text-decoration:none;">← COP</a>
+    <a href="/CAP_WxCOP_DEV/" style="color:#8af;font-size:0.8rem;text-decoration:none;">← Home</a>
+  </div>
+</div>
+
+<div id="main">
+
+  <!-- Sidebar -->
+  <div id="sidebar">
+
+    <!-- Hour selector -->
+    <div class="sidebar-section">
+      <h3>Forecast Hour</h3>
+      <div id="hour-selector">
+        <div id="hour-label">—</div>
+        <div id="hour-sub">—</div>
+        <input type="range" id="hour-slider" min="1" max="18" value="6"
+               oninput="onHourChange(this.value)">
+        <div class="hour-ticks">
+          <span>F01</span><span>F06</span><span>F12</span><span>F18</span>
+        </div>
+        <div class="hour-btns" id="hour-btns"></div>
+      </div>
+    </div>
+
+    <!-- Legend -->
+    <div class="sidebar-section">
+      <h3>Legend</h3>
+      <div class="legend-item"><div class="dot dot-green"></div> GO — No restrictions</div>
+      <div class="legend-item"><div class="dot dot-yellow"></div> CAUTION — Monitor; adjust</div>
+      <div class="legend-item"><div class="dot dot-red"></div> STOP — Suspend / shelter</div>
+      <div class="legend-item"><div class="dot dot-gray"></div> No data</div>
+    </div>
+
+    <!-- Site list -->
+    <div class="sidebar-section">
+      <h3>Sites</h3>
+      <div id="site-list"></div>
+    </div>
+
+    <div class="sidebar-section">
+      <div style="font-size:0.7rem;color:#668;line-height:1.5;">
+        HRRR: 3-km resolution · hourly<br>
+        GFS: 0.25° resolution · 3-hr steps<br>
+        WBGT: Liljegren outdoor (USARIEM)
+      </div>
+    </div>
+
+
+    <div class="sidebar-section">
+      <h3>⚡ GLM Lightning</h3>
+      <label style="font-size:0.8rem;cursor:pointer;">
+        <input type="checkbox" id="glmToggle" style="margin-right:4px;">
+        Show lightning flashes
+      </label>
+      <select id="glmMinutes" style="width:100%;font-size:0.78rem;margin-top:4px;
+              background:#1a2540;border:1px solid #334;color:#ccd;padding:2px;">
+        <option value="5">Last 5 min</option>
+        <option value="15" selected>Last 15 min</option>
+        <option value="30">Last 30 min</option>
+      </select>
+      <div style="margin-top:5px;font-size:0.72rem;line-height:1.7;">
+        <span style="color:#ff3333;">⚡</span> 0–5 min — Stop if within 5NM<br>
+        <span style="color:#ff8800;">⚡</span> 5–15 min — Caution<br>
+        <span style="color:#00cc44;">⚡</span> 15–30 min — Resume if clear
+      </div>
+      <div id="glmStatus" style="font-size:0.7rem;color:#778;margin-top:3px;"></div>
+    </div>
+
+  </div>
+
+  <!-- Map -->
+  <div id="map"></div>
+
+  <!-- Detail panel -->
+  <div id="detail-panel">
+    <button id="detail-close" onclick="closeDetail()">✕</button>
+    <div id="detail-name">—</div>
+    <div id="detail-sub">—</div>
+    <div id="detail-banner" class="banner-UNKNOWN">UNKNOWN</div>
+    <div class="category-grid" id="detail-cats"></div>
+    <h4 style="font-size:0.72rem;color:#8af;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;">
+      24-Hour Forecast
+      <span style="font-weight:normal;color:#668;">(click row to jump to hour)</span>
+    </h4>
+    <div id="forecast-table-wrap">
+      <table class="fcst-table" id="fcst-tbl">
+        <thead>
+          <tr>
+            <th>Hr</th>
+            <th>Time (Z)</th>
+            <th>Status</th>
+            <th>Tmp °F</th>
+            <th>Wind</th>
+            <th>Prcp in/h</th>
+            <th>WBGT°F / Flag</th>
+          </tr>
+        </thead>
+        <tbody id="fcst-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ---------------------------------------------------------------------------
+// Map init
+// ---------------------------------------------------------------------------
+const map = L.map('map', { center: [38.5, -96.5], zoom: 4 });
+const baseLayers = {
+  'Streets': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+    attribution: 'Tiles © Esri', maxZoom: 19
+  }),
+  'Topo': L.tileLayer('https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}', {
+    attribution: 'Tiles © USGS National Map', maxZoom: 16
+  }),
+  'Dark': L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '© OpenStreetMap contributors © CARTO', maxZoom: 19
+  }),
+};
+baseLayers['Streets'].addTo(map);
+L.control.layers(baseLayers, {}, {position: 'topright'}).addTo(map);
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+let allData      = [];   // full API response (all hours for all sites)
+let currentHour  = 6;
+let selectedSite = null;
+let markers      = {};
+
+const COLOR_LABEL = { GREEN:'GO', YELLOW:'CAUTION', RED:'STOP', UNKNOWN:'N/A' };
+const COLOR_HEX   = { GREEN:'#00b33c', YELLOW:'#e6b800', RED:'#cc2200', UNKNOWN:'#555' };
+const CAT_LABELS  = {
+  heat_stress:'Heat Stress', cold_stress:'Cold Stress', lightning:'Lightning',
+  surface_wind:'Surface Wind', precipitation:'Precip', severe_wx:'NWS Hazards',
+};
+
+// ---------------------------------------------------------------------------
+// Quick-select buttons — relabeled with valid times once data loads
+// ---------------------------------------------------------------------------
+const QUICK_HOURS = [1, 3, 6, 9, 12, 15, 18];
+(function buildQuickBtns() {
+  const el = document.getElementById('hour-btns');
+  QUICK_HOURS.forEach(h => {
+    const btn = document.createElement('button');
+    btn.className = 'hour-btn' + (h === currentHour ? ' active' : '');
+    btn.textContent = `F${String(h).padStart(2,'0')}`;
+    btn.dataset.hour = h;
+    btn.addEventListener('click', () => onHourChange(h));
+    el.appendChild(btn);
+  });
+})();
+
+function updateQuickBtnLabels() {
+  if (!allData.length) return;
+  const ref = allData.find(s => s.forecast_table && s.forecast_table.length);
+  if (!ref) return;
+  document.querySelectorAll('.hour-btn').forEach(btn => {
+    const h = parseInt(btn.dataset.hour);
+    const row = ref.forecast_table.find(r => r.forecast_hour === h);
+    if (row && row.valid_time)
+      btn.textContent = new Date(row.valid_time).toUTCString().slice(17,22) + 'Z';
+  });
+}
+
+function updateQuickBtns(h) {
+  document.querySelectorAll('.hour-btn').forEach(btn => {
+    btn.classList.toggle('active', parseInt(btn.dataset.hour) === h);
+  });
+}
+
+function updateHourLabel(h) {
+  const ref = allData.find(s => s.forecast_table && s.forecast_table.length);
+  const row = ref && ref.forecast_table.find(r => r.forecast_hour === h);
+  if (row && row.valid_time) {
+    const vt = new Date(row.valid_time);
+    document.getElementById('hour-label').textContent = vt.toUTCString().slice(17,22) + 'Z';
+    document.getElementById('hour-sub').textContent =
+      vt.toUTCString().slice(0,3) + ' ' + vt.toUTCString().slice(5,11) +
+      ' UTC · F+' + String(h).padStart(2,'0');
+  } else {
+    const future = new Date(Date.now() + h * 3600000);
+    document.getElementById('hour-label').textContent = future.toUTCString().slice(17,22) + 'Z';
+    document.getElementById('hour-sub').textContent =
+      future.toUTCString().slice(0,3) + ' ' + future.toUTCString().slice(5,11) +
+      ' UTC · F+' + String(h).padStart(2,'0');
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Hour change handler
+// ---------------------------------------------------------------------------
+function onHourChange(h) {
+  h = parseInt(h);
+  currentHour = h;
+  document.getElementById('hour-slider').value = h;
+  updateQuickBtns(h);
+  updateHourLabel(h);
+  renderMap();
+  renderSidebarList();
+  if (selectedSite !== null) {
+    const site = allData.find(s => s.site_id === selectedSite);
+    if (site) showDetail(site);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Data loading
+// ---------------------------------------------------------------------------
+async function loadData() {
+  document.getElementById('last-updated').textContent = 'Loading…';
+  try {
+    const resp = await fetch(`/CAP_WxCOP_DEV/api/cadet_wx/forecast?hour=${currentHour}`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    allData = data.sites || [];
+    renderMap();
+    renderSidebarList();
+    updateQuickBtnLabels();
+    updateHourLabel(currentHour);
+    document.getElementById('last-updated').textContent =
+      `Updated ${new Date().toUTCString().slice(17,22)}Z · Model run`;
+    if (selectedSite !== null) {
+      const site = allData.find(s => s.site_id === selectedSite);
+      if (site) showDetail(site);
+    }
+  } catch (err) {
+    document.getElementById('last-updated').textContent = 'Error loading data';
+    console.error(err);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Map rendering
+// ---------------------------------------------------------------------------
+function siteColorAtHour(site) {
+  if (!site.forecast_table || !site.forecast_table.length) return site.color || 'UNKNOWN';
+  const row = site.forecast_table.find(r => r.forecast_hour === currentHour);
+  return row ? row.color : site.color || 'UNKNOWN';
+}
+
+function renderMap() {
+  Object.values(markers).forEach(m => map.removeLayer(m));
+  markers = {};
+  allData.forEach(site => {
+    if (!site.lat || !site.lon) return;
+    const color  = siteColorAtHour(site);
+    const label  = (site.site_name || '').substring(0,3);
+    const fc     = color === 'YELLOW' ? '#222' : '#fff';
+    const icon   = L.divIcon({
+      className: '',
+      html: `<div class="wx-marker" style="width:36px;height:36px;background:${COLOR_HEX[color]||'#555'};color:${fc};">${label}</div>`,
+      iconSize: [36,36], iconAnchor: [18,18], popupAnchor: [0,-20],
+    });
+    const marker = L.marker([site.lat, site.lon], { icon })
+      .on('click', () => showDetail(site));
+    marker.addTo(map);
+    markers[site.site_id] = marker;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Sidebar list
+// ---------------------------------------------------------------------------
+function renderSidebarList() {
+  const el = document.getElementById('site-list');
+  el.innerHTML = '';
+  allData.forEach(site => {
+    const color = siteColorAtHour(site);
+    const div = document.createElement('div');
+    div.className = 'site-item' + (selectedSite === site.site_id ? ' active' : '');
+    div.innerHTML = `
+      <div class="site-dot" style="background:${COLOR_HEX[color]||'#555'};"></div>
+      <div>
+        <div style="font-weight:bold;">${site.site_name}</div>
+        <div style="font-size:0.68rem;color:#8af;">${site.unit||''} · ${site.cap_region||''}</div>
+      </div>`;
+    div.addEventListener('click', () => {
+      showDetail(site);
+      if (site.lat && site.lon) map.setView([site.lat, site.lon], 8, {animate:true});
+    });
+    el.appendChild(div);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Detail panel
+// ---------------------------------------------------------------------------
+function showDetail(site) {
+  selectedSite = site.site_id;
+  renderSidebarList();
+
+  document.getElementById('detail-panel').classList.add('visible');
+  document.getElementById('detail-name').textContent = site.site_name;
+  const tbl   = site.forecast_table || [];
+  const row   = tbl.find(r => r.forecast_hour === currentHour) || {};
+  const color = row.color || site.color || 'UNKNOWN';
+  const vtLabel = row.valid_time
+    ? new Date(row.valid_time).toUTCString().slice(17,22) + 'Z'
+    : `F+${String(currentHour).padStart(2,'0')}`;
+  document.getElementById('detail-sub').textContent =
+    (site.unit || '') + (site.cap_region ? ' · ' + site.cap_region : '') +
+    ` · Valid ${vtLabel}`;
+
+  // Banner
+  const banner = document.getElementById('detail-banner');
+  banner.className = `banner-${color}`;
+  banner.textContent = `${COLOR_LABEL[color]||color} · Valid ${vtLabel}`;
+
+  // Category grid
+  const cats = row.categories || site.categories || {};
+  const grid = document.getElementById('detail-cats');
+  grid.innerHTML = '';
+  Object.entries(CAT_LABELS).forEach(([key, label]) => {
+    const c = cats[key] || 'UNKNOWN';
+    grid.innerHTML += `
+      <div class="cat-box">
+        <div class="cat-label">${label}</div>
+        <div class="cat-color cat-${c}">${COLOR_LABEL[c]||c}</div>
+      </div>`;
+  });
+
+  // Forecast table
+  const tbody = document.getElementById('fcst-tbody');
+  tbody.innerHTML = '';
+  tbl.forEach(r => {
+    const isSelected = r.forecast_hour === currentHour;
+    const cats   = r.categories || {};
+    const t      = r.valid_time ? new Date(r.valid_time).toUTCString().slice(17,22) : '—';
+    const tmpF   = r.tmp_c != null ? ((r.tmp_c*9/5+32).toFixed(0)+'°') : '—';
+    const wind   = r.wind_speed_kts != null
+      ? `${r.wind_speed_kts.toFixed(0)}${r.wind_gust_kts ? 'G'+r.wind_gust_kts.toFixed(0) : ''}kt`
+      : '—';
+    const pcpIn  = r.precip_rate_mmhr != null ? (r.precip_rate_mmhr/25.4).toFixed(2) : '—';
+    const wbgtFlag = r.wbgt_flag || 'UNKNOWN';
+    const wbgtF  = r.wbgt_c != null
+      ? `${(r.wbgt_c*9/5+32).toFixed(0)}° <span style="font-size:0.75em;opacity:0.85">${wbgtFlag}</span>`
+      : '—';
+    // Worst of two categories (RED > YELLOW > GREEN > UNKNOWN)
+    function worstOf(...keys) {
+      const order = ['RED','YELLOW','GREEN','UNKNOWN'];
+      let best = 'UNKNOWN';
+      for (const k of keys) {
+        const c = cats[k] || 'UNKNOWN';
+        if (order.indexOf(c) < order.indexOf(best)) best = c;
+      }
+      return best;
+    }
+    const tmpCat  = worstOf('heat_stress', 'cold_stress');
+    const windCat = cats.surface_wind  || 'UNKNOWN';
+    const pcpCat  = cats.precipitation || 'UNKNOWN';
+    const wbgtCat = cats.heat_stress   || 'UNKNOWN';  // for stoplight compat
+    const tr = document.createElement('tr');
+    if (isSelected) tr.className = 'selected-hour';
+    tr.innerHTML = `
+      <td>${t}Z</td>
+      <td style="font-size:0.8em;color:#6a8ab0">F${String(r.forecast_hour).padStart(2,'0')}</td>
+      <td><span class="color-chip chip-${r.color}"></span>${COLOR_LABEL[r.color]||r.color}</td>
+      <td class="cell-${tmpCat}">${tmpF}</td>
+      <td class="cell-${windCat}">${wind}</td>
+      <td class="cell-${pcpCat}">${pcpIn}</td>
+      <td class="wbgt-${wbgtFlag}">${wbgtF}</td>`;
+    tr.addEventListener('click', () => onHourChange(r.forecast_hour));
+    tbody.appendChild(tr);
+  });
+
+  // Scroll selected row into view
+  const selRow = tbody.querySelector('tr.selected-hour');
+  if (selRow) selRow.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+function closeDetail() {
+  selectedSite = null;
+  document.getElementById('detail-panel').classList.remove('visible');
+  renderSidebarList();
+}
+
+// ---------------------------------------------------------------------------
+// Init
+// ---------------------------------------------------------------------------
+updateHourLabel(currentHour);
+loadData();
+setInterval(loadData, 10 * 60 * 1000);  // refresh every 10 min
+
+// ── GLM Lightning ────────────────────────────────────────────────────────────
+var glmLayer = null, glmTimer = null;
+var GLM_API = '/CAP_WxCOP_DEV/api/glm/flashes';
+
+function glmColor(a){ return a<5?'#ff3333':a<15?'#ffff00':'#00cc00'; }
+function glmSize(a) { return a<5?14:a<15?11:9; }
+
+function loadGLM() {
+  var minutes = parseInt(document.getElementById('glmMinutes').value)||15;
+  var statusEl = document.getElementById('glmStatus');
+  if(statusEl) statusEl.textContent = 'Loading...';
+  fetch(GLM_API+'?minutes='+minutes)
+    .then(function(r){return r.json();})
+    .then(function(data){
+      if(glmLayer){ map.removeLayer(glmLayer); glmLayer=null; }
+      glmLayer = L.layerGroup();
+      var now=Date.now(), count=0;
+      (data.features||[]).forEach(function(f){
+        if(!f.geometry||!f.geometry.coordinates) return;
+        var age=(now-new Date(f.properties.flash_time).getTime())/60000;
+        if(age<0||age>minutes) return;
+        var sz=glmSize(age);
+        L.marker([f.geometry.coordinates[1],f.geometry.coordinates[0]],{
+          icon:L.divIcon({className:'',
+            html:'<span style="font-size:'+sz+'px;color:'+glmColor(age)+
+                 ';text-shadow:0 0 3px rgba(0,0,0,0.9);line-height:1;display:block;">⚡</span>',
+            iconSize:[sz,sz],iconAnchor:[sz/2,sz/2]}),
+          interactive:false
+        }).addTo(glmLayer);
+        count++;
+      });
+      if(document.getElementById('glmToggle').checked) glmLayer.addTo(map);
+      if(statusEl) statusEl.textContent = count+' flashes · '+
+          new Date().toUTCString().slice(17,25)+'Z';
+    })
+    .catch(function(e){
+      if(statusEl) statusEl.textContent='GLM unavailable';
+    });
+}
+
+document.getElementById('glmToggle').addEventListener('change', function(){
+  if(this.checked){
+    loadGLM();
+    glmTimer = setInterval(loadGLM, 120000);
+  } else {
+    if(glmLayer){ map.removeLayer(glmLayer); glmLayer=null; }
+    if(glmTimer){ clearInterval(glmTimer); glmTimer=null; }
+    document.getElementById('glmStatus').textContent='';
+  }
+});
+document.getElementById('glmMinutes').addEventListener('change', function(){
+  if(document.getElementById('glmToggle').checked) loadGLM();
+});
+</script>
+</body>
+</html>

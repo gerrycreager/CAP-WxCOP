@@ -207,6 +207,31 @@ def enhanced_weather_map_html_legacy():
 def weather_impacts():
     return render_template('weather_impacts.html')
 
+@app.route('/wbgt')
+def wbgt_calculator():
+    return render_template('wbgt_calculator.html')
+
+@app.route('/cadet-wx')
+def cadet_wx_map():
+    try:
+        return render_template('cadet_wx_map.html')
+    except:
+        return "<h1>Cadet WX</h1><p>Template not found</p><p><a href='/CAP_WxCOP/'>← Back to Home</a></p>"
+
+@app.route('/cadet-wx-plan')
+def cadet_wx_plan():
+    try:
+        return render_template('cadet_wx_plan.html')
+    except:
+        return "<h1>Cadet WX Planning</h1><p>Template not found</p><p><a href='/CAP_WxCOP/'>← Back to Home</a></p>"
+
+@app.route('/cadet-sites/manage')
+def cadet_site_mgmt():
+    try:
+        return render_template('cadet_site_mgmt.html')
+    except:
+        return "<h1>Cadet Site Management</h1><p>Template not found</p><p><a href='/CAP_WxCOP/'>← Back to Home</a></p>"
+
 @app.route('/weather_map.html')
 def weather_map_legacy():
     return render_template('weather_map.html')

@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CAP WxCOP — Manage Cadet Sites</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; background: #f0f2f5; color: #222; min-height: 100vh; }
+
+    .topbar {
+      background: #0a1628; color: #e0e0e0;
+      padding: 10px 20px; display: flex; align-items: center; gap: 16px;
+      border-bottom: 2px solid #0f3460;
+    }
+    .topbar .logo { font-size: 1.1rem; font-weight: 700; color: #4fc3f7; letter-spacing: 0.05em; }
+    .topbar .sep  { color: #444; }
+    .topbar .title { font-size: 1rem; color: #ccc; }
+    .topbar nav { margin-left: auto; display: flex; gap: 12px; }
+    .topbar nav a { color: #8af; font-size: 0.85rem; text-decoration: none; }
+    .topbar nav a:hover { color: #fff; }
+
+    .container { max-width: 1100px; margin: 28px auto; padding: 0 20px; }
+
+    h2 { font-size: 1.2rem; color: #0a1628; margin-bottom: 16px;
+         padding-bottom: 8px; border-bottom: 2px solid #0f3460; }
+
+    .alert { padding: 10px 16px; border-radius: 4px; margin-bottom: 16px;
+             font-size: 0.9rem; display: none; }
+    .alert.success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+    .alert.error   { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+    .alert.show    { display: block; }
+
+    .card { background: #fff; border-radius: 6px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.1); padding: 20px; margin-bottom: 28px; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+    th { background: #0a1628; color: #e0e0e0; padding: 10px 12px; text-align: left;
+         font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; }
+    td { padding: 10px 12px; border-bottom: 1px solid #eee; vertical-align: middle; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #f8f9fa; }
+
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 10px;
+             font-size: 0.75rem; font-weight: 600; }
+    .badge-glr { background: #cce5ff; color: #004085; }
+    .badge-mar { background: #d4edda; color: #155724; }
+    .badge-ser { background: #fff3cd; color: #856404; }
+    .badge-rmr { background: #e8f4e8; color: #1a5c1a; }
+    .badge-ncr { background: #e2d9f3; color: #432874; }
+    .badge-ner { background: #d1ecf1; color: #0c5460; }
+    .badge-pcr { background: #f8d7da; color: #721c24; }
+    .badge-swr { background: #fdf0d5; color: #7a4f00; }
+    .badge-nwr { background: #dbeafe; color: #1e3a8a; }
+    .badge-msr { background: #fde8d8; color: #7c3d00; }
+    .badge-mer { background: #f3e8ff; color: #5b21b6; }
+
+    .btn { padding: 5px 12px; border: none; border-radius: 4px; font-size: 0.8rem;
+           cursor: pointer; font-weight: 600; transition: opacity 0.15s; }
+    .btn:hover { opacity: 0.85; }
+    .btn-edit   { background: #0f3460; color: #fff; }
+    .btn-delete { background: #cc2200; color: #fff; }
+    .btn-save   { background: #00823c; color: #fff; padding: 8px 18px; font-size: 0.9rem; }
+    .btn-cancel { background: #888; color: #fff; padding: 8px 18px; font-size: 0.9rem; }
+    .actions { display: flex; gap: 6px; }
+
+    .form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+                 gap: 14px; margin-bottom: 16px; }
+    .form-group { display: flex; flex-direction: column; gap: 4px; }
+    label { font-size: 0.78rem; font-weight: 600; color: #444;
+            text-transform: uppercase; letter-spacing: 0.04em; }
+    input, select { padding: 7px 10px; border: 1px solid #ccc; border-radius: 4px;
+                    font-size: 0.88rem; color: #222; background: #fff; }
+    input:focus, select:focus { outline: none; border-color: #0f3460;
+                                box-shadow: 0 0 0 2px rgba(15,52,96,0.15); }
+    .hint { font-size: 0.72rem; color: #888; margin-top: 2px; }
+    .form-actions { display: flex; gap: 10px; margin-top: 4px; }
+    .loading { text-align: center; color: #888; padding: 20px; font-style: italic; }
+    .empty   { text-align: center; color: #aaa; padding: 30px; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+
+<div class="topbar">
+  <span class="logo">CAP WxCOP</span>
+  <span class="sep">›</span>
+  <span class="title">Manage Cadet Sites</span>
+  <nav>
+    <a href="/CAP_WxCOP_DEV/cadet-wx">← Cadet COP</a>
+    <a href="/CAP_WxCOP_DEV/">← Home</a>
+  </nav>
+</div>
+
+<div class="container">
+
+  <div id="alert" class="alert"></div>
+
+  <div class="card">
+    <h2>Active Cadet Sites</h2>
+    <div id="sites-table-wrap"><div class="loading">Loading sites…</div></div>
+  </div>
+
+  <div class="card">
+    <h2 id="form-title">Add New Site</h2>
+    <input type="hidden" id="edit-id" value="">
+    <div class="form-grid">
+      <div class="form-group">
+        <label>Site Name *</label>
+        <input type="text" id="f-name" placeholder="e.g. NESA / Camp Atterbury">
+      </div>
+      <div class="form-group">
+        <label>Short Name</label>
+        <input type="text" id="f-short-name" placeholder="e.g. NESA">
+      </div>
+      <div class="form-group">
+        <label>CAP Region *</label>
+        <select id="f-region">
+          <option value="">— select —</option>
+          <option>GLR</option><option>MAR</option><option>MER</option>
+          <option>MSR</option><option>NCR</option><option>NER</option>
+          <option>PCR</option><option>RMR</option><option>SER</option>
+          <option>SWR</option><option>NWR</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Nearest ICAO Station</label>
+        <input type="text" id="f-icao" placeholder="e.g. KHBE" maxlength="4"
+               style="text-transform:uppercase">
+        <span class="hint">Leave blank if no nearby reporting station</span>
+      </div>
+      <div class="form-group">
+        <label>Latitude *</label>
+        <input type="number" id="f-lat" placeholder="39.1234" step="0.0001" min="-90" max="90">
+        <span class="hint">Decimal degrees (S = negative)</span>
+      </div>
+      <div class="form-group">
+        <label>Longitude *</label>
+        <input type="number" id="f-lon" placeholder="-86.4567" step="0.0001" min="-180" max="180">
+        <span class="hint">Decimal degrees (W = negative)</span>
+      </div>
+      <div class="form-group">
+        <label>Elevation (ft MSL)</label>
+        <input type="number" id="f-elev" placeholder="800" min="0" max="20000">
+      </div>
+      <div class="form-group">
+        <label>Activity Type</label>
+        <select id="f-activity">
+          <option value="">— select —</option>
+          <option value="encampment">Encampment</option>
+          <option value="flight_academy">Flight Academy</option>
+          <option value="ranger">Ranger School</option>
+          <option value="sls">SLS</option>
+          <option value="cls">CLS</option>
+          <option value="nsa">NCSA</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-save" onclick="submitForm()">💾 Save Site</button>
+      <button class="btn btn-cancel" id="cancel-btn" onclick="cancelEdit()" style="display:none">✕ Cancel</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const BASE = '/CAP_WxCOP_DEV';
+
+function showAlert(msg, type='success') {
+  const el = document.getElementById('alert');
+  el.textContent = msg;
+  el.className = `alert ${type} show`;
+  setTimeout(() => { el.className = 'alert'; }, 4000);
+}
+
+function regionBadge(r) {
+  return `<span class="badge badge-${(r||'').toLowerCase()}">${r||'—'}</span>`;
+}
+
+async function loadSites() {
+  const wrap = document.getElementById('sites-table-wrap');
+  try {
+    const resp = await fetch(`${BASE}/api/cadet_wx/sites`);
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    const sites = data.sites || [];
+    if (!sites.length) {
+      wrap.innerHTML = '<div class="empty">No sites configured yet. Add one below.</div>';
+      return;
+    }
+    const rows = sites.map(s => `
+      <tr>
+        <td><strong>${s.name}</strong>${s.short_name ? '<br><small style="color:#888">'+s.short_name+'</small>' : ''}</td>
+        <td>${regionBadge(s.cap_region)}</td>
+        <td>${s.nearest_icao || '—'}</td>
+        <td>${s.lat != null ? Number(s.lat).toFixed(4) : '—'}</td>
+        <td>${s.lon != null ? Number(s.lon).toFixed(4) : '—'}</td>
+        <td>${s.elevation_ft != null ? s.elevation_ft + ' ft' : '—'}</td>
+        <td>${s.activity_type || '—'}</td>
+        <td>
+          <div class="actions">
+            <button class="btn btn-edit" onclick="editSite(${s.site_id})">✎ Edit</button>
+            <button class="btn btn-delete" onclick="deleteSite(${s.site_id}, '${s.name.replace(/'/g,"\\'")}')">✕ Delete</button>
+          </div>
+        </td>
+      </tr>`).join('');
+    wrap.innerHTML = `
+      <table>
+        <thead><tr>
+          <th>Site Name</th><th>Region</th><th>ICAO</th>
+          <th>Lat</th><th>Lon</th><th>Elevation</th><th>Activity</th><th>Actions</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  } catch(e) {
+    wrap.innerHTML = `<div class="empty" style="color:#c00">Error loading sites: ${e.message}</div>`;
+  }
+}
+
+async function editSite(id) {
+  try {
+    const resp = await fetch(`${BASE}/api/cadet_wx/sites`);
+    const data = await resp.json();
+    const s = (data.sites || []).find(x => x.site_id === id);
+    if (!s) return;
+    document.getElementById('edit-id').value       = id;
+    document.getElementById('f-name').value        = s.name || '';
+    document.getElementById('f-short-name').value  = s.short_name || '';
+    document.getElementById('f-region').value      = s.cap_region || '';
+    document.getElementById('f-icao').value        = s.nearest_icao || '';
+    document.getElementById('f-lat').value         = s.lat != null ? s.lat : '';
+    document.getElementById('f-lon').value         = s.lon != null ? s.lon : '';
+    document.getElementById('f-elev').value        = s.elevation_ft != null ? s.elevation_ft : '';
+    document.getElementById('f-activity').value    = s.activity_type || '';
+    document.getElementById('form-title').textContent = `Edit Site: ${s.name}`;
+    document.getElementById('cancel-btn').style.display = 'inline-block';
+    document.querySelector('.card:last-child').scrollIntoView({behavior:'smooth'});
+  } catch(e) {
+    showAlert('Error loading site: ' + e.message, 'error');
+  }
+}
+
+function cancelEdit() {
+  ['edit-id','f-name','f-short-name','f-icao','f-lat','f-lon','f-elev'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
+  document.getElementById('f-region').value   = '';
+  document.getElementById('f-activity').value = '';
+  document.getElementById('form-title').textContent = 'Add New Site';
+  document.getElementById('cancel-btn').style.display = 'none';
+}
+
+async function submitForm() {
+  const id     = document.getElementById('edit-id').value;
+  const name   = document.getElementById('f-name').value.trim();
+  const region = document.getElementById('f-region').value;
+  const lat    = parseFloat(document.getElementById('f-lat').value);
+  const lon    = parseFloat(document.getElementById('f-lon').value);
+
+  if (!name)              { showAlert('Site name is required.', 'error'); return; }
+  if (!region)            { showAlert('CAP Region is required.', 'error'); return; }
+  if (isNaN(lat)||isNaN(lon)) { showAlert('Valid latitude and longitude are required.', 'error'); return; }
+
+  const payload = {
+    name,
+    short_name:    document.getElementById('f-short-name').value.trim() || null,
+    cap_region:    region,
+    nearest_icao:  document.getElementById('f-icao').value.trim().toUpperCase() || null,
+    lat, lon,
+    elevation_ft:  parseInt(document.getElementById('f-elev').value) || null,
+    activity_type: document.getElementById('f-activity').value || null,
+  };
+
+  try {
+    const url    = id ? `${BASE}/api/cadet_wx/sites/${id}` : `${BASE}/api/cadet_wx/sites`;
+    const method = id ? 'PUT' : 'POST';
+    const resp   = await fetch(url, {
+      method,
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error || 'HTTP ' + resp.status);
+    }
+    showAlert(id ? 'Site updated.' : 'Site added successfully.', 'success');
+    cancelEdit();
+    loadSites();
+  } catch(e) {
+    showAlert('Error saving site: ' + e.message, 'error');
+  }
+}
+
+async function deleteSite(id, name) {
+  if (!confirm(`Delete site "${name}"?\n\nThis will also remove all forecast data for this site.`)) return;
+  try {
+    const resp = await fetch(`${BASE}/api/cadet_wx/sites/${id}`, {method:'DELETE'});
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    showAlert(`Site "${name}" deleted.`, 'success');
+    loadSites();
+  } catch(e) {
+    showAlert('Error deleting site: ' + e.message, 'error');
+  }
+}
+
+loadSites();
+</script>
+</body>
+</html>
+
