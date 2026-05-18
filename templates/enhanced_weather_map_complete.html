@@ -186,12 +186,18 @@
         body.radar-open .controls { max-height: calc(100vh - 124px); }
 
         #tstmLegend {
-            display: none; position: fixed; bottom: 60px; right: 10px;
+            display: none; position: fixed; bottom: 215px; left: 10px;
             background: rgba(255,255,255,0.92); border: 1px solid #ccc;
-            border-radius: 4px; padding: 6px 10px; z-index: 900;
+            border-radius: 4px; padding: 6px 10px; z-index: 1001;
             font-size: 11px; font-family: sans-serif; min-width: 130px;
         }
         #tstmLegend.visible { display: block; }
+        /* When MRMS colorbar is also showing, push TSTM legend above it.
+           mrmsColorbar is ~85px tall at bottom:215px, so TSTM goes to ~310px */
+        #mrmsColorbar.visible ~ #tstmLegend,
+        body.mrms-colorbar-open #tstmLegend { bottom: 310px; }
+        body.radar-open #tstmLegend { bottom: 270px; }
+        body.radar-open.mrms-colorbar-open #tstmLegend { bottom: 330px; }
         #tstmLegend .tl-title { font-weight: 700; font-size: 11px; margin-bottom: 4px; }
         #tstmLegend .tl-row { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
         #tstmLegend .tl-swatch { width: 16px; height: 16px; border-radius: 2px; flex-shrink: 0; }
@@ -203,8 +209,13 @@
             padding: 6px 10px; z-index: 1050;
             font-size: 11px; color: #111;
             box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            transition: bottom 0.15s;
         }
         #glmLegend.visible { display: block; }
+        /* Push GLM up when TSTM legend is also visible (~85px tall) */
+        body.tstm-legend-open #glmLegend { bottom: 320px; }
+        body.radar-open #glmLegend { bottom: 330px; }
+        body.radar-open.tstm-legend-open #glmLegend { bottom: 390px; }
         #glmLegend .gl-row { display: flex; align-items: center; gap: 6px; margin: 2px 0; color: #111; }
         #glmLegend .gl-title { font-weight: 700; font-size: 10px; color: #111;
                                text-transform: uppercase; letter-spacing: 0.05em;
@@ -1598,14 +1609,14 @@
                 if(this.checked){
                     bar.classList.add('active');
                     document.body.classList.add('radar-open');
-                    if(cb) cb.style.display='block';
+                    if(cb) { cb.style.display='block'; document.body.classList.add('mrms-colorbar-open'); }
                     drawNexradColorbar();
                     mlLoadIndex();
                     mlPollTimer=setInterval(mlLoadIndex,120000);
                 } else {
                     bar.classList.remove('active');
                     document.body.classList.remove('radar-open');
-                    if(cb) cb.style.display='none';
+                    if(cb) { cb.style.display='none'; document.body.classList.remove('mrms-colorbar-open'); }
                     mlStop();
                     if(mlPollTimer){clearInterval(mlPollTimer);mlPollTimer=null;}
                     document.getElementById('mrmsTimeDisplay').textContent='MRMS — select duration and enable';
@@ -1806,6 +1817,7 @@
             });
             tstmLayer.addTo(map);
             document.getElementById('tstmLegend').classList.add('visible');
+            document.body.classList.add('tstm-legend-open');
         }
 
         function removeTstmLayer() {
@@ -1813,6 +1825,7 @@
             if (map && tstmLayer) { map.removeLayer(tstmLayer); tstmLayer = null; }
             var leg = document.getElementById('tstmLegend');
             if (leg) leg.classList.remove('visible');
+            document.body.classList.remove('tstm-legend-open');
         }
 
         document.addEventListener('DOMContentLoaded', function() {
