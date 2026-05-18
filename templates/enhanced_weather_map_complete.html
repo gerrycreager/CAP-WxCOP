@@ -1217,8 +1217,16 @@
                 .then(function(data) {
                     document.getElementById('loading').style.display = 'none';
                     if (data.metars && data.metars.length > 0) {
+                        // Clear existing METAR markers without resetting checkboxes
+                        metatMarkers.forEach(function(m) { if (m._map) map.removeLayer(m); });
+                        metatMarkers = [];
+                        // Clear no-METAR markers too — they'll reload after new currentMetars set
+                        noMetarMarkers.forEach(function(m) { if (m._map) map.removeLayer(m); });
+                        noMetarMarkers = [];
+                        noMetarAirports = [];
                         currentMetars = data.metars;
                         data.metars.forEach(addMarker);
+                        filterMarkers();   // reapply current checkbox state
                         updateLabels();
                         loadNoMetarAirports();
                     }
