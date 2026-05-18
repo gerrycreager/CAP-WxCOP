@@ -1306,15 +1306,17 @@
             var name = p.NAME || p.SUA_NAME || '';
             var typeCode = (p.TYPE_CODE || p.TYPE || '').toUpperCase();
             var typeName = SUA_TYPE_NAMES[typeCode] || typeCode;
-            var ident = p.IDENT || p.SUA_ID || '';
-            var alt_lo = p.LOWER_VAL || p.ALT_LO || '';
-            var alt_hi = p.UPPER_VAL || p.ALT_HI || '';
-            var schedule = p.TIME_CODE || p.SCHEDULE || 'See NOTAMs';
-            return '<div style="font-size:13px;min-width:160px;">' +
-                   '<strong>' + ident + ' ' + name + '</strong><br>' +
+            var altLo = (p.LOWER_VAL ? p.LOWER_VAL + ' ft ' + (p.LOWER_CODE || '') : '');
+            var altHi = (p.UPPER_VAL ? p.UPPER_VAL + ' ft ' + (p.UPPER_CODE || '') : '');
+            var schedule = p.TIMESOFUSE || p.TIME_CODE || p.SCHEDULE || 'See NOTAMs';
+            var state = p.STATE ? ' (' + p.STATE + ')' : '';
+            var remarks = p.REMARKS ? '<br><span style="color:#555;font-size:11px;">' + p.REMARKS + '</span>' : '';
+            return '<div style="font-size:13px;min-width:180px;">' +
+                   '<strong>' + name + '</strong>' + state + '<br>' +
                    '<span style="color:#555;">' + typeName + '</span><br>' +
-                   (alt_lo ? 'Alt: ' + alt_lo + ' – ' + alt_hi + '<br>' : '') +
-                   'Schedule: ' + schedule +
+                   (altLo ? 'Alt: ' + altLo + ' \u2013 ' + altHi + '<br>' : '') +
+                   '<span style="font-size:11px;">⏱ ' + schedule + '</span>' +
+                   remarks +
                    '</div>';
         }
 
@@ -1380,7 +1382,7 @@
             if (_suaLoading) { setTimeout(function(){loadSua(callback);}, 500); return; }
             _suaLoading = true;
             setAirspaceStatus('Loading SUA…');
-            fetch('/CAP_WxCOP/static/geo/sua.geojson')
+            fetch('/CAP_WxCOP/static/geojson/Special_Use_Airspace.geojson')
                 .then(function(r) {
                     if (!r.ok) throw new Error('SUA fetch failed: ' + r.status);
                     return r.json();
