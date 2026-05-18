@@ -1424,7 +1424,8 @@
         }
 
         function toggleSuaLayer(layerRef, show) {
-            if (!layerRef) return;
+            var map = window._capMap;
+            if (!layerRef || !map) return;
             if (show) { if (!map.hasLayer(layerRef)) layerRef.addTo(map); }
             else { if (map.hasLayer(layerRef)) map.removeLayer(layerRef); }
         }
@@ -1465,6 +1466,7 @@
         });
 
         document.getElementById('mtrToggle').addEventListener('change', function() {
+            var map = window._capMap;
             if (this.checked) {
                 loadMtr(function(data) {
                     if (!mtrLayer) buildMtrLayer(data);
