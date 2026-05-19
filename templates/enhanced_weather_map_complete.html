@@ -186,12 +186,18 @@
         body.radar-open .controls { max-height: calc(100vh - 124px); }
 
         #tstmLegend {
-            display: none; position: fixed; bottom: 60px; right: 10px;
+            display: none; position: fixed; bottom: 215px; left: 10px;
             background: rgba(255,255,255,0.92); border: 1px solid #ccc;
-            border-radius: 4px; padding: 6px 10px; z-index: 900;
+            border-radius: 4px; padding: 6px 10px; z-index: 1001;
             font-size: 11px; font-family: sans-serif; min-width: 130px;
         }
         #tstmLegend.visible { display: block; }
+        /* When MRMS colorbar is also showing, push TSTM legend above it.
+           mrmsColorbar is ~85px tall at bottom:215px, so TSTM goes to ~310px */
+        #mrmsColorbar.visible ~ #tstmLegend,
+        body.mrms-colorbar-open #tstmLegend { bottom: 310px; }
+        body.radar-open #tstmLegend { bottom: 270px; }
+        body.radar-open.mrms-colorbar-open #tstmLegend { bottom: 330px; }
         #tstmLegend .tl-title { font-weight: 700; font-size: 11px; margin-bottom: 4px; }
         #tstmLegend .tl-row { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
         #tstmLegend .tl-swatch { width: 16px; height: 16px; border-radius: 2px; flex-shrink: 0; }
@@ -203,8 +209,13 @@
             padding: 6px 10px; z-index: 1050;
             font-size: 11px; color: #111;
             box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            transition: bottom 0.15s;
         }
         #glmLegend.visible { display: block; }
+        /* Push GLM up when TSTM legend is also visible (~85px tall) */
+        body.tstm-legend-open #glmLegend { bottom: 320px; }
+        body.radar-open #glmLegend { bottom: 330px; }
+        body.radar-open.tstm-legend-open #glmLegend { bottom: 390px; }
         #glmLegend .gl-row { display: flex; align-items: center; gap: 6px; margin: 2px 0; color: #111; }
         #glmLegend .gl-title { font-weight: 700; font-size: 10px; color: #111;
                                text-transform: uppercase; letter-spacing: 0.05em;
@@ -339,11 +350,11 @@
 </head>
 <body>
     <div id="titleBar">
-        <a href="/CAP_WxCOP_DEV/" class="tb-home" title="Home">&#127968;</a>
+        <a href="/CAP_WxCOP/" class="tb-home" title="Home">&#127968;</a>
         <span class="tb-title">Weather Common Operating Picture</span>
         <span class="tb-utc" id="tbUtc"></span>
     </div>
-    <a href="/CAP_WxCOP_DEV/" class="home-btn">&#127968; Home</a>
+    <a href="/CAP_WxCOP/" class="home-btn">&#127968; Home</a>
     <div id="map"></div>
 
     <div id="hazardSidebar" class="sb-hidden">
@@ -1206,8 +1217,16 @@
                 .then(function(data) {
                     document.getElementById('loading').style.display = 'none';
                     if (data.metars && data.metars.length > 0) {
+                        // Clear existing METAR markers without resetting checkboxes
+                        metatMarkers.forEach(function(m) { if (m._map) map.removeLayer(m); });
+                        metatMarkers = [];
+                        // Clear no-METAR markers too — they'll reload after new currentMetars set
+                        noMetarMarkers.forEach(function(m) { if (m._map) map.removeLayer(m); });
+                        noMetarMarkers = [];
+                        noMetarAirports = [];
                         currentMetars = data.metars;
                         data.metars.forEach(addMarker);
+                        filterMarkers();   // reapply current checkbox state
                         updateLabels();
                         loadNoMetarAirports();
                     }
@@ -1267,9 +1286,23 @@
             }
         }
 
-        function mtrStyle() {
-            return { color: '#0064b4', weight: 1.5, opacity: 0.75,
-                     fillColor: '#0080d0', fillOpacity: 0.10 };
+        function mtrStyle(feature) {
+            var p = feature ? feature.properties : {};
+            var mtrType = p.MTR_TYPE;
+            // MTR_TYPE 0 = IR (instrument), 1 = VR (visual)
+            var isIR = (mtrType === 0);
+            return {
+                color:       isIR ? '#0050c8' : '#008000',
+                weight:      3,        // 2x original 1.5
+                opacity:     0.85,
+                fillOpacity: 0,
+                dashArray:   isIR ? null : '6,4'  // VR dashed, IR solid
+            };
+        }
+
+        // Wider invisible hit buffer layer for MTR click tolerance
+        function mtrHitStyle() {
+            return { color: 'transparent', weight: 12, opacity: 0, fillOpacity: 0 };
         }
 
         // ── Popup content ────────────────────────────────────────────────────
@@ -1287,32 +1320,62 @@
             var name = p.NAME || p.SUA_NAME || '';
             var typeCode = (p.TYPE_CODE || p.TYPE || '').toUpperCase();
             var typeName = SUA_TYPE_NAMES[typeCode] || typeCode;
-            var ident = p.IDENT || p.SUA_ID || '';
-            var alt_lo = p.LOWER_VAL || p.ALT_LO || '';
-            var alt_hi = p.UPPER_VAL || p.ALT_HI || '';
-            var schedule = p.TIME_CODE || p.SCHEDULE || 'See NOTAMs';
-            return '<div style="font-size:13px;min-width:160px;">' +
-                   '<strong>' + ident + ' ' + name + '</strong><br>' +
+            var state = p.STATE ? ' (' + p.STATE + ')' : '';
+            var schedule = p.TIMESOFUSE || p.TIME_CODE || p.SCHEDULE || 'See NOTAMs';
+            var remarks = p.REMARKS ? '<br><span style="color:#555;font-size:11px;">' + p.REMARKS + '</span>' : '';
+            var cont_agent = p.CONT_AGENT ? '<br><span style="font-size:11px;color:#777;">Controlling: ' + p.CONT_AGENT + '</span>' : '';
+
+            function fmtAlt(val, uom, code) {
+                if (val === null || val === undefined || val === '') return '?';
+                if ((uom || '').toUpperCase() === 'FL') return 'FL' + val;
+                if ((code || '').toUpperCase() === 'SFC') return 'SFC';
+                var suffix = (code === 'HEI') ? ' ft AGL' : ' ft MSL';
+                return val + suffix;
+            }
+            var loStr = fmtAlt(p.LOWER_VAL, p.LOWER_UOM, p.LOWER_CODE);
+            var hiStr = fmtAlt(p.UPPER_VAL, p.UPPER_UOM, p.UPPER_CODE);
+
+            return '<div style="font-size:13px;min-width:180px;">' +
+                   '<strong>' + name + '</strong>' + state + '<br>' +
                    '<span style="color:#555;">' + typeName + '</span><br>' +
-                   (alt_lo ? 'Alt: ' + alt_lo + ' – ' + alt_hi + '<br>' : '') +
-                   'Schedule: ' + schedule +
+                   'Alt: ' + loStr + ' \u2013 ' + hiStr + '<br>' +
+                   '<span style="font-size:11px;">\u23f1 ' + schedule + '</span>' +
+                   cont_agent + remarks +
                    '</div>';
         }
 
         function mtrPopup(feature) {
             var p = feature.properties;
-            var ident = p.MTR_IDENT || p.IDENT || '';
-            var type = ident.startsWith('IR') ? 'IR (Instrument)' :
-                       ident.startsWith('VR') ? 'VR (Visual)' :
-                       ident.startsWith('SR') ? 'SR (Slow Speed)' : 'MTR';
-            var alt_lo = p.LOWER_ALT || p.ALT_LO || '';
-            var alt_hi = p.UPPER_ALT || p.ALT_HI || '';
-            var width  = p.WIDTH || '';
-            return '<div style="font-size:13px;min-width:140px;">' +
+            var num    = p.IDENT || '';
+            var mtrType = p.MTR_TYPE;
+            var prefix = (mtrType === 0) ? 'IR' : (mtrType === 1) ? 'VR' : 'SR';
+            var ident  = prefix + '-' + num;
+            var typeLabel = (mtrType === 0) ? 'IR — Instrument Route' :
+                            (mtrType === 1) ? 'VR — Visual Route' : 'SR — Slow Speed Route';
+            // Altitude — LOWER_CODE HEI=AGL, ALT=MSL; UPPER_CODE ALT=MSL
+            var loVal  = p.LOWER_VAL !== null ? p.LOWER_VAL : '';
+            var loCode = p.LOWER_CODE === 'HEI' ? 'ft AGL' : 'ft MSL';
+            var hiVal  = p.UPPER_VAL !== null ? p.UPPER_VAL : '';
+            var hiCode = p.UPPER_CODE === 'HEI' ? 'ft AGL' : 'ft MSL';
+            var altStr = (loVal !== '' && hiVal !== '')
+                ? loVal + ' ' + loCode + ' \u2013 ' + hiVal + ' ' + hiCode
+                : 'See charts';
+            var wl = p.WIDTHLEFT  || 0;
+            var wr = p.WIDTHRIGHT || 0;
+            var widthStr = (wl === wr) ? '\u00b1' + wl + ' NM' : wl + '/' + wr + ' NM L/R';
+            // Chart applicability
+            var charts = [];
+            if (p.US_LOW)    charts.push('US Low');
+            if (p.US_HIGH)   charts.push('US High');
+            if (p.AK_LOW)    charts.push('AK Low');
+            if (p.AK_HIGH)   charts.push('AK High');
+            if (p.PACIFIC)   charts.push('Pacific');
+            return '<div style="font-size:13px;min-width:190px;">' +
                    '<strong>' + ident + '</strong><br>' +
-                   '<span style="color:#555;">' + type + '</span><br>' +
-                   (alt_lo ? 'Alt: ' + alt_lo + ' – ' + alt_hi + '<br>' : '') +
-                   (width ? 'Width: ±' + width + ' NM' : '') +
+                   '<span style="color:#555;">' + typeLabel + '</span><br>' +
+                   '<b>Alt:</b> ' + altStr + '<br>' +
+                   '<b>Width:</b> ' + widthStr + '<br>' +
+                   (charts.length ? '<span style="font-size:11px;color:#777;">Charts: ' + charts.join(', ') + '</span>' : '') +
                    '</div>';
         }
 
@@ -1344,10 +1407,18 @@
         }
 
         function buildMtrLayer(data) {
+            // Visible line layer
             mtrLayer = L.geoJSON(data, {
                 style: mtrStyle,
                 onEachFeature: function(f, l) { l.bindPopup(mtrPopup(f)); }
             });
+            // Wide transparent hit-buffer layer for easier clicking
+            var mtrHitLayer = L.geoJSON(data, {
+                style: mtrHitStyle,
+                onEachFeature: function(f, l) { l.bindPopup(mtrPopup(f)); }
+            });
+            // Group both so they add/remove together
+            mtrLayer = L.layerGroup([mtrLayer, mtrHitLayer]);
         }
 
         // ── Load and toggle helpers ──────────────────────────────────────────
@@ -1361,7 +1432,7 @@
             if (_suaLoading) { setTimeout(function(){loadSua(callback);}, 500); return; }
             _suaLoading = true;
             setAirspaceStatus('Loading SUA…');
-            fetch('/CAP_WxCOP/static/geo/sua.geojson')
+            fetch('/CAP_WxCOP/static/geojson/Special_Use_Airspace.geojson')
                 .then(function(r) {
                     if (!r.ok) throw new Error('SUA fetch failed: ' + r.status);
                     return r.json();
@@ -1403,7 +1474,8 @@
         }
 
         function toggleSuaLayer(layerRef, show) {
-            if (!layerRef) return;
+            var map = window._capMap;
+            if (!layerRef || !map) return;
             if (show) { if (!map.hasLayer(layerRef)) layerRef.addTo(map); }
             else { if (map.hasLayer(layerRef)) map.removeLayer(layerRef); }
         }
@@ -1444,6 +1516,7 @@
         });
 
         document.getElementById('mtrToggle').addEventListener('change', function() {
+            var map = window._capMap;
             if (this.checked) {
                 loadMtr(function(data) {
                     if (!mtrLayer) buildMtrLayer(data);
@@ -1454,15 +1527,16 @@
             }
         }); // end mtrToggle
         } // end initAirspaceLayers
+        window.initAirspaceLayers = initAirspaceLayers;
 
     })();
 
     // ── MRMS Local Composite & GLM Lightning — outside all IIFEs ────────────
     (function() {
         document.addEventListener('DOMContentLoaded', function() {
-            var ML_INDEX    = '/CAP_WxCOP_DEV/static/mrms_tiles/composite/CONUS/index.json';
-            var ML_TILE_BASE= '/CAP_WxCOP_DEV/static/mrms_tiles/composite/CONUS/';
-            var GLM_API     = '/CAP_WxCOP_DEV/api/glm/flashes';
+            var ML_INDEX    = '/CAP_WxCOP/static/mrms_tiles/composite/CONUS/index.json';
+            var ML_TILE_BASE= '/CAP_WxCOP/static/mrms_tiles/composite/CONUS/';
+            var GLM_API     = '/CAP_WxCOP/api/glm/flashes';
             function getMap() { return window._capMap; }
 
             // ── MRMS Local Loop Player ───────────────────────────────────────
@@ -1598,14 +1672,14 @@
                 if(this.checked){
                     bar.classList.add('active');
                     document.body.classList.add('radar-open');
-                    if(cb) cb.style.display='block';
+                    if(cb) { cb.style.display='block'; document.body.classList.add('mrms-colorbar-open'); }
                     drawNexradColorbar();
                     mlLoadIndex();
                     mlPollTimer=setInterval(mlLoadIndex,120000);
                 } else {
                     bar.classList.remove('active');
                     document.body.classList.remove('radar-open');
-                    if(cb) cb.style.display='none';
+                    if(cb) { cb.style.display='none'; document.body.classList.remove('mrms-colorbar-open'); }
                     mlStop();
                     if(mlPollTimer){clearInterval(mlPollTimer);mlPollTimer=null;}
                     document.getElementById('mrmsTimeDisplay').textContent='MRMS — select duration and enable';
@@ -1755,7 +1829,13 @@
 
     <!-- TSTM Probability Legend -->
     <div id="tstmLegend">
-        <div class="tl-title">&#9928; TRW Probability</div>
+        <div class="tl-title">&#9928; TRW Probability
+            <span style="float:right;font-weight:normal;line-height:1;">
+                <button id="tstmPrev" style="padding:0 4px;cursor:pointer;font-size:10px;">&#9664;</button>
+                <span id="tstmFhrLabel" style="font-size:10px;font-family:monospace;">F02</span>
+                <button id="tstmNext" style="padding:0 4px;cursor:pointer;font-size:10px;">&#9654;</button>
+            </span>
+        </div>
         <div class="tl-row"><div class="tl-swatch" style="background:rgba(255,220,50,0.63);border:1px solid #ccc;"></div>40% chance</div>
         <div class="tl-row"><div class="tl-swatch" style="background:rgba(255,140,0,0.71);border:1px solid #ccc;"></div>60% chance</div>
         <div class="tl-row"><div class="tl-swatch" style="background:rgba(220,30,30,0.78);border:1px solid #ccc;"></div>80% chance</div>
@@ -1765,14 +1845,20 @@
     <script>
     // TSTM Probability Tile Overlay
     (function() {
-        var TSTM_BASE = '/tstm/tiles';
-        var tstmLayer = null;
-        var tstmFhr   = 1;
+        var TSTM_BASE  = '/tstm/tiles';
+        var EMPTY_TILE = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+        var tstmLayer  = null;
+        var tstmFhr    = 2;   // F01 not produced by LAMP; start at F02
 
         function getMap() { return window._capMap; }
 
         function fhrStr(h) {
             return 'F' + (h < 10 ? '0' : '') + h;
+        }
+
+        function updateLabel() {
+            var lbl = document.getElementById('tstmFhrLabel');
+            if (lbl) lbl.textContent = fhrStr(tstmFhr);
         }
 
         function loadTstmLayer(fhr) {
@@ -1781,16 +1867,20 @@
             if (tstmLayer) { map.removeLayer(tstmLayer); tstmLayer = null; }
             var tog = document.getElementById('tstmToggle');
             if (!tog || !tog.checked) return;
+            tstmFhr = fhr;
+            updateLabel();
             var url = TSTM_BASE + '/' + fhrStr(fhr) + '/{z}/{x}/{y}.png';
             tstmLayer = L.tileLayer(url, {
                 opacity: 0.75,
                 tms: false,
                 minZoom: 3,
                 maxZoom: 8,
+                errorTileUrl: EMPTY_TILE,
                 attribution: 'TRW: NOAA LAMP'
             });
             tstmLayer.addTo(map);
             document.getElementById('tstmLegend').classList.add('visible');
+            document.body.classList.add('tstm-legend-open');
         }
 
         function removeTstmLayer() {
@@ -1798,15 +1888,30 @@
             if (map && tstmLayer) { map.removeLayer(tstmLayer); tstmLayer = null; }
             var leg = document.getElementById('tstmLegend');
             if (leg) leg.classList.remove('visible');
+            document.body.classList.remove('tstm-legend-open');
         }
 
         document.addEventListener('DOMContentLoaded', function() {
-            var tog = document.getElementById('tstmToggle');
-            if (!tog) return;
-            tog.addEventListener('change', function() {
-                if (this.checked) { loadTstmLayer(tstmFhr); }
-                else { removeTstmLayer(); }
-            });
+            var tog  = document.getElementById('tstmToggle');
+            var prev = document.getElementById('tstmPrev');
+            var next = document.getElementById('tstmNext');
+
+            if (tog) {
+                tog.addEventListener('change', function() {
+                    if (this.checked) { loadTstmLayer(tstmFhr); }
+                    else { removeTstmLayer(); }
+                });
+            }
+            if (prev) {
+                prev.addEventListener('click', function() {
+                    if (tstmFhr > 2) loadTstmLayer(tstmFhr - 1);
+                });
+            }
+            if (next) {
+                next.addEventListener('click', function() {
+                    if (tstmFhr < 25) loadTstmLayer(tstmFhr + 1);
+                });
+            }
         });
     })();
     </script>
