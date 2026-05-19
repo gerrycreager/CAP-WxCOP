@@ -1286,9 +1286,23 @@
             }
         }
 
-        function mtrStyle() {
-            return { color: '#0064b4', weight: 1.5, opacity: 0.75,
-                     fillColor: '#0080d0', fillOpacity: 0.10 };
+        function mtrStyle(feature) {
+            var p = feature ? feature.properties : {};
+            var mtrType = p.MTR_TYPE;
+            // MTR_TYPE 0 = IR (instrument), 1 = VR (visual)
+            var isIR = (mtrType === 0);
+            return {
+                color:       isIR ? '#0050c8' : '#008000',
+                weight:      3,        // 2x original 1.5
+                opacity:     0.85,
+                fillOpacity: 0,
+                dashArray:   isIR ? null : '6,4'  // VR dashed, IR solid
+            };
+        }
+
+        // Wider invisible hit buffer layer for MTR click tolerance
+        function mtrHitStyle() {
+            return { color: 'transparent', weight: 12, opacity: 0, fillOpacity: 0 };
         }
 
         // ── Popup content ────────────────────────────────────────────────────
@@ -1320,18 +1334,36 @@
 
         function mtrPopup(feature) {
             var p = feature.properties;
-            var ident = p.MTR_IDENT || p.IDENT || '';
-            var type = ident.startsWith('IR') ? 'IR (Instrument)' :
-                       ident.startsWith('VR') ? 'VR (Visual)' :
-                       ident.startsWith('SR') ? 'SR (Slow Speed)' : 'MTR';
-            var alt_lo = p.LOWER_ALT || p.ALT_LO || '';
-            var alt_hi = p.UPPER_ALT || p.ALT_HI || '';
-            var width  = p.WIDTH || '';
-            return '<div style="font-size:13px;min-width:140px;">' +
+            var num    = p.IDENT || '';
+            var mtrType = p.MTR_TYPE;
+            var prefix = (mtrType === 0) ? 'IR' : (mtrType === 1) ? 'VR' : 'SR';
+            var ident  = prefix + '-' + num;
+            var typeLabel = (mtrType === 0) ? 'IR — Instrument Route' :
+                            (mtrType === 1) ? 'VR — Visual Route' : 'SR — Slow Speed Route';
+            // Altitude — LOWER_CODE HEI=AGL, ALT=MSL; UPPER_CODE ALT=MSL
+            var loVal  = p.LOWER_VAL !== null ? p.LOWER_VAL : '';
+            var loCode = p.LOWER_CODE === 'HEI' ? 'ft AGL' : 'ft MSL';
+            var hiVal  = p.UPPER_VAL !== null ? p.UPPER_VAL : '';
+            var hiCode = p.UPPER_CODE === 'HEI' ? 'ft AGL' : 'ft MSL';
+            var altStr = (loVal !== '' && hiVal !== '')
+                ? loVal + ' ' + loCode + ' \u2013 ' + hiVal + ' ' + hiCode
+                : 'See charts';
+            var wl = p.WIDTHLEFT  || 0;
+            var wr = p.WIDTHRIGHT || 0;
+            var widthStr = (wl === wr) ? '\u00b1' + wl + ' NM' : wl + '/' + wr + ' NM L/R';
+            // Chart applicability
+            var charts = [];
+            if (p.US_LOW)    charts.push('US Low');
+            if (p.US_HIGH)   charts.push('US High');
+            if (p.AK_LOW)    charts.push('AK Low');
+            if (p.AK_HIGH)   charts.push('AK High');
+            if (p.PACIFIC)   charts.push('Pacific');
+            return '<div style="font-size:13px;min-width:190px;">' +
                    '<strong>' + ident + '</strong><br>' +
-                   '<span style="color:#555;">' + type + '</span><br>' +
-                   (alt_lo ? 'Alt: ' + alt_lo + ' – ' + alt_hi + '<br>' : '') +
-                   (width ? 'Width: ±' + width + ' NM' : '') +
+                   '<span style="color:#555;">' + typeLabel + '</span><br>' +
+                   '<b>Alt:</b> ' + altStr + '<br>' +
+                   '<b>Width:</b> ' + widthStr + '<br>' +
+                   (charts.length ? '<span style="font-size:11px;color:#777;">Charts: ' + charts.join(', ') + '</span>' : '') +
                    '</div>';
         }
 
@@ -1363,10 +1395,18 @@
         }
 
         function buildMtrLayer(data) {
+            // Visible line layer
             mtrLayer = L.geoJSON(data, {
                 style: mtrStyle,
                 onEachFeature: function(f, l) { l.bindPopup(mtrPopup(f)); }
             });
+            // Wide transparent hit-buffer layer for easier clicking
+            var mtrHitLayer = L.geoJSON(data, {
+                style: mtrHitStyle,
+                onEachFeature: function(f, l) { l.bindPopup(mtrPopup(f)); }
+            });
+            // Group both so they add/remove together
+            mtrLayer = L.layerGroup([mtrLayer, mtrHitLayer]);
         }
 
         // ── Load and toggle helpers ──────────────────────────────────────────
