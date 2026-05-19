@@ -1320,15 +1320,27 @@
             var name = p.NAME || p.SUA_NAME || '';
             var typeCode = (p.TYPE_CODE || p.TYPE || '').toUpperCase();
             var typeName = SUA_TYPE_NAMES[typeCode] || typeCode;
-            var ident = p.IDENT || p.SUA_ID || '';
-            var alt_lo = p.LOWER_VAL || p.ALT_LO || '';
-            var alt_hi = p.UPPER_VAL || p.ALT_HI || '';
+            var state = p.STATE ? ' (' + p.STATE + ')' : '';
             var schedule = p.TIMESOFUSE || p.TIME_CODE || p.SCHEDULE || 'See NOTAMs';
-            return '<div style="font-size:13px;min-width:160px;">' +
-                   '<strong>' + ident + ' ' + name + '</strong><br>' +
+            var remarks = p.REMARKS ? '<br><span style="color:#555;font-size:11px;">' + p.REMARKS + '</span>' : '';
+            var cont_agent = p.CONT_AGENT ? '<br><span style="font-size:11px;color:#777;">Controlling: ' + p.CONT_AGENT + '</span>' : '';
+
+            function fmtAlt(val, uom, code) {
+                if (val === null || val === undefined || val === '') return '?';
+                if ((uom || '').toUpperCase() === 'FL') return 'FL' + val;
+                if ((code || '').toUpperCase() === 'SFC') return 'SFC';
+                var suffix = (code === 'HEI') ? ' ft AGL' : ' ft MSL';
+                return val + suffix;
+            }
+            var loStr = fmtAlt(p.LOWER_VAL, p.LOWER_UOM, p.LOWER_CODE);
+            var hiStr = fmtAlt(p.UPPER_VAL, p.UPPER_UOM, p.UPPER_CODE);
+
+            return '<div style="font-size:13px;min-width:180px;">' +
+                   '<strong>' + name + '</strong>' + state + '<br>' +
                    '<span style="color:#555;">' + typeName + '</span><br>' +
-                   (alt_lo ? 'Alt: ' + alt_lo + ' – ' + alt_hi + '<br>' : '') +
-                   'Schedule: ' + schedule +
+                   'Alt: ' + loStr + ' \u2013 ' + hiStr + '<br>' +
+                   '<span style="font-size:11px;">\u23f1 ' + schedule + '</span>' +
+                   cont_agent + remarks +
                    '</div>';
         }
 
