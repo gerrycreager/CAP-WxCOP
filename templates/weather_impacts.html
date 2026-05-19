@@ -253,6 +253,18 @@
         </div>
 
         <div id="statusBar">Loading…</div>
+
+        <!-- Wind streamlines -->
+        <div class="sb-section">
+            <div class="sb-label">Wind Flow</div>
+            <label class="toggle-row">
+                <input type="checkbox" id="windToggle"> Streamlines (HRRR)
+            </label>
+            <div id="windControls" style="display:none;margin-top:4px;">
+                <select id="windLevelSelect" style="width:100%;font-size:12px;padding:2px;margin-bottom:3px;"></select>
+                <div id="windStatus" style="font-size:10px;color:#888;text-align:center;min-height:14px;"></div>
+            </div>
+        </div>
     </div>
 
     <!-- Map -->
@@ -713,6 +725,8 @@ function onHourChange(h) {
     updateHourLabel(h);
     loadData();
     if (selectedStation) loadStationDetail(selectedStation);
+    // Update wind layer forecast hour
+    if (typeof window._windSetFhr === 'function') window._windSetFhr(h);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -1069,5 +1083,187 @@ window.addEventListener('error', function(e) {
     if (e.message && e.message.includes('message channel closed')) return true;
 });
 </script>
+
+    <!-- Wind streamlines legend -->
+    <div id="windLegend" style="display:none;position:fixed;bottom:10px;right:10px;
+         background:rgba(255,255,255,0.92);border:1px solid #ccc;border-radius:4px;
+         padding:6px 10px;z-index:1001;font-size:11px;font-family:sans-serif;min-width:120px;">
+        <div style="font-weight:700;font-size:11px;margin-bottom:4px;">&#127754; Wind Speed</div>
+        <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgba(100,149,237,0.85);"></span>&lt;5 kt</div>
+        <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgba(50,205,50,0.85);"></span>5–15 kt</div>
+        <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgba(255,215,0,0.85);"></span>15–25 kt</div>
+        <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgba(255,140,0,0.85);"></span>25–35 kt</div>
+        <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgba(220,50,50,0.85);"></span>35–50 kt</div>
+        <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgba(180,0,180,0.85);"></span>&gt;50 kt</div>
+        <div style="margin-top:4px;font-size:10px;color:#666;">HRRR · Forecast</div>
+    </div>
+
+    <script>
+    // Expose map as window._capMap for wind layer
+    document.addEventListener('DOMContentLoaded', function() {
+        if (typeof map !== 'undefined') window._capMap = map;
+        // Fallback: poll until map is defined
+        var _poll = setInterval(function() {
+            if (typeof map !== 'undefined') {
+                window._capMap = map;
+                clearInterval(_poll);
+            }
+        }, 200);
+    });
+
+    // ── HRRR Wind Streamlines ─────────────────────────────────────────────
+    (function() {
+        'use strict';
+        var WIND_API = '/CAP_WxCOP/api/winds/hrrr';
+        var LEVELS = [
+            { key:'SFC',  label:'Surface (10m AGL)' },
+            { key:'925',  label:'~3,000 ft MSL' },
+            { key:'850',  label:'~6,000 ft MSL' },
+            { key:'700',  label:'~10,000 ft MSL' },
+            { key:'600',  label:'~12,000 ft MSL' },
+            { key:'500',  label:'~18,000 ft MSL' },
+        ];
+        var windLayer   = null;
+        var windLevel   = 'SFC';
+        var windFhr     = 1;
+        var windEnabled = false;
+        var _cache      = {};
+
+        var WindCanvas = L.Layer.extend({
+            initialize: function() { this._data = null; },
+            onAdd: function(map) {
+                this._map    = map;
+                this._canvas = document.createElement('canvas');
+                this._canvas.style.cssText = 'position:absolute;pointer-events:none;opacity:0.82;';
+                map.getPane('overlayPane').appendChild(this._canvas);
+                this._ctx = this._canvas.getContext('2d');
+                map.on('moveend zoomend resize', this._draw, this);
+                this._resize(); if (this._data) this._draw();
+            },
+            onRemove: function(map) {
+                map.off('moveend zoomend resize', this._draw, this);
+                if (this._canvas && this._canvas.parentNode)
+                    this._canvas.parentNode.removeChild(this._canvas);
+            },
+            setData: function(d) { this._data = d; if (this._map) this._draw(); },
+            _resize: function() {
+                var s = this._map.getSize();
+                this._canvas.width = s.x; this._canvas.height = s.y;
+                L.DomUtil.setPosition(this._canvas,
+                    this._map.containerPointToLayerPoint([0,0]));
+            },
+            _draw: function() {
+                if (!this._canvas || !this._data) return;
+                this._resize();
+                var ctx = this._ctx, map = this._map;
+                var s   = map.getSize();
+                ctx.clearRect(0, 0, s.x, s.y);
+                var zoom = map.getZoom();
+                var aLen = Math.max(14, Math.min(32, zoom * 2.8));
+                var bounds = map.getBounds();
+                (this._data.features || []).forEach(function(f) {
+                    var coords = f.geometry.coordinates;
+                    var ll = L.latLng(coords[1], coords[0]);
+                    if (!bounds.contains(ll)) return;
+                    var pt  = map.latLngToContainerPoint(ll);
+                    var p   = f.properties;
+                    var rad = (p.dir + 180) * Math.PI / 180;
+                    var ux  =  Math.sin(rad);
+                    var uy  = -Math.cos(rad);
+                    var x1  = pt.x - ux * aLen * 0.5;
+                    var y1  = pt.y - uy * aLen * 0.5;
+                    var x2  = pt.x + ux * aLen * 0.5;
+                    var y2  = pt.y + uy * aLen * 0.5;
+                    var col = spdColor(p.spd);
+                    ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 1.4;
+                    ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+                    var ha = Math.atan2(y2-y1, x2-x1), hl = aLen * 0.3;
+                    ctx.beginPath(); ctx.moveTo(x2,y2);
+                    ctx.lineTo(x2 - hl*Math.cos(ha-0.45), y2 - hl*Math.sin(ha-0.45));
+                    ctx.lineTo(x2 - hl*Math.cos(ha+0.45), y2 - hl*Math.sin(ha+0.45));
+                    ctx.closePath(); ctx.fill();
+                });
+            }
+        });
+
+        function spdColor(k) {
+            if (k < 5)  return 'rgba(100,149,237,0.85)';
+            if (k < 15) return 'rgba(50,205,50,0.85)';
+            if (k < 25) return 'rgba(255,215,0,0.85)';
+            if (k < 35) return 'rgba(255,140,0,0.85)';
+            if (k < 50) return 'rgba(220,50,50,0.85)';
+            return 'rgba(180,0,180,0.85)';
+        }
+
+        function fetchWind(level, fhr, cb) {
+            // Cap fhr at 18 — HRRR only goes to F018
+            var hrrFhr = Math.min(fhr, 18);
+            var key = level + ':' + hrrFhr;
+            if (_cache[key]) { cb(null, _cache[key]); return; }
+            fetch(WIND_API + '?level=' + level + '&fhr=' + hrrFhr)
+                .then(function(r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+                .then(function(d) { _cache[key] = d; cb(null, d); })
+                .catch(function(e) { cb(e); });
+        }
+
+        function setStatus(msg) {
+            var el = document.getElementById('windStatus');
+            if (el) el.textContent = msg;
+        }
+
+        function loadWind() {
+            var map = window._capMap;
+            if (!map || !windEnabled) return;
+            setStatus('Loading…');
+            fetchWind(windLevel, windFhr, function(err, data) {
+                if (err) { setStatus('Unavailable'); return; }
+                if (!windLayer) { windLayer = new WindCanvas(); windLayer.addTo(map); }
+                windLayer.setData(data);
+                var m = data.metadata || {};
+                var fhrDisp = windFhr > 18 ? 'F+' + String(windFhr).padStart(2,'0') + ' (HRRR F18)' :
+                                             'F+' + String(m.fhr || windFhr).padStart(2,'0');
+                setStatus(m.cycle ? m.cycle + ' ' + fhrDisp : fhrDisp);
+                document.getElementById('windLegend').style.display = 'block';
+            });
+        }
+
+        function removeWind() {
+            var map = window._capMap;
+            if (windLayer && map) { map.removeLayer(windLayer); windLayer = null; }
+            setStatus('');
+            document.getElementById('windLegend').style.display = 'none';
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            var sel = document.getElementById('windLevelSelect');
+            if (sel) {
+                LEVELS.forEach(function(lv) {
+                    var o = document.createElement('option');
+                    o.value = lv.key; o.textContent = lv.label;
+                    sel.appendChild(o);
+                });
+                sel.addEventListener('change', function() {
+                    windLevel = this.value; _cache = {};
+                    if (windEnabled) loadWind();
+                });
+            }
+            var tog = document.getElementById('windToggle');
+            if (tog) {
+                tog.addEventListener('change', function() {
+                    windEnabled = this.checked;
+                    document.getElementById('windControls').style.display =
+                        windEnabled ? 'block' : 'none';
+                    if (windEnabled) loadWind(); else removeWind();
+                });
+            }
+        });
+
+        window._windSetFhr = function(fhr) {
+            windFhr = fhr; _cache = {};
+            if (windEnabled) loadWind();
+        };
+    })();
+    </script>
+
 </body>
 </html>
