@@ -103,6 +103,14 @@ try:
 except Exception as e:
     print(f"⚠ Could not load Enhanced Weather API: {e}")
 
+# HRRR Winds API - streamline/barb wind vector data
+try:
+    from hrrr_winds_api import hrrr_winds_api
+    app.register_blueprint(hrrr_winds_api, url_prefix='/api/winds')
+    print("✓ HRRR Winds API registered at /CAP_WxCOP/api/winds")
+except Exception as e:
+    print(f"⚠ Could not load HRRR Winds API: {e}")
+
 # Radar API - NEXRAD animation and data
 try:
     from radar_api import radar_api
@@ -135,12 +143,15 @@ try:
 except Exception as e:
     print(f"⚠ Could not load AIRMET/SIGMET API: {e}")
 
-    try:
-        from radar_status_api import radar_status_bp
-        app.register_blueprint(radar_status_bp, url_prefix='/api/radar')
-        print('✓ radar_status_api registered')
-    except Exception as e:
-        print(f'⚠ radar_status_api failed: {e}')
+try:
+    from radar_status_api import radar_status_bp
+    app.register_blueprint(radar_status_bp, url_prefix='/api/radar-status')
+    print('✓ radar_status_api registered')
+
+except Exception as e:
+    import traceback
+    traceback.print_exc()
+    print(f'⚠ radar_status_api failed: {e}')
 
 
 # MRMS WMS proxy — MapServer tile loop for radar map
@@ -231,6 +242,10 @@ def cadet_site_mgmt():
         return render_template('cadet_site_mgmt.html')
     except:
         return "<h1>Cadet Site Management</h1><p>Template not found</p><p><a href='/CAP_WxCOP/'>← Back to Home</a></p>"
+
+@app.route('/radar-status')
+def radar_status():
+    return render_template('radar_status.html')
 
 @app.route('/weather_map.html')
 def weather_map_legacy():

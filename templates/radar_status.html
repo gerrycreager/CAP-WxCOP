@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NEXRAD Radar Status — CAP WxCOP</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Segoe UI', Arial, sans-serif; background: #f4f6f9; color: #222; height: 100vh; display: flex; flex-direction: column; }
+
+#titleBar {
+    background: #1a3a2a; color: white; padding: 8px 14px;
+    display: flex; align-items: center; gap: 12px; flex-shrink: 0;
+}
+.tb-home { color: #8ecf9e; text-decoration: none; font-size: 18px; }
+.tb-title { font-size: 15px; font-weight: 700; flex: 1; }
+.tb-utc { font-size: 12px; color: #8ecf9e; font-family: monospace; }
+#reloadBar {
+    background: #2c5f41; color: white; padding: 4px 14px;
+    font-size: 11px; display: flex; align-items: center; gap: 10px; flex-shrink: 0;
+}
+#reloadProgress { flex: 1; height: 3px; background: rgba(255,255,255,0.2); border-radius: 2px; }
+#reloadFill { height: 100%; background: #8ecf9e; border-radius: 2px; width: 0%; transition: width 1s linear; }
+#reloadMsg { white-space: nowrap; }
+
+#summaryBar {
+    background: white; border-bottom: 1px solid #ddd;
+    padding: 6px 14px; display: flex; gap: 16px; align-items: center;
+    flex-shrink: 0; font-size: 12px;
+}
+.sb-item { display: flex; align-items: center; gap: 5px; }
+.sb-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+.sb-count { font-weight: 700; font-size: 14px; }
+.sb-label { color: #666; }
+
+#mainLayout { display: flex; flex: 1; overflow: hidden; }
+#mapPane { flex: 1; position: relative; }
+#map { width: 100%; height: 100%; }
+#tablePane {
+    width: 320px; flex-shrink: 0; overflow-y: auto;
+    background: white; border-left: 1px solid #ddd;
+    display: flex; flex-direction: column;
+}
+#tableHeader {
+    padding: 8px 10px; background: #f8f9fa; border-bottom: 1px solid #ddd;
+    font-size: 12px; font-weight: 600; color: #444; flex-shrink: 0;
+    display: flex; align-items: center; gap: 8px;
+}
+#siteFilter {
+    flex: 1; padding: 3px 6px; font-size: 12px; border: 1px solid #ccc;
+    border-radius: 3px;
+}
+#siteTable { width: 100%; border-collapse: collapse; font-size: 12px; }
+#siteTable th {
+    position: sticky; top: 0; background: #2c5f41; color: white;
+    padding: 5px 8px; text-align: left; font-weight: 600; cursor: pointer;
+    user-select: none;
+}
+#siteTable th:hover { background: #3a7a55; }
+#siteTable td { padding: 4px 8px; border-bottom: 1px solid #f0f0f0; }
+#siteTable tr:hover td { background: #f5fbf7; cursor: pointer; }
+.dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+.c-green  { background: #43a047; }
+.c-blue   { background: #1565c0; }
+.c-yellow { background: #f9a825; }
+.c-red    { background: #e53935; }
+.c-unknown { background: #9e9e9e; }
+#loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+           background: white; padding: 16px 30px; border-radius: 6px;
+           box-shadow: 0 2px 10px rgba(0,0,0,0.15); z-index: 1000; font-size: 14px; }
+</style>
+</head>
+<body>
+
+<div id="titleBar">
+    <a href="/CAP_WxCOP/" class="tb-home" title="Home">&#127968;</a>
+    <span class="tb-title">&#128225; NEXRAD Radar Status Monitor</span>
+    <span class="tb-utc" id="utcClock"></span>
+</div>
+
+<div id="reloadBar">
+    <div id="reloadProgress"><div id="reloadFill"></div></div>
+    <span id="reloadMsg">Next update in 5:00</span>
+</div>
+
+<div id="summaryBar">
+    <div class="sb-item"><div class="sb-dot c-green"></div><span class="sb-count" id="cnt-green">—</span><span class="sb-label">&lt;10 min</span></div>
+    <div class="sb-item"><div class="sb-dot c-blue"></div><span class="sb-count" id="cnt-blue">—</span><span class="sb-label">10–15 min</span></div>
+    <div class="sb-item"><div class="sb-dot c-yellow"></div><span class="sb-count" id="cnt-yellow">—</span><span class="sb-label">15–60 min</span></div>
+    <div class="sb-item"><div class="sb-dot c-red"></div><span class="sb-count" id="cnt-red">—</span><span class="sb-label">&gt;60 min / Outage</span></div>
+    <div class="sb-item" style="margin-left:auto;"><div class="sb-dot c-unknown"></div><span class="sb-count" id="cnt-unknown">—</span><span class="sb-label">No data</span></div>
+    <span style="font-size:11px;color:#888;" id="genTime"></span>
+</div>
+
+<div id="mainLayout">
+    <div id="mapPane"><div id="map"></div></div>
+    <div id="tablePane">
+        <div id="tableHeader">
+            <span>Sites</span>
+            <input type="text" id="siteFilter" placeholder="Filter site ID…" oninput="filterTable()">
+        </div>
+        <table id="siteTable">
+            <thead>
+                <tr>
+                    <th onclick="sortTable('site_id')">Site ↕</th>
+                    <th onclick="sortTable('latency_min')">Latency ↕</th>
+                    <th onclick="sortTable('state')">St ↕</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody id="tableBody"></tbody>
+        </table>
+    </div>
+</div>
+
+<div id="loading">Loading radar status…</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+var map = L.map('map', { center: [38, -96], zoom: 4 });
+L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+    attribution: '© OpenStreetMap © CartoDB', subdomains: 'abcd', maxZoom: 12
+}).addTo(map);
+
+var sitesData  = [];
+var markers    = {};
+var sortCol    = 'site_id';
+var sortAsc    = true;
+var RELOAD_SEC = 300;
+var reloadTimer, countdown;
+
+function colorHex(c) {
+    return {green:'#43a047', blue:'#1565c0', yellow:'#f9a825', red:'#e53935', unknown:'#9e9e9e'}[c] || '#9e9e9e';
+}
+
+function makeIcon(color) {
+    var hex = colorHex(color);
+    return L.divIcon({
+        className: '',
+        html: '<div style="width:10px;height:10px;border-radius:50%;background:' + hex +
+              ';border:1px solid rgba(0,0,0,0.3);"></div>',
+        iconSize: [10, 10], iconAnchor: [5, 5]
+    });
+}
+
+function latencyStr(min) {
+    if (min === null || min === undefined) return '—';
+    if (min < 60) return min + ' min';
+    return Math.floor(min/60) + 'h ' + (min%60) + 'm';
+}
+
+function loadData() {
+    fetch('/CAP_WxCOP/api/radar-status/sites')
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            document.getElementById('loading').style.display = 'none';
+            sitesData = d.sites || [];
+            renderMap();
+            renderTable();
+            updateSummary(d.sites);
+            var gt = d.generated ? new Date(d.generated).toUTCString().replace('GMT','Z') : '';
+            document.getElementById('genTime').textContent = 'Updated: ' + gt.slice(5,22);
+        })
+        .catch(function(e) {
+            document.getElementById('loading').textContent = 'Error loading data';
+            console.error(e);
+        });
+}
+
+function renderMap() {
+    sitesData.forEach(function(s) {
+        if (!s.lat || !s.lon) return;
+        var popup = '<b>' + s.site_id + '</b> — ' + (s.name||'') + '<br>' +
+            'State: ' + (s.state||'—') + '<br>' +
+            'Latency: ' + latencyStr(s.latency_min) + '<br>' +
+            'Status: ' + (s.status||'Unknown') +
+            (s.ftm_status ? '<br>FTM: ' + s.ftm_status : '') +
+            (s.ftm_message ? '<br><small>' + s.ftm_message.slice(0,120) + '</small>' : '');
+        if (markers[s.site_id]) {
+            markers[s.site_id].setIcon(makeIcon(s.color));
+            markers[s.site_id].getPopup().setContent(popup);
+        } else {
+            markers[s.site_id] = L.marker([s.lat, s.lon], { icon: makeIcon(s.color) })
+                .bindPopup(popup)
+                .addTo(map);
+        }
+    });
+}
+
+function renderTable() {
+    var filter = document.getElementById('siteFilter').value.toUpperCase();
+    var sorted = sitesData.slice().filter(function(s) {
+        return !filter || s.site_id.includes(filter) || (s.state||'').toUpperCase().includes(filter);
+    }).sort(function(a, b) {
+        var av = a[sortCol], bv = b[sortCol];
+        if (av === null || av === undefined) av = sortAsc ? 99999 : -1;
+        if (bv === null || bv === undefined) bv = sortAsc ? 99999 : -1;
+        if (av < bv) return sortAsc ? -1 : 1;
+        if (av > bv) return sortAsc ? 1 : -1;
+        return 0;
+    });
+    var html = '';
+    sorted.forEach(function(s) {
+        var dot = '<span class="dot c-' + (s.color||'unknown') + '"></span>';
+        var lat = s.latency_min !== null && s.latency_min !== undefined
+                  ? s.latency_min + ' min' : '—';
+        html += '<tr onclick="zoomTo(\'' + s.site_id + '\')">' +
+            '<td>' + dot + ' ' + s.site_id + '</td>' +
+            '<td>' + lat + '</td>' +
+            '<td>' + (s.state||'—') + '</td>' +
+            '<td>' + (s.status||'—').slice(0,10) + '</td>' +
+            '</tr>';
+    });
+    document.getElementById('tableBody').innerHTML = html;
+}
+
+function filterTable() { renderTable(); }
+
+function sortTable(col) {
+    if (sortCol === col) sortAsc = !sortAsc;
+    else { sortCol = col; sortAsc = true; }
+    renderTable();
+}
+
+function zoomTo(siteId) {
+    var s = sitesData.find(function(x) { return x.site_id === siteId; });
+    if (s && s.lat && s.lon) {
+        map.setView([s.lat, s.lon], 8);
+        if (markers[siteId]) markers[siteId].openPopup();
+    }
+}
+
+function updateSummary(sites) {
+    var counts = {green:0, blue:0, yellow:0, red:0, unknown:0};
+    (sites||[]).forEach(function(s) { counts[s.color||'unknown']++; });
+    document.getElementById('cnt-green').textContent  = counts.green;
+    document.getElementById('cnt-blue').textContent   = counts.blue;
+    document.getElementById('cnt-yellow').textContent = counts.yellow;
+    document.getElementById('cnt-red').textContent    = counts.red;
+    document.getElementById('cnt-unknown').textContent = counts.unknown;
+}
+
+// Reload countdown
+function startCountdown() {
+    var remaining = RELOAD_SEC;
+    var fill = document.getElementById('reloadFill');
+    var msg  = document.getElementById('reloadMsg');
+    clearInterval(countdown);
+    countdown = setInterval(function() {
+        remaining--;
+        var pct = ((RELOAD_SEC - remaining) / RELOAD_SEC) * 100;
+        fill.style.width = pct + '%';
+        var m = Math.floor(remaining / 60);
+        var s = remaining % 60;
+        msg.textContent = 'Next update in ' + m + ':' + (s < 10 ? '0' : '') + s;
+        if (remaining <= 0) {
+            clearInterval(countdown);
+            // Full page reload as specified
+            window.location.reload();
+        }
+    }, 1000);
+}
+
+// UTC clock
+(function utcClock() {
+    function pad(n) { return String(n).padStart(2,'0'); }
+    function tick() {
+        var n = new Date();
+        document.getElementById('utcClock').textContent =
+            n.getUTCFullYear() + '-' + pad(n.getUTCMonth()+1) + '-' +
+            pad(n.getUTCDate()) + ' ' + pad(n.getUTCHours()) + ':' +
+            pad(n.getUTCMinutes()) + ':' + pad(n.getUTCSeconds()) + 'Z';
+    }
+    tick(); setInterval(tick, 1000);
+})();
+
+loadData();
+startCountdown();
+</script>
+</body>
+</html>
