@@ -130,6 +130,15 @@ def main():
 
             color = latency_color(latency, ftm_status)
 
+            # Auto-clear stale FTM OFFLINE if L3 data is clearly flowing (< 10 min)
+            # Live data proves the radar is operational regardless of old FTM
+            auto_cleared = False
+            if latency is not None and latency < 10 and \
+               ftm_status and ftm_status.upper() in ('OFFLINE', 'MAINTENANCE'):
+                ftm_status = 'OPERATIONAL'
+                auto_cleared = True
+                color = 'green'
+
             # Determine overall status
             if ftm_status in ('OFFLINE', 'MAINTENANCE'):
                 status = ftm_status
@@ -138,16 +147,34 @@ def main():
             else:
                 status = 'OPERATIONAL'
 
-            cur.execute("""
-                INSERT INTO radar.radar_status
-                    (site_id, status, last_update, latency_minutes, last_l3_time)
-                VALUES (%s, %s, NOW(), %s, %s)
-                ON CONFLICT (site_id) DO UPDATE SET
-                    status          = EXCLUDED.status,
-                    last_update     = NOW(),
-                    latency_minutes = EXCLUDED.latency_minutes,
-                    last_l3_time    = EXCLUDED.last_l3_time
-            """, (site_id, status, latency, ts))
+            if auto_cleared:
+                cur.execute("""
+                    INSERT INTO radar.radar_status
+                        (site_id, status, last_update, latency_minutes, last_l3_time,
+                         ftm_status, ftm_message, ftm_time)
+                    VALUES (%s, %s, NOW(), %s, %s, %s, %s, NOW())
+                    ON CONFLICT (site_id) DO UPDATE SET
+                        status          = EXCLUDED.status,
+                        last_update     = NOW(),
+                        latency_minutes = EXCLUDED.latency_minutes,
+                        last_l3_time    = EXCLUDED.last_l3_time,
+                        ftm_status      = EXCLUDED.ftm_status,
+                        ftm_message     = EXCLUDED.ftm_message,
+                        ftm_time        = EXCLUDED.ftm_time
+                """, (site_id, status, latency, ts,
+                      'OPERATIONAL', 'Auto-cleared: L3 latency < 10 min'))
+                log.info(f'{site_id}: auto-cleared stale OFFLINE — latency={latency} min')
+            else:
+                cur.execute("""
+                    INSERT INTO radar.radar_status
+                        (site_id, status, last_update, latency_minutes, last_l3_time)
+                    VALUES (%s, %s, NOW(), %s, %s)
+                    ON CONFLICT (site_id) DO UPDATE SET
+                        status          = EXCLUDED.status,
+                        last_update     = NOW(),
+                        latency_minutes = EXCLUDED.latency_minutes,
+                        last_l3_time    = EXCLUDED.last_l3_time
+                """, (site_id, status, latency, ts))
             updated += 1
 
         conn.commit()
