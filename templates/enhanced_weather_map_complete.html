@@ -489,6 +489,12 @@
             </div>
             <div id="n0hStatus" style="font-size:10px;color:#888;text-align:center;min-height:14px;"></div>
         </div>
+        <label class="checkbox-label">
+            <input type="checkbox" id="nidsToggle"> Site Radar N0B (zoom&gt;9)
+        </label>
+        <div id="nidsControls" style="display:none;margin-top:2px;margin-bottom:4px;">
+            <div id="nidsStatus" style="font-size:10px;color:#888;text-align:center;min-height:14px;"></div>
+        </div>
         <div class="divider"></div>
         <h3>Wind Flow</h3>
         <label class="checkbox-label">
@@ -2230,6 +2236,147 @@
                     var pct = this.value;
                     if (osv) osv.textContent = pct + '%';
                     if (n0hLayer) n0hLayer.setOpacity(pct / 100);
+                });
+            }
+        });
+    })();
+    </script>
+
+    <!-- N0B Single-site NIDS legend -->
+    <div id="nidsLegend" style="display:none;position:fixed;bottom:60px;right:10px;
+         background:rgba(255,255,255,0.93);border:1px solid #ccc;border-radius:4px;
+         padding:6px 10px;z-index:1002;font-size:11px;font-family:sans-serif;min-width:140px;">
+        <div style="font-weight:700;margin-bottom:4px;">&#128225; Base Reflectivity</div>
+        <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgb(4,233,231);"></span>5–10 dBZ</div>
+        <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgb(1,159,244);"></span>10–15 dBZ</div>
+        <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgb(3,0,244);"></span>15–20 dBZ</div>
+        <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgb(2,253,2);"></span>20–25 dBZ</div>
+        <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgb(52,125,0);"></span>25–35 dBZ</div>
+        <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgb(253,191,1);"></span>35–40 dBZ</div>
+        <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgb(253,116,0);"></span>40–45 dBZ</div>
+        <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgb(253,0,0);"></span>45–50 dBZ</div>
+        <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgb(148,0,211);"></span>55–60 dBZ</div>
+        <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgb(255,255,255);border:1px solid #ccc;"></span>&gt;65 dBZ</div>
+        <div style="margin-top:4px;font-size:10px;color:#666;" id="nidsLegendSite">NEXRAD N0B</div>
+    </div>
+
+    <script>
+    // ── Single-site NIDS zoom overlay (N0B, zoom > 9) ─────────────────────
+    (function() {
+        'use strict';
+        var ZOOM_THRESHOLD = 9;
+        var NIDS_API       = '/CAP_WxCOP/api/nids';
+        var PRODUCT        = 'N0B';
+        var REFRESH_MS     = 300000;
+
+        var nidsLayer     = null;
+        var nidsEnabled   = false;
+        var currentSite   = null;
+        var siteList      = null;
+        var refreshTimer  = null;
+        var renderPending = false;
+
+        function setStatus(msg) {
+            var el = document.getElementById('nidsStatus');
+            if (el) el.textContent = msg;
+        }
+
+        function nearestSite(lat, lon) {
+            if (!siteList || !siteList.length) return null;
+            var best = null, bestDist = Infinity;
+            siteList.forEach(function(s) {
+                var dlat = s.lat - lat;
+                var dlon = (s.lon - lon) * Math.cos(lat * Math.PI / 180);
+                var d = dlat*dlat + dlon*dlon;
+                if (d < bestDist) { bestDist = d; best = s; }
+            });
+            return best;
+        }
+
+        function loadSiteList(cb) {
+            if (siteList) { cb(); return; }
+            fetch(NIDS_API + '/sites?product=' + PRODUCT)
+                .then(function(r) { return r.json(); })
+                .then(function(d) { siteList = d.sites || []; cb(); })
+                .catch(function() { siteList = []; cb(); });
+        }
+
+        function updateOverlay() {
+            var map = window._capMap;
+            if (!map || !nidsEnabled) return;
+            if (map.getZoom() <= ZOOM_THRESHOLD) {
+                if (nidsLayer) { map.removeLayer(nidsLayer); nidsLayer = null; }
+                document.getElementById('nidsLegend').style.display = 'none';
+                setStatus('Zoom in past ' + ZOOM_THRESHOLD + ' for site radar');
+                currentSite = null;
+                return;
+            }
+            if (renderPending) return;
+            renderPending = true;
+            var center = map.getCenter();
+            loadSiteList(function() {
+                var site = nearestSite(center.lat, center.lng);
+                if (!site) { renderPending = false; return; }
+                if (site.site_id === currentSite && nidsLayer) {
+                    renderPending = false; return;
+                }
+                setStatus('Loading ' + site.site_id + '…');
+                fetch(NIDS_API + '/' + site.site_id + '/' + PRODUCT + '/meta')
+                    .then(function(r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+                    .then(function(meta) {
+                        var km_lat = 111.32;
+                        var km_lon = km_lat * Math.cos(meta.lat * Math.PI / 180);
+                        var lr = 230 / km_lat, lo = 230 / km_lon;
+                        var bounds = [[meta.lat-lr, meta.lon-lo],[meta.lat+lr, meta.lon+lo]];
+                        var url = NIDS_API + '/' + site.site_id + '/' + PRODUCT + '?_=' + Date.now();
+                        if (nidsLayer) {
+                            nidsLayer.setUrl(url);
+                            nidsLayer.setBounds(bounds);
+                        } else {
+                            nidsLayer = L.imageOverlay(url, bounds, {
+                                opacity: 0.85, interactive: false, zIndex: 350
+                            }).addTo(map);
+                        }
+                        currentSite = site.site_id;
+                        document.getElementById('nidsLegend').style.display = 'block';
+                        var age = meta.age_secs < 60 ? '<1 min' :
+                                  Math.round(meta.age_secs/60) + ' min ago';
+                        document.getElementById('nidsLegendSite').textContent =
+                            site.site_id + ' · N0B · ' + age;
+                        setStatus('');
+                        renderPending = false;
+                    })
+                    .catch(function() { setStatus('No data'); renderPending = false; });
+            });
+        }
+
+        function removeOverlay() {
+            var map = window._capMap;
+            if (nidsLayer && map) { map.removeLayer(nidsLayer); nidsLayer = null; }
+            document.getElementById('nidsLegend').style.display = 'none';
+            setStatus(''); currentSite = null;
+            if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            var tog = document.getElementById('nidsToggle');
+            if (tog) {
+                tog.addEventListener('change', function() {
+                    nidsEnabled = this.checked;
+                    document.getElementById('nidsControls').style.display =
+                        nidsEnabled ? 'block' : 'none';
+                    if (nidsEnabled) {
+                        var map = window._capMap;
+                        if (map) map.on('zoomend moveend', updateOverlay);
+                        updateOverlay();
+                        refreshTimer = setInterval(function() {
+                            currentSite = null; updateOverlay();
+                        }, REFRESH_MS);
+                    } else {
+                        var map = window._capMap;
+                        if (map) map.off('zoomend moveend', updateOverlay);
+                        removeOverlay();
+                    }
                 });
             }
         });

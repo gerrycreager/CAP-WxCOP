@@ -138,8 +138,8 @@
   <div style="display:flex;align-items:center;gap:12px;">
     <div id="last-updated">Loading…</div>
     <button id="refresh-btn" onclick="loadData()">↻ Refresh</button>
-    <a href="/CAP_WxCOP_DEV/cadet-wx-plan" style="color:#8af;font-size:0.8rem;text-decoration:none;">📅 Planning →</a>
-    <a href="/CAP_WxCOP_DEV/" style="color:#8af;font-size:0.8rem;text-decoration:none;">← Home</a>
+    <a href="/CAP_WxCOP/cadet-wx-plan" style="color:#8af;font-size:0.8rem;text-decoration:none;">📅 Planning →</a>
+    <a href="/CAP_WxCOP/" style="color:#8af;font-size:0.8rem;text-decoration:none;">← Home</a>
   </div>
 </div>
 
@@ -273,7 +273,7 @@ function markerIcon(color, label) {
 async function loadData() {
   document.getElementById('last-updated').textContent = 'Loading…';
   try {
-    const resp = await fetch('/CAP_WxCOP_DEV/api/cadet_wx/current');
+    const resp = await fetch('/CAP_WxCOP/api/cadet_wx/current');
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     siteData = data.sites || [];
@@ -437,7 +437,7 @@ setInterval(loadData, 5 * 60 * 1000);
 
 // ── GLM Lightning ────────────────────────────────────────────────────────────
 var glmLayer = null, glmTimer = null;
-var GLM_API = '/CAP_WxCOP_DEV/api/glm/flashes';
+var GLM_API = '/CAP_WxCOP/api/glm/flashes';
 
 function glmColor(a){ return a<5?'#ff3333':a<15?'#ffff00':'#00cc00'; }
 function glmSize(a) { return a<5?14:a<15?11:9; }

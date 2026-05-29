@@ -337,8 +337,8 @@
   </div>
   <div class="header-title">WBGT CALCULATOR</div>
   <nav class="header-nav">
-    <a href="/CAP_WxCOP_DEV/cadet-wx">← Cadet COP</a>
-    <a href="/CAP_WxCOP_DEV/">← Home</a>
+    <a href="/CAP_WxCOP/cadet-wx">← Cadet COP</a>
+    <a href="/CAP_WxCOP/">← Home</a>
   </nav>
 </header>
 
@@ -901,7 +901,7 @@ async function loadNearestMetar() {
 
   try {
     const resp = await fetch(
-      `/CAP_WxCOP_DEV/api/cadet_wx/nearest_metar?lat=${lat}&lon=${lon}&limit=5`);
+      `/CAP_WxCOP/api/cadet_wx/nearest_metar?lat=${lat}&lon=${lon}&limit=5`);
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const data = await resp.json();
     nearestStations = data.stations || [];
@@ -985,7 +985,7 @@ function loadNearestConditions() {
 // ── Load site list ─────────────────────────────────────────────────────────────
 async function loadSites() {
   try {
-    const resp = await fetch('/CAP_WxCOP_DEV/api/cadet_wx/sites');
+    const resp = await fetch('/CAP_WxCOP/api/cadet_wx/sites');
     if (!resp.ok) return;
     const data = await resp.json();
     const sel  = document.getElementById('site-select');
@@ -1018,7 +1018,7 @@ async function loadSiteConditions() {
   setNow();
 
   try {
-    const resp = await fetch('/CAP_WxCOP_DEV/api/cadet_wx/current');
+    const resp = await fetch('/CAP_WxCOP/api/cadet_wx/current');
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const data = await resp.json();
     const site = (data.sites || []).find(s => s.site_id == siteId);

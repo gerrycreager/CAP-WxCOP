@@ -180,7 +180,7 @@
     <div id="last-updated">Loading…</div>
     <button id="refresh-btn" onclick="loadData()">↻ Refresh</button>
     <a href="/cadet_wx" style="color:#8af;font-size:0.8rem;text-decoration:none;">← COP</a>
-    <a href="/CAP_WxCOP_DEV/" style="color:#8af;font-size:0.8rem;text-decoration:none;">← Home</a>
+    <a href="/CAP_WxCOP/" style="color:#8af;font-size:0.8rem;text-decoration:none;">← Home</a>
   </div>
 </div>
 
@@ -394,7 +394,7 @@ function onHourChange(h) {
 async function loadData() {
   document.getElementById('last-updated').textContent = 'Loading…';
   try {
-    const resp = await fetch(`/CAP_WxCOP_DEV/api/cadet_wx/forecast?hour=${currentHour}`);
+    const resp = await fetch(`/CAP_WxCOP/api/cadet_wx/forecast?hour=${currentHour}`);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     allData = data.sites || [];
@@ -568,7 +568,7 @@ setInterval(loadData, 10 * 60 * 1000);  // refresh every 10 min
 
 // ── GLM Lightning ────────────────────────────────────────────────────────────
 var glmLayer = null, glmTimer = null;
-var GLM_API = '/CAP_WxCOP_DEV/api/glm/flashes';
+var GLM_API = '/CAP_WxCOP/api/glm/flashes';
 
 function glmColor(a){ return a<5?'#ff3333':a<15?'#ffff00':'#00cc00'; }
 function glmSize(a) { return a<5?14:a<15?11:9; }
