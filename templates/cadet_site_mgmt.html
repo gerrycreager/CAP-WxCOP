@@ -263,13 +263,12 @@ async function submitForm() {
   if (isNaN(lat)||isNaN(lon)) { showAlert('Valid latitude and longitude are required.', 'error'); return; }
 
   const payload = {
-    name,
-    short_name:    document.getElementById('f-short-name').value.trim() || null,
+    site_name: name,
     cap_region:    region,
-    nearest_icao:  document.getElementById('f-icao').value.trim().toUpperCase() || null,
+    station_id: document.getElementById('f-icao').value.trim().toUpperCase() || null,
     lat, lon,
     elevation_ft:  parseInt(document.getElementById('f-elev').value) || null,
-    activity_type: document.getElementById('f-activity').value || null,
+    site_type: document.getElementById('f-activity').value || 'ground',
   };
 
   try {
