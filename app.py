@@ -111,6 +111,14 @@ try:
 except Exception as e:
     print(f"⚠ Could not load HRRR Winds API: {e}")
 
+# Local Base Reflectivity at sufficiently high zoom (z>9)
+try:
+    from nids_api import nids_api
+    app.register_blueprint(nids_api, url_prefix='/api/nids')
+    print('✓ NIDS API registered at /CAP_WxCOP/api/nids')
+except Exception as e:
+    print(f'⚠ Could not load NIDS API: {e}')
+
 # Radar API - NEXRAD animation and data
 try:
     from radar_api import radar_api
@@ -177,6 +185,13 @@ except Exception as e:
     print(f"⚠ Could not load Wing ICL admin: {e}")
 
 print("CAP Weather COP initialization complete.\n")
+
+try:
+    from cadet_wx_api import cadet_wx_bp
+    app.register_blueprint(cadet_wx_bp)
+    print("✓ Cadet WX API registered")
+except Exception as e:
+    print(f"⚠ Could not load Cadet WX API: {e}")
 
 # ============================================================================
 # MAIN ROUTES - Professional Production Interface

@@ -72,3 +72,6 @@ venv/
 .vscode/
 .webassets-cache
 *.wsgi.bak
+static/geojson/
+static/mrms_tiles
+static/radar/
