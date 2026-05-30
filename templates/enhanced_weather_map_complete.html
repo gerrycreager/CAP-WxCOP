@@ -472,8 +472,9 @@
         <div class="divider"></div>
         <h3>Radar</h3>
         <label class="checkbox-label">
-            <input type="checkbox" id="mrmsLocalToggle"> MRMS_Composite Refl
+            <input type="checkbox" id="mrmsLocalToggle"> Base Reflectivity
         </label>
+        <div id="radarStatus" style="font-size:10px;color:#888;text-align:center;min-height:14px;margin-bottom:2px;"></div>
         <label class="checkbox-label">
             <input type="checkbox" id="tstmToggle"> TRW Probability (LAMP)
         </label>
@@ -488,12 +489,6 @@
                 <span id="n0hOpacityVal" style="color:#888;width:28px;">70%</span>
             </div>
             <div id="n0hStatus" style="font-size:10px;color:#888;text-align:center;min-height:14px;"></div>
-        </div>
-        <label class="checkbox-label">
-            <input type="checkbox" id="nidsToggle"> Site Radar N0B (zoom&gt;9)
-        </label>
-        <div id="nidsControls" style="display:none;margin-top:2px;margin-bottom:4px;">
-            <div id="nidsStatus" style="font-size:10px;color:#888;text-align:center;min-height:14px;"></div>
         </div>
         <div class="divider"></div>
         <h3>Wind Flow</h3>
@@ -1848,7 +1843,7 @@
             <option value="250">Fast</option>
             <option value="100">Max</option>
         </select>
-        <span style="font-size:11px;color:#aaa;white-space:nowrap;">MRMS_Composite Refl</span>
+        <span style="font-size:11px;color:#aaa;white-space:nowrap;">Base Reflectivity</span>
     </div>
 
 
@@ -2242,43 +2237,63 @@
     })();
     </script>
 
-    <!-- N0B Single-site NIDS legend -->
+    <!-- NIDS single-site legend -->
     <div id="nidsLegend" style="display:none;position:fixed;bottom:60px;right:10px;
          background:rgba(255,255,255,0.93);border:1px solid #ccc;border-radius:4px;
-         padding:6px 10px;z-index:1002;font-size:11px;font-family:sans-serif;min-width:140px;">
+         padding:6px 10px;z-index:1002;font-size:11px;font-family:sans-serif;min-width:150px;">
         <div style="font-weight:700;margin-bottom:4px;">&#128225; Base Reflectivity</div>
         <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgb(4,233,231);"></span>5–10 dBZ</div>
-        <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgb(1,159,244);"></span>10–15 dBZ</div>
-        <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgb(3,0,244);"></span>15–20 dBZ</div>
-        <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgb(2,253,2);"></span>20–25 dBZ</div>
-        <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgb(52,125,0);"></span>25–35 dBZ</div>
-        <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgb(253,191,1);"></span>35–40 dBZ</div>
+        <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgb(1,159,244);"></span>10–20 dBZ</div>
+        <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgb(2,253,2);"></span>20–30 dBZ</div>
+        <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgb(253,191,1);"></span>30–40 dBZ</div>
         <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgb(253,116,0);"></span>40–45 dBZ</div>
-        <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgb(253,0,0);"></span>45–50 dBZ</div>
-        <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgb(148,0,211);"></span>55–60 dBZ</div>
+        <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgb(253,0,0);"></span>45–55 dBZ</div>
+        <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgb(148,0,211);"></span>55–65 dBZ</div>
         <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgb(255,255,255);border:1px solid #ccc;"></span>&gt;65 dBZ</div>
-        <div style="margin-top:4px;font-size:10px;color:#666;" id="nidsLegendSite">NEXRAD N0B</div>
+        <div id="nidsLegendSite" style="margin-top:4px;font-size:10px;color:#666;">NEXRAD N0B</div>
+        <!-- Animation controls — shown when history loaded -->
+        <div id="nidsAnimBar" style="display:none;margin-top:6px;border-top:1px solid #eee;padding-top:5px;">
+            <div style="display:flex;align-items:center;gap:4px;margin-bottom:3px;">
+                <button id="nidsAnimPrev" style="padding:1px 6px;font-size:11px;">◀</button>
+                <button id="nidsAnimPlay" style="padding:1px 6px;font-size:11px;">▶</button>
+                <button id="nidsAnimNext" style="padding:1px 6px;font-size:11px;">▶|</button>
+                <span id="nidsAnimLabel" style="font-size:10px;color:#666;flex:1;text-align:right;"></span>
+            </div>
+            <input type="range" id="nidsAnimSlider" min="0" value="0"
+                   style="width:100%;accent-color:#e53935;">
+        </div>
     </div>
 
     <script>
-    // ── Single-site NIDS zoom overlay (N0B, zoom > 9) ─────────────────────
+    // ── Integrated Radar: MRMS (zoom≤9) + NIDS N0B (zoom>9) with animation ─
     (function() {
         'use strict';
         var ZOOM_THRESHOLD = 9;
         var NIDS_API       = '/CAP_WxCOP/api/nids';
         var PRODUCT        = 'N0B';
-        var REFRESH_MS     = 300000;
+        var REFRESH_MS     = 300000;   // 5-min live refresh
+        var ANIM_INTERVAL  = 600;      // ms between animation frames
 
         var nidsLayer     = null;
-        var nidsEnabled   = false;
         var currentSite   = null;
         var siteList      = null;
         var refreshTimer  = null;
         var renderPending = false;
 
-        function setStatus(msg) {
-            var el = document.getElementById('nidsStatus');
+        // Animation state
+        var animFrames    = [];
+        var animIdx       = 0;
+        var animTimer     = null;
+        var animPlaying   = false;
+
+        function setRadarStatus(msg) {
+            var el = document.getElementById('radarStatus');
             if (el) el.textContent = msg;
+        }
+
+        function isRadarEnabled() {
+            var tog = document.getElementById('mrmsLocalToggle');
+            return tog && tog.checked;
         }
 
         function nearestSite(lat, lon) {
@@ -2295,40 +2310,117 @@
 
         function loadSiteList(cb) {
             if (siteList) { cb(); return; }
-            fetch(NIDS_API + '/sites?product=' + PRODUCT)
+            fetch(NIDS_API + '/sites')
                 .then(function(r) { return r.json(); })
                 .then(function(d) { siteList = d.sites || []; cb(); })
                 .catch(function() { siteList = []; cb(); });
         }
 
-        function updateOverlay() {
+        function siteBounds(lat, lon) {
+            var kmlat = 111.32;
+            var kmlon = kmlat * Math.cos(lat * Math.PI / 180);
+            var lr = 230/kmlat, lo = 230/kmlon;
+            return [[lat-lr, lon-lo], [lat+lr, lon+lo]];
+        }
+
+        function removeNidsLayer() {
             var map = window._capMap;
-            if (!map || !nidsEnabled) return;
+            if (nidsLayer && map) { map.removeLayer(nidsLayer); nidsLayer = null; }
+            document.getElementById('nidsLegend').style.display = 'none';
+            document.getElementById('nidsAnimBar').style.display = 'none';
+            stopAnimation();
+            currentSite = null;
+        }
+
+        // ── Animation ──────────────────────────────────────────────────────
+        function loadHistory(site) {
+            fetch(NIDS_API + '/' + site.site_id + '/' + PRODUCT + '/history?n=10')
+                .then(function(r) { return r.json(); })
+                .then(function(d) {
+                    if (!d.frames || d.frames.length < 2) return;
+                    animFrames = d.frames;  // newest first
+                    animIdx    = 0;
+                    var slider = document.getElementById('nidsAnimSlider');
+                    slider.max   = animFrames.length - 1;
+                    slider.value = 0;
+                    document.getElementById('nidsAnimBar').style.display = 'block';
+                    updateAnimLabel();
+                })
+                .catch(function() {});
+        }
+
+        function showFrame(idx) {
+            var map = window._capMap;
+            if (!map || !animFrames.length) return;
+            var frame = animFrames[idx];
+            if (!frame) return;
+            var url = frame.url;
+            if (nidsLayer) {
+                nidsLayer.setUrl(url);
+            }
+            animIdx = idx;
+            document.getElementById('nidsAnimSlider').value = idx;
+            updateAnimLabel();
+        }
+
+        function updateAnimLabel() {
+            var el = document.getElementById('nidsAnimLabel');
+            if (!el || !animFrames.length) return;
+            var f = animFrames[animIdx];
+            var age = f.age_secs < 60 ? '<1m' : Math.round(f.age_secs/60) + 'm ago';
+            el.textContent = (animIdx + 1) + '/' + animFrames.length + ' · ' + age;
+        }
+
+        function stopAnimation() {
+            if (animTimer) { clearInterval(animTimer); animTimer = null; }
+            animPlaying = false;
+            var btn = document.getElementById('nidsAnimPlay');
+            if (btn) btn.textContent = '▶';
+        }
+
+        function toggleAnimation() {
+            if (animPlaying) {
+                stopAnimation();
+            } else {
+                animPlaying = true;
+                document.getElementById('nidsAnimPlay').textContent = '⏸';
+                animTimer = setInterval(function() {
+                    var next = (animIdx + 1) % animFrames.length;
+                    showFrame(next);
+                }, ANIM_INTERVAL);
+            }
+        }
+
+        // ── Main overlay update ────────────────────────────────────────────
+        function updateRadarSource() {
+            var map = window._capMap;
+            if (!map || !isRadarEnabled()) {
+                removeNidsLayer(); setRadarStatus(''); return;
+            }
             if (map.getZoom() <= ZOOM_THRESHOLD) {
-                if (nidsLayer) { map.removeLayer(nidsLayer); nidsLayer = null; }
-                document.getElementById('nidsLegend').style.display = 'none';
-                setStatus('Zoom in past ' + ZOOM_THRESHOLD + ' for site radar');
-                currentSite = null;
-                return;
+                removeNidsLayer(); setRadarStatus(''); return;
             }
             if (renderPending) return;
             renderPending = true;
+
             var center = map.getCenter();
             loadSiteList(function() {
                 var site = nearestSite(center.lat, center.lng);
                 if (!site) { renderPending = false; return; }
+
                 if (site.site_id === currentSite && nidsLayer) {
                     renderPending = false; return;
                 }
-                setStatus('Loading ' + site.site_id + '…');
+
+                stopAnimation();
+                setRadarStatus('Loading ' + site.site_id + '…');
+
                 fetch(NIDS_API + '/' + site.site_id + '/' + PRODUCT + '/meta')
                     .then(function(r) { if (!r.ok) throw new Error(r.status); return r.json(); })
                     .then(function(meta) {
-                        var km_lat = 111.32;
-                        var km_lon = km_lat * Math.cos(meta.lat * Math.PI / 180);
-                        var lr = 230 / km_lat, lo = 230 / km_lon;
-                        var bounds = [[meta.lat-lr, meta.lon-lo],[meta.lat+lr, meta.lon+lo]];
-                        var url = NIDS_API + '/' + site.site_id + '/' + PRODUCT + '?_=' + Date.now();
+                        var bounds = siteBounds(meta.lat, meta.lon);
+                        var url = NIDS_API + '/' + site.site_id + '/' + PRODUCT +
+                                  '?_=' + Date.now();
                         if (nidsLayer) {
                             nidsLayer.setUrl(url);
                             nidsLayer.setBounds(bounds);
@@ -2338,48 +2430,70 @@
                             }).addTo(map);
                         }
                         currentSite = site.site_id;
+                        // Reset anim frames when site changes
+                        animFrames = []; animIdx = 0;
+                        document.getElementById('nidsAnimBar').style.display = 'none';
                         document.getElementById('nidsLegend').style.display = 'block';
                         var age = meta.age_secs < 60 ? '<1 min' :
                                   Math.round(meta.age_secs/60) + ' min ago';
                         document.getElementById('nidsLegendSite').textContent =
                             site.site_id + ' · N0B · ' + age;
-                        setStatus('');
+                        setRadarStatus(site.site_id + ' N0B');
                         renderPending = false;
+                        // Load history for animation
+                        loadHistory(site);
                     })
-                    .catch(function() { setStatus('No data'); renderPending = false; });
+                    .catch(function() {
+                        setRadarStatus('No site data');
+                        renderPending = false;
+                    });
             });
         }
 
-        function removeOverlay() {
-            var map = window._capMap;
-            if (nidsLayer && map) { map.removeLayer(nidsLayer); nidsLayer = null; }
-            document.getElementById('nidsLegend').style.display = 'none';
-            setStatus(''); currentSite = null;
-            if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
-        }
-
+        // ── DOM wiring ─────────────────────────────────────────────────────
         document.addEventListener('DOMContentLoaded', function() {
-            var tog = document.getElementById('nidsToggle');
+            // Poll until _capMap available
+            var poll = setInterval(function() {
+                if (!window._capMap) return;
+                clearInterval(poll);
+                window._capMap.on('zoomend moveend', function() {
+                    if (isRadarEnabled()) { currentSite = null; updateRadarSource(); }
+                });
+            }, 200);
+
+            // Extend mrmsLocalToggle
+            var tog = document.getElementById('mrmsLocalToggle');
             if (tog) {
                 tog.addEventListener('change', function() {
-                    nidsEnabled = this.checked;
-                    document.getElementById('nidsControls').style.display =
-                        nidsEnabled ? 'block' : 'none';
-                    if (nidsEnabled) {
-                        var map = window._capMap;
-                        if (map) map.on('zoomend moveend', updateOverlay);
-                        updateOverlay();
-                        refreshTimer = setInterval(function() {
-                            currentSite = null; updateOverlay();
-                        }, REFRESH_MS);
+                    if (!this.checked) {
+                        removeNidsLayer(); setRadarStatus('');
+                        if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
                     } else {
-                        var map = window._capMap;
-                        if (map) map.off('zoomend moveend', updateOverlay);
-                        removeOverlay();
+                        updateRadarSource();
+                        refreshTimer = setInterval(function() {
+                            currentSite = null; updateRadarSource();
+                        }, REFRESH_MS);
                     }
                 });
             }
+
+            // Animation controls
+            document.getElementById('nidsAnimPrev').addEventListener('click', function() {
+                stopAnimation();
+                showFrame((animIdx - 1 + animFrames.length) % animFrames.length);
+            });
+            document.getElementById('nidsAnimPlay').addEventListener('click', toggleAnimation);
+            document.getElementById('nidsAnimNext').addEventListener('click', function() {
+                stopAnimation();
+                showFrame((animIdx + 1) % animFrames.length);
+            });
+            document.getElementById('nidsAnimSlider').addEventListener('input', function() {
+                stopAnimation();
+                showFrame(parseInt(this.value));
+            });
         });
+
+        window._updateRadarSource = updateRadarSource;
     })();
     </script>
 
