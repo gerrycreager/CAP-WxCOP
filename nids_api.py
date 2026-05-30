@@ -29,7 +29,7 @@ L3_BASE    = '/LDM/radar/level3'
 NIDS_SITE  = '/home/ldm/bin/nids_site'
 CACHE_DIR  = '/tmp/nids_cache'
 CACHE_SECS = 300    # 5 min render cache
-MAX_AGE    = 720    # 12 min — skip stale files
+MAX_AGE    = 7200    # 12 min — skip stale files
 DB_DSN     = 'host=192.168.0.60 port=5432 dbname=avwx_data user=avwx_user'
 RENDER_SIZE = 1024  # PNG pixels
 
