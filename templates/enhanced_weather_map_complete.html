@@ -1728,7 +1728,14 @@
                 });
             }
             document.getElementById('mrmsLocalDuration').addEventListener('change',function(){
-                if(document.getElementById('mrmsLocalToggle').checked) mlLoadIndex();
+                if(document.getElementById('mrmsLocalToggle').checked) {
+                    if (nidsActive && currentSite) {
+                        /* Reload NIDS history with new duration */
+                        loadNidsHistory({site_id: currentSite}, currentProd);
+                    } else {
+                        mlLoadIndex();
+                    }
+                }
             });
             document.getElementById('mrmsPlaySpeed').addEventListener('change',function(){
                 if(mlPlaying){ mlPause(); mlPlay(); }
@@ -2122,7 +2129,7 @@
 
 
     <!-- NIDS single-site legend -->
-    <div id="nidsLegend" style="display:none;position:fixed;bottom:60px;right:10px;
+    <div id="nidsLegend" style="display:none;position:fixed;bottom:60px;left:10px;
          background:rgba(255,255,255,0.93);border:1px solid #ccc;border-radius:4px;
          padding:6px 10px;z-index:1002;font-size:11px;font-family:sans-serif;min-width:150px;">
         <div id="nidsLegendTitle" style="font-weight:700;margin-bottom:4px;">📡 Base Reflectivity</div>
@@ -2239,35 +2246,104 @@
             }
         }
 
+        var nidsAnimTimer = null;
+        var nidsAnimPlaying = false;
+
+        function nidsAnimPlay() {
+            if (nidsAnimPlaying) return;
+            nidsAnimPlaying = true;
+            document.getElementById('mBtnPlay').innerHTML = '&#9646;&#9646;';
+            var spd = 600;
+            var sel = document.getElementById('mrmsPlaySpeed');
+            if (sel) { var v=parseInt(sel.value); if(!isNaN(v)) spd=v; }
+            nidsAnimTimer = setInterval(function() {
+                if (!window._nidsFrames || !window._nidsFrames.length) return;
+                nidsGoFrame((window.mlCurrent + 1) % window._nidsFrames.length);
+            }, spd);
+        }
+
+        function nidsAnimPause() {
+            nidsAnimPlaying = false;
+            document.getElementById('mBtnPlay').innerHTML = '&#9654;';
+            if (nidsAnimTimer) { clearInterval(nidsAnimTimer); nidsAnimTimer = null; }
+        }
+
         function hijackTimeline(frames) {
             window._nidsFrames = frames;
-            /* Save mlGoFrame and replace */
             if (!_origGoFrame && typeof window.mlGoFrame === 'function') {
                 _origGoFrame = window.mlGoFrame;
             }
             window.mlGoFrame = nidsGoFrame;
-            /* Populate mlFrames with dummy entries so length checks pass */
-            window.mlFrames = frames.map(function(f, i) { return {timestamp: 'NIDS_' + i}; });
+            window.mlFrames = frames.map(function(f,i){return{timestamp:'NIDS_'+i};});
             window.mlCurrent = 0;
             nidsActive = true;
-            /* Go to latest frame */
+            /* Pause MRMS animation — mlPlay uses closure so must stop timer directly */
+            if (typeof window.mlPause === 'function') window.mlPause();
+            /* Hide MRMS colorbar */
+            var cb = document.getElementById('mrmsColorbar');
+            if (cb) cb.style.display = 'none';
+            /* Show latest frame */
             nidsGoFrame(frames.length - 1);
-            /* Update bottom bar label */
             var lbl = document.getElementById('mrmsLocalLabel');
             if (lbl) lbl.textContent = currentSite + ' ' + currentProd;
+            /* Wire play button to NIDS animation */
+            var playBtn = document.getElementById('mBtnPlay');
+            if (playBtn) {
+                playBtn._nidsHandler = function() {
+                    nidsAnimPlaying ? nidsAnimPause() : nidsAnimPlay();
+                };
+                playBtn.removeEventListener('click', playBtn._mrmsHandler);
+                playBtn.addEventListener('click', playBtn._nidsHandler);
+            }
+            /* Wire prev/next/first/last to nidsGoFrame */
+            var btnFirst = document.getElementById('mBtnFirst');
+            var btnPrev  = document.getElementById('mBtnPrev');
+            var btnNext  = document.getElementById('mBtnNext');
+            var btnLast  = document.getElementById('mBtnLast');
+            if (btnFirst) { btnFirst._nids = function(){nidsAnimPause();nidsGoFrame(0);}; btnFirst.addEventListener('click', btnFirst._nids); }
+            if (btnPrev)  { btnPrev._nids  = function(){nidsAnimPause();nidsGoFrame(Math.max(0,window.mlCurrent-1));}; btnPrev.addEventListener('click', btnPrev._nids); }
+            if (btnNext)  { btnNext._nids  = function(){nidsAnimPause();nidsGoFrame(Math.min(window._nidsFrames.length-1,window.mlCurrent+1));}; btnNext.addEventListener('click', btnNext._nids); }
+            if (btnLast)  { btnLast._nids  = function(){nidsAnimPause();nidsGoFrame(window._nidsFrames.length-1);}; btnLast.addEventListener('click', btnLast._nids); }
+            /* Wire timeline scrubber */
+            var tl = document.getElementById('mrmsTimeline');
+            if (tl) {
+                tl._nidsHandler = function(e) {
+                    if (!window._nidsFrames || !window._nidsFrames.length) return;
+                    var rect = this.getBoundingClientRect();
+                    var pct  = Math.max(0, Math.min(1, (e.clientX-rect.left)/rect.width));
+                    nidsAnimPause();
+                    nidsGoFrame(Math.round(pct*(window._nidsFrames.length-1)));
+                };
+                tl.addEventListener('click', tl._nidsHandler);
+            }
         }
 
         function restoreTimeline() {
             if (!nidsActive) return;
+            nidsAnimPause();
             nidsActive = false;
             window._nidsFrames = [];
-            if (_origGoFrame) {
-                window.mlGoFrame = _origGoFrame;
+            if (_origGoFrame) { window.mlGoFrame = _origGoFrame; }
+            /* Unwire NIDS button handlers */
+            var playBtn = document.getElementById('mBtnPlay');
+            if (playBtn && playBtn._nidsHandler) {
+                playBtn.removeEventListener('click', playBtn._nidsHandler);
+                playBtn._nidsHandler = null;
+                playBtn.innerHTML = '&#9654;';
             }
-            /* Restore MRMS frames */
-            if (typeof window.mlLoadIndex === 'function') {
-                window.mlLoadIndex();
+            ['mBtnFirst','mBtnPrev','mBtnNext','mBtnLast'].forEach(function(id) {
+                var b = document.getElementById(id);
+                if (b && b._nids) { b.removeEventListener('click', b._nids); b._nids = null; }
+            });
+            var tl = document.getElementById('mrmsTimeline');
+            if (tl && tl._nidsHandler) {
+                tl.removeEventListener('click', tl._nidsHandler);
+                tl._nidsHandler = null;
             }
+            /* Restore MRMS colorbar */
+            var cb = document.getElementById('mrmsColorbar');
+            if (cb && isRadarEnabled()) cb.style.display = '';
+            if (typeof window.mlLoadIndex === 'function') window.mlLoadIndex();
             var lbl = document.getElementById('mrmsLocalLabel');
             if (lbl) lbl.textContent = 'Base Reflectivity';
             setRadarStatus('');
@@ -2300,7 +2376,9 @@
 
         /* ── Load NIDS history and populate timeline ── */
         function loadNidsHistory(site, prod) {
-            fetch(NIDS_API + '/' + site.site_id + '/' + prod + '/history?n=10')
+            var mins = parseInt(document.getElementById('mrmsLocalDuration').value) || 120;
+            var hours = mins / 60;
+            fetch(NIDS_API + '/' + site.site_id + '/' + prod + '/history?hours=' + hours)
                 .then(function(r) { return r.json(); })
                 .then(function(d) {
                     if (!d.frames || !d.frames.length) return;

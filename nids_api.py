@@ -29,7 +29,7 @@ L3_BASE    = '/LDM/radar/level3'
 NIDS_SITE  = '/home/ldm/bin/nids_site'
 CACHE_DIR  = '/tmp/nids_cache'
 CACHE_SECS = 300    # 5 min render cache
-MAX_AGE    = 7200    # 12 min — skip stale files
+MAX_AGE    = 720    # 12 min — skip stale for "live" display
 DB_DSN     = 'host=192.168.0.60 port=5432 dbname=avwx_data user=avwx_user'
 RENDER_SIZE = 1024  # PNG pixels
 
@@ -103,8 +103,11 @@ def find_newest_nids(site_id, product):
     return None, None
 
 
-def find_history_nids(site_id, product, n=10):
-    """Return list of recent NIDS files for animation (newest first)."""
+def find_history_nids(site_id, product, n=10, max_age_secs=14400):
+    """Return list of recent NIDS files for animation (newest first).
+    max_age_secs: how far back to look (default 4 hours = 14400s)
+    n: max number of frames to return
+    """
     now   = time.time()
     today = datetime.now(timezone.utc).strftime('%Y%m%d')
     yest  = (datetime.now(timezone.utc) - timedelta(days=1)).strftime('%Y%m%d')
@@ -114,9 +117,11 @@ def find_history_nids(site_id, product, n=10):
         day_files = sorted(glob.glob(pattern), reverse=True)
         for f in day_files:
             age = now - os.path.getmtime(f)
-            if age <= 7200:  # 2 hours history
+            if age <= max_age_secs:
                 files.append({'path': f, 'age': int(age),
                               'name': os.path.basename(f)})
+            if len(files) >= n:
+                break
         if len(files) >= n:
             break
     return files[:n]
@@ -234,8 +239,17 @@ def get_history(site_id, product):
     coords = get_site_coords(site_id)
     if not coords:
         return jsonify({'error': f'Unknown site: {site_id}'}), 404
-    n = request.args.get('n', 10, type=int)
-    files = find_history_nids(site_id, product, n)
+    # Support either ?n=frames or ?hours=N (hours takes precedence)
+    hours = request.args.get('hours', 0, type=float)
+    if hours > 0:
+        # ~30 frames/hour for N0B (2-min scans), ~10/hour for N0H (6-min scans)
+        fps = 10 if product == 'N0H' else 30
+        n = min(int(hours * fps) + 5, 200)  # +5 buffer, cap at 200
+        max_age = int(hours * 3600) + 300    # +5 min buffer
+    else:
+        n = request.args.get('n', 10, type=int)
+        max_age = 14400
+    files = find_history_nids(site_id, product, n, max_age)
     frames = []
     for i, f in enumerate(files):
         frames.append({
