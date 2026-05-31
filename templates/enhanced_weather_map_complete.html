@@ -2413,7 +2413,7 @@
             loadSiteList(prod, function() {
                 var site = nearestSite(center.lat, center.lng);
                 if (!site) { renderPending = false; return; }
-                if (site.site_id === currentSite && nidsLayer) {
+                if (site.site_id === currentSite && nidsLayer && nidsActive) {
                     renderPending = false; return;
                 }
 
@@ -2487,3 +2487,4 @@
 
 </body>
 </html>
+
