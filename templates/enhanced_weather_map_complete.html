@@ -1739,6 +1739,13 @@
             document.getElementById('mBtnNext').addEventListener('click', function(){mlPause();mlGoFrame(mlCurrent+1);});
             document.getElementById('mBtnLast').addEventListener('click', function(){mlPause();mlGoFrame(mlFrames.length-1);});
 
+            /* Expose to window scope for NIDS timeline integration */
+            window.mlGoFrame    = mlGoFrame;
+            window.mlLoadIndex  = mlLoadIndex;
+            window.mlPause      = mlPause;
+            window.mlFrames     = mlFrames;
+            window.mlCurrent    = mlCurrent;
+
             // ── GLM Lightning ────────────────────────────────────────────────
             var glmLayer=null, glmRefreshTimer=null;
 
@@ -1841,7 +1848,7 @@
             <option value="250">Fast</option>
             <option value="100">Max</option>
         </select>
-        <span style="font-size:11px;color:#aaa;white-space:nowrap;">Base Reflectivity</span>
+        <span id="mrmsLocalLabel" style="font-size:11px;color:#aaa;white-space:nowrap;">Base Reflectivity</span>
     </div>
 
 
@@ -2144,27 +2151,16 @@
             <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:10px;background:rgb(100,100,100);border-radius:2px;"></span>GC/Unknown</div>
         </div>
         <div id="nidsLegendSite" style="margin-top:4px;font-size:10px;color:#666;">NEXRAD N0B</div>
-        <!-- Animation controls -->
-        <div id="nidsAnimBar" style="display:none;margin-top:6px;border-top:1px solid #eee;padding-top:5px;">
-            <div style="display:flex;align-items:center;gap:4px;margin-bottom:3px;">
-                <button id="nidsAnimPrev" style="padding:1px 6px;font-size:11px;">◀</button>
-                <button id="nidsAnimPlay" style="padding:1px 6px;font-size:11px;">▶</button>
-                <button id="nidsAnimNext" style="padding:1px 6px;font-size:11px;">▶|</button>
-                <span id="nidsAnimLabel" style="font-size:10px;color:#666;flex:1;text-align:right;"></span>
-            </div>
-            <input type="range" id="nidsAnimSlider" min="0" value="0"
-                   style="width:100%;accent-color:#e53935;">
-        </div>
+        <!-- Animation controlled by bottom timeline bar when NIDS active -->
     </div>
 
     <script>
-    // ── Integrated Radar: MRMS (zoom≤9) + NIDS zoom overlay with product switching ─
+    // ── Integrated Radar: MRMS (zoom≤8) + NIDS (zoom>8) sharing bottom timeline ─
     (function() {
         'use strict';
-        var ZOOM_THRESHOLD = 9;
+        var ZOOM_THRESHOLD = 8;
         var NIDS_API       = '/CAP_WxCOP/api/nids';
         var REFRESH_MS     = 300000;
-        var ANIM_INTERVAL  = 600;
 
         var nidsLayer     = null;
         var currentSite   = null;
@@ -2172,10 +2168,11 @@
         var siteList      = null;
         var refreshTimer  = null;
         var renderPending = false;
-        var animFrames    = [];
-        var animIdx       = 0;
-        var animTimer     = null;
-        var animPlaying   = false;
+        var nidsActive    = false;  /* true when NIDS has taken over timeline */
+
+        /* Saved MRMS timeline state for restore on zoom-out */
+        var mrmsFramesSaved = null;
+        var mrmsCurrent     = -1;
 
         function getProduct() {
             var r = document.querySelector('input[name="radarProduct"]:checked');
@@ -2212,58 +2209,71 @@
             var lr = 230/kmlat, lo = 230/kmlon;
             return [[lat-lr, lon-lo], [lat+lr, lon+lo]];
         }
-        function removeNidsLayer() {
-            var map = window._capMap;
-            if (nidsLayer && map) { map.removeLayer(nidsLayer); nidsLayer = null; }
-            document.getElementById('nidsLegend').style.display = 'none';
-            document.getElementById('nidsAnimBar').style.display = 'none';
-            stopAnimation();
-            currentSite = null;
+
+        /* ── Timeline integration ── */
+        /* Override mlGoFrame to drive NIDS when active */
+        var _origGoFrame = null;
+
+        function nidsGoFrame(idx) {
+            if (!window._nidsFrames || !window._nidsFrames.length) return;
+            idx = Math.max(0, Math.min(idx, window._nidsFrames.length - 1));
+            var frame = window._nidsFrames[idx];
+            if (nidsLayer) nidsLayer.setUrl(frame.url);
+            window.mlCurrent = idx;
+
+            /* Update timeline display */
+            var age = frame.age_secs < 60 ? '<1m' : Math.round(frame.age_secs/60) + 'm ago';
+            var el = document.getElementById('mrmsTimeDisplay');
+            if (el) el.textContent = currentSite + ' ' + currentProd + ' · ' + age;
+            var fd = document.getElementById('mrmsFrameDisplay');
+            if (fd) fd.textContent = (idx+1) + ' / ' + window._nidsFrames.length;
+            var pct = window._nidsFrames.length > 1 ? (idx/(window._nidsFrames.length-1))*100 : 0;
+            var fill  = document.getElementById('mrmsFill');
+            var thumb = document.getElementById('mrmsThumb');
+            if (fill)  fill.style.width  = pct + '%';
+            if (thumb) thumb.style.left  = pct + '%';
+
+            var site_el = document.getElementById('nidsLegendSite');
+            if (site_el) {
+                site_el.textContent = currentSite + ' · ' + currentProd + ' · ' + age;
+            }
         }
 
-        /* Animation */
-        function loadHistory(site, prod) {
-            fetch(NIDS_API + '/' + site.site_id + '/' + prod + '/history?n=10')
-                .then(function(r) { return r.json(); })
-                .then(function(d) {
-                    if (!d.frames || d.frames.length < 2) return;
-                    animFrames = d.frames; animIdx = 0;
-                    var slider = document.getElementById('nidsAnimSlider');
-                    slider.max = animFrames.length - 1; slider.value = 0;
-                    document.getElementById('nidsAnimBar').style.display = 'block';
-                    updateAnimLabel();
-                }).catch(function() {});
-        }
-        function showFrame(idx) {
-            if (!animFrames.length || !nidsLayer) return;
-            nidsLayer.setUrl(animFrames[idx].url);
-            animIdx = idx;
-            document.getElementById('nidsAnimSlider').value = idx;
-            updateAnimLabel();
-        }
-        function updateAnimLabel() {
-            var el = document.getElementById('nidsAnimLabel');
-            if (!el || !animFrames.length) return;
-            var f = animFrames[animIdx];
-            var age = f.age_secs < 60 ? '<1m' : Math.round(f.age_secs/60) + 'm ago';
-            el.textContent = (animIdx+1) + '/' + animFrames.length + ' · ' + age;
-        }
-        function stopAnimation() {
-            if (animTimer) { clearInterval(animTimer); animTimer = null; }
-            animPlaying = false;
-            var btn = document.getElementById('nidsAnimPlay');
-            if (btn) btn.textContent = '▶';
-        }
-        function toggleAnimation() {
-            if (animPlaying) { stopAnimation(); return; }
-            animPlaying = true;
-            document.getElementById('nidsAnimPlay').textContent = '⏸';
-            animTimer = setInterval(function() {
-                showFrame((animIdx + 1) % animFrames.length);
-            }, ANIM_INTERVAL);
+        function hijackTimeline(frames) {
+            window._nidsFrames = frames;
+            /* Save mlGoFrame and replace */
+            if (!_origGoFrame && typeof window.mlGoFrame === 'function') {
+                _origGoFrame = window.mlGoFrame;
+            }
+            window.mlGoFrame = nidsGoFrame;
+            /* Populate mlFrames with dummy entries so length checks pass */
+            window.mlFrames = frames.map(function(f, i) { return {timestamp: 'NIDS_' + i}; });
+            window.mlCurrent = 0;
+            nidsActive = true;
+            /* Go to latest frame */
+            nidsGoFrame(frames.length - 1);
+            /* Update bottom bar label */
+            var lbl = document.getElementById('mrmsLocalLabel');
+            if (lbl) lbl.textContent = currentSite + ' ' + currentProd;
         }
 
-        /* Legend */
+        function restoreTimeline() {
+            if (!nidsActive) return;
+            nidsActive = false;
+            window._nidsFrames = [];
+            if (_origGoFrame) {
+                window.mlGoFrame = _origGoFrame;
+            }
+            /* Restore MRMS frames */
+            if (typeof window.mlLoadIndex === 'function') {
+                window.mlLoadIndex();
+            }
+            var lbl = document.getElementById('mrmsLocalLabel');
+            if (lbl) lbl.textContent = 'Base Reflectivity';
+            setRadarStatus('');
+        }
+
+        /* ── Legend product switch ── */
         function updateLegendForProduct(prod) {
             var refl  = document.getElementById('nidsLegendRefl');
             var hydro = document.getElementById('nidsLegendHydro');
@@ -2279,11 +2289,38 @@
             }
         }
 
-        /* Main update */
+        /* ── Remove NIDS overlay ── */
+        function removeNidsLayer() {
+            var map = window._capMap;
+            if (nidsLayer && map) { map.removeLayer(nidsLayer); nidsLayer = null; }
+            document.getElementById('nidsLegend').style.display = 'none';
+            restoreTimeline();
+            currentSite = null;
+        }
+
+        /* ── Load NIDS history and populate timeline ── */
+        function loadNidsHistory(site, prod) {
+            fetch(NIDS_API + '/' + site.site_id + '/' + prod + '/history?n=10')
+                .then(function(r) { return r.json(); })
+                .then(function(d) {
+                    if (!d.frames || !d.frames.length) return;
+                    /* Newest first — reverse for timeline (oldest→newest) */
+                    var frames = d.frames.slice().reverse();
+                    hijackTimeline(frames);
+                })
+                .catch(function() {});
+        }
+
+        /* ── Main update ── */
         function updateRadarSource() {
             var map = window._capMap;
-            if (!map || !isRadarEnabled()) { removeNidsLayer(); setRadarStatus(''); return; }
-            if (map.getZoom() <= ZOOM_THRESHOLD) { removeNidsLayer(); setRadarStatus(''); return; }
+            if (!map || !isRadarEnabled()) {
+                removeNidsLayer(); setRadarStatus(''); return;
+            }
+            if (map.getZoom() <= ZOOM_THRESHOLD) {
+                if (nidsActive) removeNidsLayer();
+                return;
+            }
             if (renderPending) return;
             renderPending = true;
 
@@ -2293,15 +2330,15 @@
             if (prod !== currentProd) {
                 siteList = null; currentSite = null; currentProd = prod;
                 if (nidsLayer) removeNidsLayer();
-                animFrames = [];
             }
 
             loadSiteList(prod, function() {
                 var site = nearestSite(center.lat, center.lng);
                 if (!site) { renderPending = false; return; }
-                if (site.site_id === currentSite && nidsLayer) { renderPending = false; return; }
+                if (site.site_id === currentSite && nidsLayer) {
+                    renderPending = false; return;
+                }
 
-                stopAnimation();
                 setRadarStatus('Loading ' + site.site_id + '…');
 
                 fetch(NIDS_API + '/' + site.site_id + '/' + prod + '/meta')
@@ -2317,8 +2354,6 @@
                             }).addTo(map);
                         }
                         currentSite = site.site_id;
-                        animFrames = []; animIdx = 0;
-                        document.getElementById('nidsAnimBar').style.display = 'none';
                         document.getElementById('nidsLegend').style.display = 'block';
                         updateLegendForProduct(prod);
                         var age = meta.age_secs < 60 ? '<1 min' : Math.round(meta.age_secs/60) + ' min ago';
@@ -2326,14 +2361,16 @@
                             site.site_id + ' · ' + prod + ' · ' + age;
                         setRadarStatus(site.site_id + ' ' + prod);
                         renderPending = false;
-                        loadHistory(site, prod);
+                        /* Load history to take over timeline */
+                        loadNidsHistory(site, prod);
                     })
                     .catch(function() { setRadarStatus('No data'); renderPending = false; });
             });
         }
 
-        /* DOM wiring */
+        /* ── DOM wiring ── */
         document.addEventListener('DOMContentLoaded', function() {
+            /* Expose mlGoFrame to window scope once MRMS JS has set it */
             var poll = setInterval(function() {
                 if (!window._capMap) return;
                 clearInterval(poll);
@@ -2364,16 +2401,6 @@
                     if (isRadarEnabled()) { currentSite = null; updateRadarSource(); }
                 });
             });
-
-            /* Animation controls */
-            var prev = document.getElementById('nidsAnimPrev');
-            var play = document.getElementById('nidsAnimPlay');
-            var next = document.getElementById('nidsAnimNext');
-            var sldr = document.getElementById('nidsAnimSlider');
-            if (prev) prev.addEventListener('click', function() { stopAnimation(); showFrame((animIdx-1+animFrames.length)%animFrames.length); });
-            if (play) play.addEventListener('click', toggleAnimation);
-            if (next) next.addEventListener('click', function() { stopAnimation(); showFrame((animIdx+1)%animFrames.length); });
-            if (sldr) sldr.addEventListener('input', function() { stopAnimation(); showFrame(parseInt(this.value)); });
         });
 
         window._updateRadarSource = updateRadarSource;
