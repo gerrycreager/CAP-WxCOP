@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """
-nids_api.py — Single-site NIDS radar API v2
+nids_api.py — Single-site NIDS radar API v2.1
 Renders NIDS files on demand via nids_site C binary.
+Supports WSR-88D (N0B, N0H, N0Q) and TDWR (TZ0, TZ1, TZL) products.
 
 Endpoints:
   GET /api/nids/<site>/<product>           — render newest file, return PNG
   GET /api/nids/<site>/<product>/meta      — metadata JSON only (fast)
   GET /api/nids/<site>/<product>/history   — list available files for animation
-  GET /api/nids/sites                      — list CONUS sites with coords
+  GET /api/nids/sites                      — list sites with coords, type, range
+                                             ?radar_type=WSR-88D|TDWR (default: WSR-88D)
 """
 import os
 import glob
@@ -33,57 +35,85 @@ MAX_AGE    = 720    # 12 min — skip stale for "live" display
 DB_DSN     = 'host=192.168.0.60 port=5432 dbname=avwx_data user=avwx_user'
 RENDER_SIZE = 1024  # PNG pixels
 
-VALID_PRODUCTS = {'N0B', 'N0H', 'N0Q'}
+# WSR-88D products: N0B=dual-pol refl, N0H=hydrometeor class, N0Q=legacy refl
+# TDWR products:    TZ0=base refl 48nmi tilt1, TZ1=base refl tilt2, TZL=long range refl 225nmi
+VALID_PRODUCTS = {'N0B', 'N0H', 'N0Q', 'TZ0', 'TZ1', 'TZ2', 'TZL'}
+
+TDWR_PRODUCTS   = {'TZ0', 'TZ1', 'TZ2', 'TZL'}
+WSR88D_PRODUCTS = {'N0B', 'N0H', 'N0Q'}
 
 os.makedirs(CACHE_DIR, exist_ok=True)
 
-# ── In-memory site list cache ─────────────────────────────────────────────
-_site_cache = {'data': None, 'ts': 0, 'ttl': 300}
+# ── In-memory site list cache — separate for WSR-88D and TDWR ────────────────
+_site_cache = {
+    'WSR-88D': {'data': None, 'ts': 0},
+    'TDWR':    {'data': None, 'ts': 0},
+    'ttl': 300,
+}
 
-def get_conus_sites():
-    """Return CONUS radar sites from DB, cached 5 min."""
+
+def get_sites(radar_type='WSR-88D'):
+    """Return radar sites from DB by type, cached 5 min.
+    Returns list of dicts: {site_id, lat, lon, range_km, radar_type}
+    """
+    radar_type = radar_type.upper()
+    if radar_type not in ('WSR-88D', 'TDWR'):
+        radar_type = 'WSR-88D'
+
     now = time.time()
-    if _site_cache['data'] and (now - _site_cache['ts']) < _site_cache['ttl']:
-        return _site_cache['data']
+    cache = _site_cache[radar_type]
+    if cache['data'] and (now - cache['ts']) < _site_cache['ttl']:
+        return cache['data']
+
     try:
         conn = psycopg2.connect(DB_DSN)
         cur  = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute("""
-            SELECT site_id, lat, lon
+            SELECT site_id, lat, lon, range_km, radar_type
             FROM radar.radar_sites
-            WHERE lat BETWEEN 20 AND 52
-              AND lon BETWEEN -127 AND -65
+            WHERE radar_type = %s
             ORDER BY site_id
-        """)
-        sites = [{'site_id': r['site_id'],
-                  'lat': float(r['lat']),
-                  'lon': float(r['lon'])} for r in cur.fetchall()]
+        """, (radar_type,))
+        sites = [{'site_id':    r['site_id'],
+                  'lat':        float(r['lat']),
+                  'lon':        float(r['lon']),
+                  'range_km':   int(r['range_km']),
+                  'radar_type': r['radar_type']} for r in cur.fetchall()]
         conn.close()
-        _site_cache['data'] = sites
-        _site_cache['ts']   = now
+        cache['data'] = sites
+        cache['ts']   = now
         return sites
     except Exception as e:
-        log.error(f'get_conus_sites error: {e}')
-        return _site_cache['data'] or []
+        log.error(f'get_sites({radar_type}) error: {e}')
+        return cache['data'] or []
 
 
 def get_site_coords(site_id):
-    """Get lat/lon for a single site."""
-    sites = get_conus_sites()
-    for s in sites:
-        if s['site_id'] == site_id:
-            return s['lat'], s['lon']
-    # Try DB directly for OCONUS sites
+    """Get lat/lon/range_km/radar_type for a single site."""
+    site_id = site_id.upper()
+    # Check both caches
+    for rtype in ('WSR-88D', 'TDWR'):
+        for s in get_sites(rtype):
+            if s['site_id'] == site_id:
+                return s
+    # Miss — try DB directly (e.g. OCONUS not in CONUS cache)
     try:
         conn = psycopg2.connect(DB_DSN)
         cur  = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cur.execute('SELECT lat, lon FROM radar.radar_sites WHERE site_id=%s',
+        cur.execute("""SELECT lat, lon, range_km, radar_type
+                       FROM radar.radar_sites WHERE site_id=%s""",
                     (site_id,))
         row = cur.fetchone()
         conn.close()
-        return (float(row['lat']), float(row['lon'])) if row else None
+        if row:
+            return {'site_id':    site_id,
+                    'lat':        float(row['lat']),
+                    'lon':        float(row['lon']),
+                    'range_km':   int(row['range_km']),
+                    'radar_type': row['radar_type']}
     except Exception:
-        return None
+        pass
+    return None
 
 
 def find_newest_nids(site_id, product):
@@ -104,10 +134,7 @@ def find_newest_nids(site_id, product):
 
 
 def find_history_nids(site_id, product, n=10, max_age_secs=14400):
-    """Return list of recent NIDS files for animation (newest first).
-    max_age_secs: how far back to look (default 4 hours = 14400s)
-    n: max number of frames to return
-    """
+    """Return list of recent NIDS files for animation (newest first)."""
     now   = time.time()
     today = datetime.now(timezone.utc).strftime('%Y%m%d')
     yest  = (datetime.now(timezone.utc) - timedelta(days=1)).strftime('%Y%m%d')
@@ -128,19 +155,19 @@ def find_history_nids(site_id, product, n=10, max_age_secs=14400):
 
 
 def render_nids(site_id, product, nids_file, lat, lon):
-    """Render NIDS file to PNG. Returns (png_bytes, meta) or (None, None)."""
-    mtime = int(os.path.getmtime(nids_file))
+    """Render NIDS file to PNG via nids_site C binary.
+    Returns (png_bytes, meta) or (None, None).
+    """
+    mtime      = int(os.path.getmtime(nids_file))
     cache_key  = f'{site_id}_{product}_{mtime}'
     cache_png  = os.path.join(CACHE_DIR, f'{cache_key}.png')
     cache_json = os.path.join(CACHE_DIR, f'{cache_key}.json')
 
-    # Return cached version if available
     if os.path.exists(cache_png) and os.path.exists(cache_json):
         with open(cache_png, 'rb') as f: png = f.read()
         with open(cache_json) as f:      meta = json.load(f)
         return png, meta
 
-    # Render via C binary
     with tempfile.NamedTemporaryFile(suffix='.png', delete=False,
                                      dir=CACHE_DIR) as tmp:
         tmp_path = tmp.name
@@ -157,7 +184,7 @@ def render_nids(site_id, product, nids_file, lat, lon):
             capture_output=True, text=True, timeout=20
         )
         if result.returncode != 0 or not result.stdout.strip():
-            log.error(f'nids_site failed {site_id}: {result.stderr}')
+            log.error(f'nids_site failed {site_id}/{product}: {result.stderr}')
             return None, None
 
         meta = json.loads(result.stdout.strip())
@@ -169,8 +196,6 @@ def render_nids(site_id, product, nids_file, lat, lon):
         })
 
         with open(tmp_path, 'rb') as f: png = f.read()
-
-        # Atomically move to cache
         os.rename(tmp_path, cache_png)
         with open(cache_json, 'w') as f: json.dump(meta, f)
 
@@ -180,7 +205,7 @@ def render_nids(site_id, product, nids_file, lat, lon):
         for old_f in old[:-12]:
             try: os.unlink(old_f)
             except Exception: pass
-            try: os.unlink(old_f.replace('.png','.json'))
+            try: os.unlink(old_f.replace('.png', '.json'))
             except Exception: pass
 
         return png, meta
@@ -197,20 +222,54 @@ def render_nids(site_id, product, nids_file, lat, lon):
             except Exception: pass
 
 
-# ── Routes ────────────────────────────────────────────────────────────────
+# ── Routes ────────────────────────────────────────────────────────────────────
 
 @nids_api.route('/sites')
 def list_sites():
-    """Return CONUS sites that have recent N0B data."""
-    product = request.args.get('product', 'N0B').upper()
-    sites = get_conus_sites()
-    # Filter to only sites with recent data
+    """Return sites that have recent data for any product of the requested type.
+    ?radar_type=WSR-88D|TDWR  (default WSR-88D)
+    ?product=N0B|N0H|N0Q|TZ0|TZ1|TZ2|TZL  (optional; used to infer radar_type)
+
+    For TDWR: a site is available if it has data for ANY TZ product —
+    not all sites broadcast all tilts. Returns range_km and radar_type
+    so nearestSite() can apply the correct range constraint.
+    """
+    radar_type  = request.args.get('radar_type', 'WSR-88D').upper()
+    product_arg = request.args.get('product', '').upper()
+    if product_arg in TDWR_PRODUCTS:
+        radar_type = 'TDWR'
+    product = product_arg or ('TZ0' if radar_type == 'TDWR' else 'N0B')
+
+    check_products = list(TDWR_PRODUCTS) if radar_type == 'TDWR' else [product]
+
+    sites     = get_sites(radar_type)
     available = []
     for s in sites:
-        _, age = find_newest_nids(s['site_id'], product)
-        if age is not None:
-            available.append(s)
-    return jsonify({'product': product, 'sites': available, 'count': len(available)})
+        best_product = None
+        best_age     = None
+        for prod in ([product] + [p for p in check_products if p != product]):
+            _, age = find_newest_nids(s['site_id'], prod)
+            if age is not None:
+                if best_product is None:
+                    best_product = prod
+                    best_age     = age
+                if prod == product:
+                    best_product = prod
+                    best_age     = age
+                    break
+        if best_product is not None:
+            available.append({
+                'site_id':      s['site_id'],
+                'lat':          s['lat'],
+                'lon':          s['lon'],
+                'range_km':     s['range_km'],
+                'radar_type':   s['radar_type'],
+                'best_product': best_product,
+                'age_secs':     best_age,
+            })
+
+    return jsonify({'product': product, 'radar_type': radar_type,
+                    'sites': available, 'count': len(available)})
 
 
 @nids_api.route('/<site_id>/<product>/meta')
@@ -218,16 +277,21 @@ def get_meta(site_id, product):
     site_id = site_id.upper(); product = product.upper()
     if product not in VALID_PRODUCTS:
         return jsonify({'error': 'Invalid product'}), 400
-    coords = get_site_coords(site_id)
-    if not coords:
+    site = get_site_coords(site_id)
+    if not site:
         return jsonify({'error': f'Unknown site: {site_id}'}), 404
     nids_file, age = find_newest_nids(site_id, product)
     if not nids_file:
         return jsonify({'error': f'No recent {product} for {site_id}'}), 404
     return jsonify({
-        'site_id': site_id, 'product': product,
-        'file': os.path.basename(nids_file), 'age_secs': age,
-        'lat': coords[0], 'lon': coords[1],
+        'site_id':    site_id,
+        'product':    product,
+        'file':       os.path.basename(nids_file),
+        'age_secs':   age,
+        'lat':        site['lat'],
+        'lon':        site['lon'],
+        'range_km':   site['range_km'],
+        'radar_type': site['radar_type'],
     })
 
 
@@ -236,20 +300,21 @@ def get_history(site_id, product):
     site_id = site_id.upper(); product = product.upper()
     if product not in VALID_PRODUCTS:
         return jsonify({'error': 'Invalid product'}), 400
-    coords = get_site_coords(site_id)
-    if not coords:
+    site = get_site_coords(site_id)
+    if not site:
         return jsonify({'error': f'Unknown site: {site_id}'}), 404
-    # Support either ?n=frames or ?hours=N (hours takes precedence)
+
     hours = request.args.get('hours', 0, type=float)
     if hours > 0:
-        # ~30 frames/hour for N0B (2-min scans), ~10/hour for N0H (6-min scans)
-        fps = 10 if product == 'N0H' else 30
-        n = min(int(hours * fps) + 5, 200)  # +5 buffer, cap at 200
-        max_age = int(hours * 3600) + 300    # +5 min buffer
+        # TDWR scans ~every 2.5 min = ~24/hr (TZ0/TZ1/TZL); WSR-88D N0B ~2min = ~30/hr; N0H ~6min = ~10/hr
+        fps = 10 if product == 'N0H' else (24 if product in TDWR_PRODUCTS else 30)
+        n = min(int(hours * fps) + 5, 200)
+        max_age = int(hours * 3600) + 300
     else:
         n = request.args.get('n', 10, type=int)
         max_age = 14400
-    files = find_history_nids(site_id, product, n, max_age)
+
+    files  = find_history_nids(site_id, product, n, max_age)
     frames = []
     for i, f in enumerate(files):
         frames.append({
@@ -260,9 +325,14 @@ def get_history(site_id, product):
                         f'?file={f["name"]}&_={int(os.path.getmtime(f["path"]))}'
         })
     return jsonify({
-        'site_id': site_id, 'product': product,
-        'lat': coords[0], 'lon': coords[1],
-        'frames': frames, 'count': len(frames),
+        'site_id':    site_id,
+        'product':    product,
+        'lat':        site['lat'],
+        'lon':        site['lon'],
+        'range_km':   site['range_km'],
+        'radar_type': site['radar_type'],
+        'frames':     frames,
+        'count':      len(frames),
     })
 
 
@@ -272,16 +342,15 @@ def get_png(site_id, product):
     if product not in VALID_PRODUCTS:
         return jsonify({'error': 'Invalid product'}), 400
 
-    coords = get_site_coords(site_id)
-    if not coords:
+    site = get_site_coords(site_id)
+    if not site:
         return jsonify({'error': f'Unknown site: {site_id}'}), 404
-    lat, lon = coords
+    lat, lon = site['lat'], site['lon']
 
-    # Support specific file for animation playback
     fname = request.args.get('file')
     if fname:
         today = datetime.now(timezone.utc).strftime('%Y%m%d')
-        yest  = (datetime.now(timezone.utc)-timedelta(days=1)).strftime('%Y%m%d')
+        yest  = (datetime.now(timezone.utc) - timedelta(days=1)).strftime('%Y%m%d')
         nids_file = None
         for date in [today, yest]:
             candidate = os.path.join(L3_BASE, site_id, product,
