@@ -77,6 +77,14 @@ try:
 except Exception as e:
     print(f"⚠ Could not load Radar API: {e}")
 
+# NIDS single-site radar API (WSR-88D N0B/N0H + TDWR TZ0/TZ1/TZ2/TZL)
+try:
+    from nids_api_dev import nids_api
+    app.register_blueprint(nids_api, url_prefix='/api/nids')
+    print("✓ NIDS API registered at /CAP_WxCOP/api/nids")
+except Exception as e:
+    print(f"⚠ Could not load NIDS API: {e}")
+
 # Incident Archive - Weather data collection for investigations
 try:
     from incident_archive import incident_archive
@@ -117,6 +125,14 @@ try:
 except Exception as e:
     print(f"⚠ Could not load GLM API: {e}")
 
+# Wing ICL API
+try:
+    from wing_icl_admin import wing_icl_admin
+    app.register_blueprint(wing_icl_admin)
+    print("✓ Wing ICL admin registered")
+except Exception as e:
+    print(f'⚠ Could not load Wing ICL admin: {e}')
+
 # Radar Status API - NEXRAD operational status from FTM products
 try:
     from radar_status_api import radar_status_bp
@@ -127,6 +143,15 @@ except Exception as e:
     print(f"⚠ Could not load Radar Status API: {e}")
 
 print("CAP Weather COP initialization complete.\n")
+
+# Auth — must be registered first
+try:
+    from auth import auth, load_secret_key, login_required
+    app.secret_key = load_secret_key()
+    app.register_blueprint(auth)
+    print("✓ Auth registered at /CAP_WxCOP/auth")
+except Exception as e:
+    print(f"❌ CRITICAL: Could not load Auth: {e}")
 
 # ============================================================================
 # MAIN ROUTES - Professional Production Interface
@@ -291,6 +316,7 @@ def system_status():
         
         return jsonify(status)
     except Exception as e:
+
         return jsonify({
             'status': 'degraded',
             'error': str(e),

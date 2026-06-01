@@ -1,5 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
+<!-- PWA -->
+    <link rel="manifest" href="/CAP_WxCOP/static/manifest.json">
+    <meta name="theme-color" content="#1a3a2a">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="WxCOP">
+    <link rel="apple-touch-icon" href="/CAP_WxCOP/static/icons/icon-192x192.png">
+    <script>if('serviceWorker' in navigator){navigator.serviceWorker.register('/CAP_WxCOP/static/sw.js',{scope:'/CAP_WxCOP/'});}</script>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -302,6 +310,25 @@
         }
         #mrmsColorbar .cb-title { font-weight: 700; font-size: 11px; margin-bottom: 3px; }
         #mrmsColorbar canvas { display: block; border: 1px solid #aaa; border-radius: 2px; margin-bottom: 2px; }
+
+        /* NIDS/TDWR single-site legend — stacks above fixedLegend */
+        #nidsLegend {
+            position: fixed;
+            bottom: 60px;   /* above timeline bar, aligns with fixedLegend base */
+            left: 10px;
+            z-index: 1050;
+            background: rgba(255,255,255,0.95);
+            border-radius: 5px;
+            padding: 6px 10px;
+            box-shadow: 0 1px 6px rgba(0,0,0,0.3);
+            font-size: 11px;
+            min-width: 130px;
+            pointer-events: none;
+        }
+        /* Push nidsLegend above fixedLegend (~210px tall) when radar-open */
+        body.radar-open #nidsLegend { bottom: 270px; }
+        /* When not radar-open, fixedLegend is at bottom:10px (~210px tall) */
+        #nidsLegend { bottom: 220px; }
         #mrmsColorbar .cb-labels {
             display: flex; justify-content: space-between; width: 160px; font-size: 9px; color: #444;
         }
@@ -463,12 +490,55 @@
 
         <div class="divider"></div>
         <h3>Radar</h3>
+        <!-- WSR-88D NIDS toggle (zoom > 8) -->
         <label class="checkbox-label">
-            <input type="checkbox" id="mrmsLocalToggle"> MRMS_Composite Refl
+            <input type="checkbox" id="mrmsLocalToggle"> NEXRAD (zoom&gt;8)
         </label>
+        <div id="radarSubOptions" style="display:none;margin-left:16px;margin-top:2px;margin-bottom:2px;font-size:11px;">
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;margin-bottom:2px;">
+                <input type="radio" name="radarProduct" id="radarN0B" value="N0B" checked
+                       style="accent-color:#2c5f41;"> Reflectivity (N0B)
+            </label>
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;">
+                <input type="radio" name="radarProduct" id="radarN0H" value="N0H"
+                       style="accent-color:#2c5f41;"> Hydrometeor Class (N0H)
+            </label>
+        </div>
+        <!-- TDWR toggle (zoom > 8, near major airports) -->
+        <label class="checkbox-label" style="margin-top:4px;">
+            <input type="checkbox" id="tdwrToggle"> TDWR (zoom&gt;8)
+        </label>
+        <div id="tdwrSubOptions" style="display:none;margin-left:16px;margin-top:2px;margin-bottom:2px;font-size:11px;">
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;margin-bottom:2px;">
+                <input type="radio" name="tdwrProduct" id="tdwrTZ0" value="TZ0" checked
+                       style="accent-color:#2c5f41;"> Refl 48nmi T1 (TZ0)
+            </label>
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;margin-bottom:2px;">
+                <input type="radio" name="tdwrProduct" id="tdwrTZ1" value="TZ1"
+                       style="accent-color:#2c5f41;"> Refl 48nmi T2 (TZ1)
+            </label>
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;margin-bottom:2px;">
+                <input type="radio" name="tdwrProduct" id="tdwrTZ2" value="TZ2"
+                       style="accent-color:#2c5f41;"> Refl 48nmi T3 (TZ2)
+            </label>
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;">
+                <input type="radio" name="tdwrProduct" id="tdwrTZL" value="TZL"
+                       style="accent-color:#2c5f41;"> Long Range Refl (TZL)
+            </label>
+        </div>
+        <div id="radarStatus" style="font-size:10px;color:#888;text-align:center;min-height:14px;margin-bottom:2px;"></div>
         <label class="checkbox-label">
             <input type="checkbox" id="tstmToggle"> TRW Probability (LAMP)
         </label>
+        <div class="divider"></div>
+        <h3>Wind Flow</h3>
+        <label class="checkbox-label">
+            <input type="checkbox" id="windToggle"> Streamlines (HRRR)
+        </label>
+        <div id="windControls" style="display:none;margin-top:4px;">
+            <select id="windLevelSelect" style="width:100%;font-size:12px;padding:2px;margin-bottom:3px;"></select>
+            <div id="windStatus" style="font-size:10px;color:#888;text-align:center;"></div>
+        </div>
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -1700,7 +1770,14 @@
                 });
             }
             document.getElementById('mrmsLocalDuration').addEventListener('change',function(){
-                if(document.getElementById('mrmsLocalToggle').checked) mlLoadIndex();
+                if(document.getElementById('mrmsLocalToggle').checked) {
+                    if (nidsActive && currentSite) {
+                        /* Reload NIDS history with new duration */
+                        loadNidsHistory({site_id: currentSite}, currentProd);
+                    } else {
+                        mlLoadIndex();
+                    }
+                }
             });
             document.getElementById('mrmsPlaySpeed').addEventListener('change',function(){
                 if(mlPlaying){ mlPause(); mlPlay(); }
@@ -1710,6 +1787,13 @@
             document.getElementById('mBtnPlay').addEventListener('click', function(){mlPlaying?mlPause():mlPlay();});
             document.getElementById('mBtnNext').addEventListener('click', function(){mlPause();mlGoFrame(mlCurrent+1);});
             document.getElementById('mBtnLast').addEventListener('click', function(){mlPause();mlGoFrame(mlFrames.length-1);});
+
+            /* Expose to window scope for NIDS timeline integration */
+            window.mlGoFrame    = mlGoFrame;
+            window.mlLoadIndex  = mlLoadIndex;
+            window.mlPause      = mlPause;
+            window.mlFrames     = mlFrames;
+            window.mlCurrent    = mlCurrent;
 
             // ── GLM Lightning ────────────────────────────────────────────────
             var glmLayer=null, glmRefreshTimer=null;
@@ -1813,7 +1897,7 @@
             <option value="250">Fast</option>
             <option value="100">Max</option>
         </select>
-        <span style="font-size:11px;color:#aaa;white-space:nowrap;">MRMS_Composite Refl</span>
+        <span id="mrmsLocalLabel" style="font-size:11px;color:#aaa;white-space:nowrap;">Base Reflectivity</span>
     </div>
 
 
@@ -1916,5 +2000,667 @@
     })();
     </script>
 
+    <!-- Wind streamlines legend -->
+    <div id="windLegend" style="display:none;position:fixed;bottom:10px;right:10px;
+         background:rgba(255,255,255,0.92);border:1px solid #ccc;border-radius:4px;
+         padding:6px 10px;z-index:1001;font-size:11px;font-family:sans-serif;min-width:120px;">
+        <div style="font-weight:700;font-size:11px;margin-bottom:4px;">&#127754; Wind Speed</div>
+        <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgba(100,149,237,0.85);"></span>&lt;5 kt</div>
+        <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgba(50,205,50,0.85);"></span>5–15 kt</div>
+        <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgba(255,215,0,0.85);"></span>15–25 kt</div>
+        <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgba(255,140,0,0.85);"></span>25–35 kt</div>
+        <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgba(220,50,50,0.85);"></span>35–50 kt</div>
+        <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgba(180,0,180,0.85);"></span>&gt;50 kt</div>
+        <div style="margin-top:4px;font-size:10px;color:#666;">HRRR · Current</div>
+    </div>
+
+    <script>
+    // ── HRRR Wind Streamlines ─────────────────────────────────────────────
+    (function() {
+        'use strict';
+        var WIND_API = '/CAP_WxCOP/api/winds/hrrr';
+        var LEVELS = [
+            { key:'SFC',  label:'Surface (10m AGL)' },
+            { key:'925',  label:'~3,000 ft MSL' },
+            { key:'850',  label:'~6,000 ft MSL' },
+            { key:'700',  label:'~10,000 ft MSL' },
+            { key:'600',  label:'~12,000 ft MSL' },
+            { key:'500',  label:'~18,000 ft MSL' },
+        ];
+        var windLayer   = null;
+        var windLevel   = 'SFC';
+        var windFhr     = 0;
+        var windEnabled = false;
+        var _cache      = {};
+
+        // ── Canvas layer ──────────────────────────────────────────────────
+        var WindCanvas = L.Layer.extend({
+            initialize: function() { this._data = null; },
+            onAdd: function(map) {
+                this._map    = map;
+                this._canvas = document.createElement('canvas');
+                this._canvas.style.cssText = 'position:absolute;pointer-events:none;opacity:0.82;';
+                map.getPane('overlayPane').appendChild(this._canvas);
+                this._ctx = this._canvas.getContext('2d');
+                map.on('moveend zoomend resize', this._draw, this);
+                this._resize(); if (this._data) this._draw();
+            },
+            onRemove: function(map) {
+                map.off('moveend zoomend resize', this._draw, this);
+                if (this._canvas && this._canvas.parentNode)
+                    this._canvas.parentNode.removeChild(this._canvas);
+            },
+            setData: function(d) { this._data = d; if (this._map) this._draw(); },
+            _resize: function() {
+                var s = this._map.getSize();
+                this._canvas.width = s.x; this._canvas.height = s.y;
+                L.DomUtil.setPosition(this._canvas,
+                    this._map.containerPointToLayerPoint([0,0]));
+            },
+            _draw: function() {
+                if (!this._canvas || !this._data) return;
+                this._resize();
+                var ctx = this._ctx, map = this._map;
+                var s   = map.getSize();
+                ctx.clearRect(0, 0, s.x, s.y);
+                var zoom = map.getZoom();
+                var aLen = Math.max(14, Math.min(32, zoom * 2.8));
+                var bounds = map.getBounds();
+                (this._data.features || []).forEach(function(f) {
+                    var coords = f.geometry.coordinates;
+                    var ll = L.latLng(coords[1], coords[0]);
+                    if (!bounds.contains(ll)) return;
+                    var pt  = map.latLngToContainerPoint(ll);
+                    var p   = f.properties;
+                    var rad = (p.dir + 180) * Math.PI / 180;
+                    var ux  =  Math.sin(rad);
+                    var uy  = -Math.cos(rad);
+                    var x1  = pt.x - ux * aLen * 0.5;
+                    var y1  = pt.y - uy * aLen * 0.5;
+                    var x2  = pt.x + ux * aLen * 0.5;
+                    var y2  = pt.y + uy * aLen * 0.5;
+                    var col = spdColor(p.spd);
+                    ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 1.4;
+                    ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+                    var ha = Math.atan2(y2-y1, x2-x1), hl = aLen * 0.3;
+                    ctx.beginPath(); ctx.moveTo(x2,y2);
+                    ctx.lineTo(x2 - hl*Math.cos(ha-0.45), y2 - hl*Math.sin(ha-0.45));
+                    ctx.lineTo(x2 - hl*Math.cos(ha+0.45), y2 - hl*Math.sin(ha+0.45));
+                    ctx.closePath(); ctx.fill();
+                });
+            }
+        });
+
+        function spdColor(k) {
+            if (k < 5)  return 'rgba(100,149,237,0.85)';
+            if (k < 15) return 'rgba(50,205,50,0.85)';
+            if (k < 25) return 'rgba(255,215,0,0.85)';
+            if (k < 35) return 'rgba(255,140,0,0.85)';
+            if (k < 50) return 'rgba(220,50,50,0.85)';
+            return 'rgba(180,0,180,0.85)';
+        }
+
+        function fetchWind(level, fhr, cb) {
+            var key = level + ':' + fhr;
+            if (_cache[key]) { cb(null, _cache[key]); return; }
+            fetch(WIND_API + '?level=' + level + '&fhr=' + fhr)
+                .then(function(r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+                .then(function(d) { _cache[key] = d; cb(null, d); })
+                .catch(function(e) { cb(e); });
+        }
+
+        function setStatus(msg) {
+            var el = document.getElementById('windStatus');
+            if (el) el.textContent = msg;
+        }
+
+        function loadWind() {
+            var map = window._capMap;
+            if (!map || !windEnabled) return;
+            setStatus('Loading…');
+            fetchWind(windLevel, windFhr, function(err, data) {
+                if (err) { setStatus('Unavailable'); return; }
+                if (!windLayer) { windLayer = new WindCanvas(); windLayer.addTo(map); }
+                windLayer.setData(data);
+                var m = data.metadata || {};
+                setStatus(m.cycle ? m.cycle + ' F+' + String(m.fhr).padStart(2,'0') : '');
+                document.getElementById('windLegend').style.display = 'block';
+            });
+        }
+
+        function removeWind() {
+            var map = window._capMap;
+            if (windLayer && map) { map.removeLayer(windLayer); windLayer = null; }
+            setStatus('');
+            document.getElementById('windLegend').style.display = 'none';
+        }
+
+        // Build level selector
+        document.addEventListener('DOMContentLoaded', function() {
+            var sel = document.getElementById('windLevelSelect');
+            if (sel) {
+                LEVELS.forEach(function(lv) {
+                    var o = document.createElement('option');
+                    o.value = lv.key; o.textContent = lv.label;
+                    sel.appendChild(o);
+                });
+                sel.addEventListener('change', function() {
+                    windLevel = this.value;
+                    _cache = {};
+                    if (windEnabled) loadWind();
+                });
+            }
+            var tog = document.getElementById('windToggle');
+            if (tog) {
+                tog.addEventListener('change', function() {
+                    windEnabled = this.checked;
+                    document.getElementById('windControls').style.display =
+                        windEnabled ? 'block' : 'none';
+                    if (windEnabled) loadWind(); else removeWind();
+                });
+            }
+        });
+
+        // Allow external fhr update (for impacts map)
+        window._windSetFhr = function(fhr) {
+            windFhr = fhr; _cache = {};
+            if (windEnabled) loadWind();
+        };
+    })();
+    </script>
+
+
+    <!-- NIDS single-site legend -->
+    <div id="nidsLegend" style="display:none;">
+        <div id="nidsLegendTitle" style="font-weight:700;margin-bottom:4px;">📡 Base Reflectivity</div>
+        <div id="nidsLegendType" style="font-size:10px;color:#555;margin-bottom:3px;display:none;"></div>
+        <!-- Reflectivity color scale (N0B) -->
+        <div id="nidsLegendRefl">
+            <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgb(4,233,231);"></span>5–10 dBZ</div>
+            <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgb(1,159,244);"></span>10–20 dBZ</div>
+            <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgb(2,253,2);"></span>20–30 dBZ</div>
+            <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgb(253,191,1);"></span>30–40 dBZ</div>
+            <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgb(253,116,0);"></span>40–45 dBZ</div>
+            <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgb(253,0,0);"></span>45–55 dBZ</div>
+            <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgb(148,0,211);"></span>55–65 dBZ</div>
+            <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgb(255,255,255);border:1px solid #ccc;"></span>&gt;65 dBZ</div>
+        </div>
+        <!-- Hydrometeor class scale (N0H) -->
+        <div id="nidsLegendHydro" style="display:none;">
+            <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:10px;background:rgb(99,207,0);border-radius:2px;"></span>Biological</div>
+            <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:10px;background:rgb(150,200,255);border-radius:2px;"></span>Ice Crystals</div>
+            <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:10px;background:rgb(0,200,255);border-radius:2px;"></span>Dry Snow</div>
+            <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:10px;background:rgb(0,100,255);border-radius:2px;"></span>Wet Snow</div>
+            <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:10px;background:rgb(2,253,2);border-radius:2px;"></span>Light Rain</div>
+            <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:10px;background:rgb(253,191,1);border-radius:2px;"></span>Moderate Rain</div>
+            <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:10px;background:rgb(253,0,0);border-radius:2px;"></span>Heavy Rain</div>
+            <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:10px;background:rgb(253,144,253);border-radius:2px;"></span>Big Drops</div>
+            <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:10px;background:rgb(255,255,255);border:1px solid #ccc;border-radius:2px;"></span>Hail+Rain</div>
+            <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:10px;background:rgb(100,100,100);border-radius:2px;"></span>GC/Unknown</div>
+        </div>
+        <div id="nidsLegendSite" style="margin-top:4px;font-size:10px;color:#666;">NEXRAD N0B</div>
+        <!-- Animation controlled by bottom timeline bar when NIDS active -->
+    </div>
+
+    <script>
+    // ── Integrated Radar: MRMS (zoom≤8) + NIDS (zoom>8) sharing bottom timeline ─
+    // Supports WSR-88D (N0B/N0H) at 230km range and TDWR (TV0/TV1/TV2) at 90km range
+    (function() {
+        'use strict';
+        var ZOOM_THRESHOLD = 8;
+        var NIDS_API       = '/CAP_WxCOP/api/nids';
+        var REFRESH_MS     = 300000;
+
+        // WSR-88D state
+        var nidsLayer     = null;
+        var currentSite   = null;
+        var currentProd   = 'N0B';
+        var siteList      = null;   /* WSR-88D site list */
+        var refreshTimer  = null;
+        var renderPending = false;
+        var nidsActive    = false;  /* true when NIDS has taken over timeline */
+
+        // TDWR state (parallel, independent layer)
+        var tdwrLayer        = null;
+        var tdwrCurrentSite  = null;
+        var tdwrCurrentProd  = 'TZ0';
+        var tdwrSiteList     = null;
+        var tdwrRefreshTimer = null;
+        var tdwrPending      = false;
+        var tdwrActive       = false;
+
+        /* Saved MRMS timeline state for restore on zoom-out */
+        var mrmsFramesSaved = null;
+        var mrmsCurrent     = -1;
+
+        function getProduct() {
+            var r = document.querySelector('input[name="radarProduct"]:checked');
+            return r ? r.value : 'N0B';
+        }
+        function setRadarStatus(msg) {
+            var el = document.getElementById('radarStatus');
+            if (el) el.textContent = msg;
+        }
+        function isRadarEnabled() {
+            var tog = document.getElementById('mrmsLocalToggle');
+            return tog && tog.checked;
+        }
+        function nearestSite(lat, lon, list, maxRangeKm) {
+            if (!list || !list.length) return null;
+            var best = null, bestDist = Infinity;
+            var cosLat = Math.cos(lat * Math.PI / 180);
+            list.forEach(function(s) {
+                var dlat = (s.lat - lat) * 111.32;
+                var dlon = (s.lon - lon) * 111.32 * cosLat;
+                var distKm = Math.sqrt(dlat*dlat + dlon*dlon);
+                // Only consider sites whose coverage includes the map center
+                var effectiveRange = maxRangeKm || s.range_km || 230;
+                if (distKm < effectiveRange && distKm < bestDist) {
+                    bestDist = distKm; best = s;
+                }
+            });
+            return best;
+        }
+        function loadSiteList(prod, cb) {
+            var rtype = 'WSR-88D';
+            fetch(NIDS_API + '/sites?product=' + prod + '&radar_type=' + rtype)
+                .then(function(r) { return r.json(); })
+                .then(function(d) { siteList = d.sites || []; cb(); })
+                .catch(function() { siteList = []; cb(); });
+        }
+        function loadTdwrSiteList(prod, cb) {
+            fetch(NIDS_API + '/sites?product=' + prod + '&radar_type=TDWR')
+                .then(function(r) { return r.json(); })
+                .then(function(d) { tdwrSiteList = d.sites || []; cb(); })
+                .catch(function() { tdwrSiteList = []; cb(); });
+        }
+        function siteBounds(lat, lon, range_km) {
+            range_km = range_km || 230;
+            var kmlat = 111.32;
+            var kmlon = kmlat * Math.cos(lat * Math.PI / 180);
+            var lr = range_km/kmlat, lo = range_km/kmlon;
+            return [[lat-lr, lon-lo], [lat+lr, lon+lo]];
+        }
+
+        /* ── Timeline integration ── */
+        /* Override mlGoFrame to drive NIDS when active */
+        var _origGoFrame = null;
+
+        function nidsGoFrame(idx) {
+            if (!window._nidsFrames || !window._nidsFrames.length) return;
+            idx = Math.max(0, Math.min(idx, window._nidsFrames.length - 1));
+            var frame = window._nidsFrames[idx];
+            if (nidsLayer) nidsLayer.setUrl(frame.url);
+            window.mlCurrent = idx;
+
+            /* Update timeline display */
+            var age = frame.age_secs < 60 ? '<1m' : Math.round(frame.age_secs/60) + 'm ago';
+            var el = document.getElementById('mrmsTimeDisplay');
+            if (el) el.textContent = currentSite + ' ' + currentProd + ' · ' + age;
+            var fd = document.getElementById('mrmsFrameDisplay');
+            if (fd) fd.textContent = (idx+1) + ' / ' + window._nidsFrames.length;
+            var pct = window._nidsFrames.length > 1 ? (idx/(window._nidsFrames.length-1))*100 : 0;
+            var fill  = document.getElementById('mrmsFill');
+            var thumb = document.getElementById('mrmsThumb');
+            if (fill)  fill.style.width  = pct + '%';
+            if (thumb) thumb.style.left  = pct + '%';
+
+            var site_el = document.getElementById('nidsLegendSite');
+            if (site_el) {
+                site_el.textContent = currentSite + ' · ' + currentProd + ' · ' + age;
+            }
+        }
+
+        var nidsAnimTimer = null;
+        var nidsAnimPlaying = false;
+
+        function nidsAnimPlay() {
+            if (nidsAnimPlaying) return;
+            nidsAnimPlaying = true;
+            document.getElementById('mBtnPlay').innerHTML = '&#9646;&#9646;';
+            var spd = 600;
+            var sel = document.getElementById('mrmsPlaySpeed');
+            if (sel) { var v=parseInt(sel.value); if(!isNaN(v)) spd=v; }
+            nidsAnimTimer = setInterval(function() {
+                if (!window._nidsFrames || !window._nidsFrames.length) return;
+                nidsGoFrame((window.mlCurrent + 1) % window._nidsFrames.length);
+            }, spd);
+        }
+
+        function nidsAnimPause() {
+            nidsAnimPlaying = false;
+            document.getElementById('mBtnPlay').innerHTML = '&#9654;';
+            if (nidsAnimTimer) { clearInterval(nidsAnimTimer); nidsAnimTimer = null; }
+        }
+
+        function hijackTimeline(frames) {
+            window._nidsFrames = frames;
+            if (!_origGoFrame && typeof window.mlGoFrame === 'function') {
+                _origGoFrame = window.mlGoFrame;
+            }
+            window.mlGoFrame = nidsGoFrame;
+            window.mlFrames = frames.map(function(f,i){return{timestamp:'NIDS_'+i};});
+            window.mlCurrent = 0;
+            nidsActive = true;
+            /* Pause MRMS animation — mlPlay uses closure so must stop timer directly */
+            if (typeof window.mlPause === 'function') window.mlPause();
+            /* Hide MRMS colorbar */
+            var cb = document.getElementById('mrmsColorbar');
+            if (cb) cb.style.display = 'none';
+            /* Show latest frame */
+            nidsGoFrame(frames.length - 1);
+            var lbl = document.getElementById('mrmsLocalLabel');
+            if (lbl) lbl.textContent = currentSite + ' ' + currentProd;
+            /* Wire play button to NIDS animation */
+            var playBtn = document.getElementById('mBtnPlay');
+            if (playBtn) {
+                playBtn._nidsHandler = function() {
+                    nidsAnimPlaying ? nidsAnimPause() : nidsAnimPlay();
+                };
+                playBtn.removeEventListener('click', playBtn._mrmsHandler);
+                playBtn.addEventListener('click', playBtn._nidsHandler);
+            }
+            /* Wire prev/next/first/last to nidsGoFrame */
+            var btnFirst = document.getElementById('mBtnFirst');
+            var btnPrev  = document.getElementById('mBtnPrev');
+            var btnNext  = document.getElementById('mBtnNext');
+            var btnLast  = document.getElementById('mBtnLast');
+            if (btnFirst) { btnFirst._nids = function(){nidsAnimPause();nidsGoFrame(0);}; btnFirst.addEventListener('click', btnFirst._nids); }
+            if (btnPrev)  { btnPrev._nids  = function(){nidsAnimPause();nidsGoFrame(Math.max(0,window.mlCurrent-1));}; btnPrev.addEventListener('click', btnPrev._nids); }
+            if (btnNext)  { btnNext._nids  = function(){nidsAnimPause();nidsGoFrame(Math.min(window._nidsFrames.length-1,window.mlCurrent+1));}; btnNext.addEventListener('click', btnNext._nids); }
+            if (btnLast)  { btnLast._nids  = function(){nidsAnimPause();nidsGoFrame(window._nidsFrames.length-1);}; btnLast.addEventListener('click', btnLast._nids); }
+            /* Wire timeline scrubber */
+            var tl = document.getElementById('mrmsTimeline');
+            if (tl) {
+                tl._nidsHandler = function(e) {
+                    if (!window._nidsFrames || !window._nidsFrames.length) return;
+                    var rect = this.getBoundingClientRect();
+                    var pct  = Math.max(0, Math.min(1, (e.clientX-rect.left)/rect.width));
+                    nidsAnimPause();
+                    nidsGoFrame(Math.round(pct*(window._nidsFrames.length-1)));
+                };
+                tl.addEventListener('click', tl._nidsHandler);
+            }
+        }
+
+        function restoreTimeline() {
+            if (!nidsActive) return;
+            nidsAnimPause();
+            nidsActive = false;
+            window._nidsFrames = [];
+            if (_origGoFrame) { window.mlGoFrame = _origGoFrame; }
+            /* Unwire NIDS button handlers */
+            var playBtn = document.getElementById('mBtnPlay');
+            if (playBtn && playBtn._nidsHandler) {
+                playBtn.removeEventListener('click', playBtn._nidsHandler);
+                playBtn._nidsHandler = null;
+                playBtn.innerHTML = '&#9654;';
+            }
+            ['mBtnFirst','mBtnPrev','mBtnNext','mBtnLast'].forEach(function(id) {
+                var b = document.getElementById(id);
+                if (b && b._nids) { b.removeEventListener('click', b._nids); b._nids = null; }
+            });
+            var tl = document.getElementById('mrmsTimeline');
+            if (tl && tl._nidsHandler) {
+                tl.removeEventListener('click', tl._nidsHandler);
+                tl._nidsHandler = null;
+            }
+            /* Restore MRMS colorbar */
+            var cb = document.getElementById('mrmsColorbar');
+            if (cb && isRadarEnabled()) cb.style.display = '';
+            if (typeof window.mlLoadIndex === 'function') window.mlLoadIndex();
+            var lbl = document.getElementById('mrmsLocalLabel');
+            if (lbl) lbl.textContent = 'Base Reflectivity';
+            setRadarStatus('');
+        }
+
+        /* ── Legend product switch ── */
+        function updateLegendForProduct(prod) {
+            var refl  = document.getElementById('nidsLegendRefl');
+            var hydro = document.getElementById('nidsLegendHydro');
+            var title = document.getElementById('nidsLegendTitle');
+            if (prod === 'N0H') {
+                if (title) title.textContent = '🌧 Hydrometeor Class';
+                if (refl)  refl.style.display  = 'none';
+                if (hydro) hydro.style.display = 'block';
+            } else {
+                if (title) title.textContent = '📡 Base Reflectivity';
+                if (refl)  refl.style.display  = 'block';
+                if (hydro) hydro.style.display = 'none';
+            }
+        }
+
+        /* ── Remove NIDS overlay ── */
+        function removeNidsLayer() {
+            var map = window._capMap;
+            if (nidsLayer && map) { map.removeLayer(nidsLayer); nidsLayer = null; }
+            document.getElementById('nidsLegend').style.display = 'none';
+            var typeEl = document.getElementById('nidsLegendType');
+            if (typeEl) { typeEl.style.display = 'none'; typeEl.textContent = ''; }
+            restoreTimeline();
+            currentSite = null;
+        }
+
+        /* ── TDWR layer management ── */
+        function isTdwrEnabled() {
+            var tog = document.getElementById('tdwrToggle');
+            return tog && tog.checked;
+        }
+        function getTdwrProduct() {
+            var r = document.querySelector('input[name="tdwrProduct"]:checked');
+            return r ? r.value : 'TZ0';
+        }
+        function removeTdwrLayer() {
+            var map = window._capMap;
+            if (tdwrLayer && map) { map.removeLayer(tdwrLayer); tdwrLayer = null; }
+            tdwrCurrentSite = null;
+            tdwrActive = false;
+        }
+        function updateTdwrSource() {
+            var map = window._capMap;
+            if (!map || !isTdwrEnabled()) { removeTdwrLayer(); return; }
+            if (map.getZoom() <= ZOOM_THRESHOLD) { removeTdwrLayer(); return; }
+            if (tdwrPending) return;
+            tdwrPending = true;
+
+            var prod   = getTdwrProduct();
+            var center = map.getCenter();
+
+            if (prod !== tdwrCurrentProd) {
+                tdwrSiteList = null; tdwrCurrentSite = null; tdwrCurrentProd = prod;
+                if (tdwrLayer) removeTdwrLayer();
+            }
+
+            loadTdwrSiteList(prod, function() {
+                var site = nearestSite(center.lat, center.lng, tdwrSiteList, 90);
+                if (!site) {
+                    // No TDWR within range — silently remove layer
+                    removeTdwrLayer();
+                    setRadarStatus(isRadarEnabled() ? (currentSite || '') : '');
+                    tdwrPending = false; return;
+                }
+                if (site.site_id === tdwrCurrentSite && tdwrLayer && tdwrActive) {
+                    tdwrPending = false; return;
+                }
+
+                setRadarStatus('TDWR ' + site.site_id + '…');
+                fetch(NIDS_API + '/' + site.site_id + '/' + prod + '/meta')
+                    .then(function(r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+                    .then(function(meta) {
+                        var bounds = siteBounds(meta.lat, meta.lon, meta.range_km || 90);
+                        var url = NIDS_API + '/' + site.site_id + '/' + prod + '?_=' + Date.now();
+                        if (tdwrLayer) {
+                            tdwrLayer.setUrl(url); tdwrLayer.setBounds(bounds);
+                        } else {
+                            tdwrLayer = L.imageOverlay(url, bounds, {
+                                opacity: 0.80, interactive: false, zIndex: 360
+                            }).addTo(map);
+                        }
+                        tdwrCurrentSite = site.site_id;
+                        tdwrActive = true;
+                        /* Update the NIDS legend to show TDWR info */
+                        document.getElementById('nidsLegend').style.display = 'block';
+                        var titleEl = document.getElementById('nidsLegendTitle');
+                        if (titleEl) titleEl.textContent = '🛬 TDWR Reflectivity';
+                        var typeEl = document.getElementById('nidsLegendType');
+                        if (typeEl) {
+                            typeEl.textContent = site.site_id + ' · 90km · ' + prod;
+                            typeEl.style.display = 'block';
+                        }
+                        var age = meta.age_secs < 60 ? '<1 min' : Math.round(meta.age_secs/60) + ' min ago';
+                        document.getElementById('nidsLegendSite').textContent =
+                            site.site_id + ' · ' + prod + ' · ' + age;
+                        setRadarStatus('TDWR ' + site.site_id + ' ' + prod);
+                        tdwrPending = false;
+                    })
+                    .catch(function() {
+                        setRadarStatus('TDWR: No data');
+                        tdwrPending = false;
+                    });
+            });
+        }
+
+        /* ── Load NIDS history and populate timeline ── */
+        function loadNidsHistory(site, prod) {
+            var mins = parseInt(document.getElementById('mrmsLocalDuration').value) || 120;
+            var hours = mins / 60;
+            fetch(NIDS_API + '/' + site.site_id + '/' + prod + '/history?hours=' + hours)
+                .then(function(r) { return r.json(); })
+                .then(function(d) {
+                    if (!d.frames || !d.frames.length) return;
+                    /* Newest first — reverse for timeline (oldest→newest) */
+                    var frames = d.frames.slice().reverse();
+                    hijackTimeline(frames);
+                })
+                .catch(function() {});
+        }
+
+        /* ── Main update ── */
+        function updateRadarSource() {
+            var map = window._capMap;
+            if (!map || !isRadarEnabled()) {
+                removeNidsLayer(); setRadarStatus(''); return;
+            }
+            if (map.getZoom() <= ZOOM_THRESHOLD) {
+                if (nidsActive) removeNidsLayer();
+                return;
+            }
+            if (renderPending) return;
+            renderPending = true;
+
+            var prod   = getProduct();
+            var center = map.getCenter();
+
+            if (prod !== currentProd) {
+                siteList = null; currentSite = null; currentProd = prod;
+                if (nidsLayer) removeNidsLayer();
+            }
+
+            loadSiteList(prod, function() {
+                var site = nearestSite(center.lat, center.lng, siteList, 230);
+                if (!site) { renderPending = false; return; }
+                if (site.site_id === currentSite && nidsLayer && nidsActive) {
+                    renderPending = false; return;
+                }
+
+                setRadarStatus('Loading ' + site.site_id + '…');
+
+                fetch(NIDS_API + '/' + site.site_id + '/' + prod + '/meta')
+                    .then(function(r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+                    .then(function(meta) {
+                        var bounds = siteBounds(meta.lat, meta.lon, meta.range_km);
+                        var url = NIDS_API + '/' + site.site_id + '/' + prod + '?_=' + Date.now();
+                        if (nidsLayer) {
+                            nidsLayer.setUrl(url); nidsLayer.setBounds(bounds);
+                        } else {
+                            nidsLayer = L.imageOverlay(url, bounds, {
+                                opacity: 0.85, interactive: false, zIndex: 350
+                            }).addTo(map);
+                        }
+                        currentSite = site.site_id;
+                        document.getElementById('nidsLegend').style.display = 'block';
+                        updateLegendForProduct(prod);
+                        var age = meta.age_secs < 60 ? '<1 min' : Math.round(meta.age_secs/60) + ' min ago';
+                        document.getElementById('nidsLegendSite').textContent =
+                            site.site_id + ' · ' + prod + ' · ' + age;
+                        var typeEl = document.getElementById('nidsLegendType');
+                        if (typeEl) {
+                            typeEl.textContent = 'NEXRAD WSR-88D · 230km';
+                            typeEl.style.display = 'block';
+                        }
+                        setRadarStatus(site.site_id + ' ' + prod);
+                        renderPending = false;
+                        /* Load history to take over timeline */
+                        loadNidsHistory(site, prod);
+                    })
+                    .catch(function() { setRadarStatus('No data'); renderPending = false; });
+            });
+        }
+
+        /* ── DOM wiring ── */
+        document.addEventListener('DOMContentLoaded', function() {
+            /* Expose mlGoFrame to window scope once MRMS JS has set it */
+            var poll = setInterval(function() {
+                if (!window._capMap) return;
+                clearInterval(poll);
+                window._capMap.on('zoomend moveend', function() {
+                    if (isRadarEnabled()) { currentSite = null; updateRadarSource(); }
+                    if (isTdwrEnabled()) { tdwrCurrentSite = null; updateTdwrSource(); }
+                });
+            }, 200);
+
+            var tog = document.getElementById('mrmsLocalToggle');
+            if (tog) {
+                tog.addEventListener('change', function() {
+                    var sub = document.getElementById('radarSubOptions');
+                    if (sub) sub.style.display = this.checked ? 'block' : 'none';
+                    if (!this.checked) {
+                        removeNidsLayer(); setRadarStatus('');
+                        if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
+                    } else {
+                        updateRadarSource();
+                        refreshTimer = setInterval(function() {
+                            currentSite = null; updateRadarSource();
+                        }, REFRESH_MS);
+                    }
+                });
+            }
+
+            document.querySelectorAll('input[name="radarProduct"]').forEach(function(r) {
+                r.addEventListener('change', function() {
+                    if (isRadarEnabled()) { currentSite = null; updateRadarSource(); }
+                });
+            });
+
+            /* TDWR toggle */
+            var tdwrTog = document.getElementById('tdwrToggle');
+            if (tdwrTog) {
+                tdwrTog.addEventListener('change', function() {
+                    var sub = document.getElementById('tdwrSubOptions');
+                    if (sub) sub.style.display = this.checked ? 'block' : 'none';
+                    if (!this.checked) {
+                        removeTdwrLayer(); setRadarStatus('');
+                        if (tdwrRefreshTimer) { clearInterval(tdwrRefreshTimer); tdwrRefreshTimer = null; }
+                    } else {
+                        updateTdwrSource();
+                        tdwrRefreshTimer = setInterval(function() {
+                            tdwrCurrentSite = null; updateTdwrSource();
+                        }, REFRESH_MS);
+                    }
+                });
+            }
+            document.querySelectorAll('input[name="tdwrProduct"]').forEach(function(r) {
+                r.addEventListener('change', function() {
+                    if (isTdwrEnabled()) { tdwrCurrentSite = null; updateTdwrSource(); }
+                });
+            });
+        });
+
+        window._updateRadarSource = updateRadarSource;
+        window._updateTdwrSource  = updateTdwrSource;
+    })();
+    </script>
+
 </body>
 </html>
+

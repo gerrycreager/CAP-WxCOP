@@ -7,8 +7,10 @@ Protected routes require:
   2. TOTP 6-digit code (authenticator app) OR email/SMS OTP fallback
 
 Credentials file: /etc/cap_wxcop/users.conf
-  Format: username:bcrypt_hash:totp_secret[:email]
-  Example: gcreager:$2b$12$...:BASE32SECRET:gerry@example.com
+  Format: username:bcrypt_hash:totp_secret[:email[:role[:wing_id]]]
+  role: 'admin' (all wings) or 'wing' (own wing only), default 'admin'
+  wing_id: e.g. 'COWG', 'MDWG' — required when role=wing
+  Example: gcreager:$2b$12$...:BASE32SECRET:gerry@example.com:admin
 
 Session secret: /etc/cap_wxcop/secret.key
 
@@ -93,10 +95,14 @@ def load_users():
         pw_hash      = parts[1]
         totp_secret  = parts[2]
         email        = parts[3] if len(parts) > 3 else None
+        role         = parts[4] if len(parts) > 4 else 'admin'
+        wing_id      = parts[5] if len(parts) > 5 else None
         users[username] = {
             'hash':        pw_hash,
             'totp_secret': totp_secret,
             'email':       email,
+            'role':        role,
+            'wing_id':     wing_id,
         }
     return users
 
@@ -234,7 +240,7 @@ def login_required_json(f):
 def login():
     """Step 1: Username + password."""
     if is_authenticated():
-        return redirect(url_for('kq_admin.list_stations'))
+        return redirect('/')
 
     next_url = request.args.get('next') or request.form.get('next', '')
 
@@ -291,19 +297,22 @@ def mfa():
         # Verify code — try TOTP first, then email OTP
         if verify_totp(username, code) or verify_email_otp(username, code):
             # Full authentication complete
+            user = load_users().get(username, {})
             session.pop('pending_user', None)
             session.pop('pending_time', None)
             session['authenticated'] = True
             session['username']      = username
             session['login_time']    = time.time()
+            session['role']          = user.get('role', 'admin')
+            session['wing_id']       = user.get('wing_id')
             session.permanent        = True
 
             log.info(f"Successful login: {username} from {request.remote_addr}")
 
-            # Redirect to original destination or KQ admin
-            if next_url and next_url.startswith('/'):
+            # Redirect to original destination or landing page
+            if next_url and (next_url.startswith('/') or 'wxcop.duckdns.org' in next_url):
                 return redirect(next_url)
-            return redirect(url_for('kq_admin.list_stations'))
+            return redirect('/')
 
         else:
             time.sleep(0.5)
@@ -320,7 +329,7 @@ def logout():
     session.clear()
     log.info(f"Logout: {username}")
     flash('You have been logged out.', 'info')
-    return redirect(url_for('kq_admin.list_stations'))
+    return redirect('/')
 
 
 @auth.route('/status')
