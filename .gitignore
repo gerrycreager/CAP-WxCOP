@@ -77,3 +77,4 @@ venv/
 wwa_ingest_state.txt
 *.html.*
 a.out
+nids_api.py
