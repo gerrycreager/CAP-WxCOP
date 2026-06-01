@@ -303,6 +303,7 @@
             display: none; position: fixed; bottom: 215px; left: 10px; z-index: 1001;
         }
         body.radar-open #mrmsColorbar { bottom: 270px; }
+        body.nids-active #mrmsColorbar { display: none !important; }
         #mrmsColorbar .cb-panel {
             background: rgba(255,255,255,0.93); border-radius: 6px;
             padding: 5px 8px; box-shadow: 0 1px 6px rgba(0,0,0,0.3);
@@ -310,6 +311,25 @@
         }
         #mrmsColorbar .cb-title { font-weight: 700; font-size: 11px; margin-bottom: 3px; }
         #mrmsColorbar canvas { display: block; border: 1px solid #aaa; border-radius: 2px; margin-bottom: 2px; }
+
+        /* NIDS/TDWR single-site legend — stacks above fixedLegend */
+        #nidsLegend {
+            position: fixed;
+            bottom: 60px;   /* above timeline bar, aligns with fixedLegend base */
+            left: 10px;
+            z-index: 1050;
+            background: rgba(255,255,255,0.95);
+            border-radius: 5px;
+            padding: 6px 10px;
+            box-shadow: 0 1px 6px rgba(0,0,0,0.3);
+            font-size: 11px;
+            min-width: 130px;
+            pointer-events: none;
+        }
+        /* Push nidsLegend above fixedLegend (~210px tall) when radar-open */
+        body.radar-open #nidsLegend { bottom: 270px; }
+        /* When not radar-open, fixedLegend is at bottom:10px (~210px tall) */
+        #nidsLegend { bottom: 220px; }
         #mrmsColorbar .cb-labels {
             display: flex; justify-content: space-between; width: 160px; font-size: 9px; color: #444;
         }
@@ -471,18 +491,42 @@
 
         <div class="divider"></div>
         <h3>Radar</h3>
+        <!-- Single radar toggle — auto-selects MRMS/WSR-88D/TDWR by zoom+proximity -->
         <label class="checkbox-label">
-            <input type="checkbox" id="mrmsLocalToggle"> Base Reflectivity
+            <input type="checkbox" id="mrmsLocalToggle"> Local Radar (auto)
         </label>
         <div id="radarSubOptions" style="display:none;margin-left:16px;margin-top:2px;margin-bottom:2px;font-size:11px;">
-            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;margin-bottom:2px;">
-                <input type="radio" name="radarProduct" id="radarN0B" value="N0B" checked
-                       style="accent-color:#2c5f41;"> Reflectivity
-            </label>
-            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;">
-                <input type="radio" name="radarProduct" id="radarN0H" value="N0H"
-                       style="accent-color:#2c5f41;"> Hydrometeor Class
-            </label>
+            <!-- WSR-88D products (shown when WSR-88D active) -->
+            <div id="nexradProducts">
+                <label style="display:flex;align-items:center;gap:5px;cursor:pointer;margin-bottom:2px;">
+                    <input type="radio" name="radarProduct" id="radarN0B" value="N0B" checked
+                           style="accent-color:#2c5f41;"> Reflectivity (N0B)
+                </label>
+                <label style="display:flex;align-items:center;gap:5px;cursor:pointer;">
+                    <input type="radio" name="radarProduct" id="radarN0H" value="N0H"
+                           style="accent-color:#2c5f41;"> Hydrometeor Class (N0H)
+                </label>
+            </div>
+            <!-- TDWR products (shown when TDWR auto-selected) -->
+            <div id="tdwrProducts" style="display:none;">
+                <label style="display:flex;align-items:center;gap:5px;cursor:pointer;margin-bottom:2px;">
+                    <input type="radio" name="tdwrProduct" id="tdwrTZ0" value="TZ0" checked
+                           style="accent-color:#2c5f41;"> Refl 48nmi T1 (TZ0)
+                </label>
+                <label style="display:flex;align-items:center;gap:5px;cursor:pointer;margin-bottom:2px;">
+                    <input type="radio" name="tdwrProduct" id="tdwrTZ1" value="TZ1"
+                           style="accent-color:#2c5f41;"> Refl 48nmi T2 (TZ1)
+                </label>
+                <label style="display:flex;align-items:center;gap:5px;cursor:pointer;margin-bottom:2px;">
+                    <input type="radio" name="tdwrProduct" id="tdwrTZ2" value="TZ2"
+                           style="accent-color:#2c5f41;"> Refl 48nmi T3 (TZ2)
+                </label>
+                <label style="display:flex;align-items:center;gap:5px;cursor:pointer;">
+                    <input type="radio" name="tdwrProduct" id="tdwrTZL" value="TZL"
+                           style="accent-color:#2c5f41;"> Long Range Refl (TZL)
+                </label>
+            </div>
+            <div id="radarTypeIndicator" style="font-size:10px;color:#666;margin-top:3px;"></div>
         </div>
         <div id="radarStatus" style="font-size:10px;color:#888;text-align:center;min-height:14px;margin-bottom:2px;"></div>
         <label class="checkbox-label">
@@ -1588,7 +1632,7 @@
                         mlLayers={};
                         mlFrames.forEach(function(f){
                             mlLayers[f.timestamp]=L.tileLayer(ML_TILE_BASE+f.timestamp+'/{z}/{x}/{y}.png',{
-                                opacity:0,maxZoom:10,minZoom:3,zIndex:410,
+                                opacity:0,maxZoom:7,minZoom:3,zIndex:410,
                                 errorTileUrl:'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
                                 attribution:'MRMS &copy; NOAA/NSSL — Local'
                             });
@@ -1750,8 +1794,13 @@
             window.mlGoFrame    = mlGoFrame;
             window.mlLoadIndex  = mlLoadIndex;
             window.mlPause      = mlPause;
+            window.mlStop       = mlStop;
             window.mlFrames     = mlFrames;
             window.mlCurrent    = mlCurrent;
+            window.mlIsActive   = function() {
+                return document.getElementById('mrmsLocalToggle') &&
+                       document.getElementById('mrmsLocalToggle').checked;
+            };
 
             // ── GLM Lightning ────────────────────────────────────────────────
             var glmLayer=null, glmRefreshTimer=null;
@@ -2129,10 +2178,9 @@
 
 
     <!-- NIDS single-site legend -->
-    <div id="nidsLegend" style="display:none;position:fixed;bottom:60px;left:10px;
-         background:rgba(255,255,255,0.93);border:1px solid #ccc;border-radius:4px;
-         padding:6px 10px;z-index:1002;font-size:11px;font-family:sans-serif;min-width:150px;">
+    <div id="nidsLegend" style="display:none;">
         <div id="nidsLegendTitle" style="font-weight:700;margin-bottom:4px;">📡 Base Reflectivity</div>
+        <div id="nidsLegendType" style="font-size:10px;color:#555;margin-bottom:3px;display:none;"></div>
         <!-- Reflectivity color scale (N0B) -->
         <div id="nidsLegendRefl">
             <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgb(4,233,231);"></span>5–10 dBZ</div>
@@ -2162,26 +2210,37 @@
     </div>
 
     <script>
-    // ── Integrated Radar: MRMS (zoom≤8) + NIDS (zoom>8) sharing bottom timeline ─
+    // ── Integrated Radar: MRMS (zoom≤8) → WSR-88D (zoom 9-10) → TDWR auto (zoom>10) ─
+    // Auto-switches to TDWR when zoom>10 and a TDWR site is within 90km
+    // Single layer, single timeline, no user toggle needed
     (function() {
         'use strict';
-        var ZOOM_THRESHOLD = 8;
-        var NIDS_API       = '/CAP_WxCOP/api/nids';
-        var REFRESH_MS     = 300000;
+        var ZOOM_THRESHOLD      = 7;   /* MRMS → NIDS handoff */
+        var ZOOM_TDWR_THRESHOLD = 10;  /* WSR-88D → TDWR auto handoff */
+        var NIDS_API            = '/CAP_WxCOP/api/nids';
+        var REFRESH_MS          = 300000;
 
+        // Unified radar state — one layer at a time
         var nidsLayer     = null;
         var currentSite   = null;
         var currentProd   = 'N0B';
-        var siteList      = null;
+        var currentType   = 'WSR-88D';  /* 'WSR-88D' or 'TDWR' */
+        var siteList      = null;        /* WSR-88D site list */
+        var tdwrSiteList  = null;        /* TDWR site list */
         var refreshTimer  = null;
         var renderPending = false;
-        var nidsActive    = false;  /* true when NIDS has taken over timeline */
+        var nidsActive    = false;
 
         /* Saved MRMS timeline state for restore on zoom-out */
         var mrmsFramesSaved = null;
         var mrmsCurrent     = -1;
 
         function getProduct() {
+            /* Returns active product based on current radar type */
+            if (currentType === 'TDWR') {
+                var r = document.querySelector('input[name="tdwrProduct"]:checked');
+                return r ? r.value : 'TZ0';
+            }
             var r = document.querySelector('input[name="radarProduct"]:checked');
             return r ? r.value : 'N0B';
         }
@@ -2193,27 +2252,65 @@
             var tog = document.getElementById('mrmsLocalToggle');
             return tog && tog.checked;
         }
-        function nearestSite(lat, lon) {
-            if (!siteList || !siteList.length) return null;
+        function showRadarTypeUI(type) {
+            /* Switch product selector UI between WSR-88D and TDWR */
+            var nx   = document.getElementById('nexradProducts');
+            var tw   = document.getElementById('tdwrProducts');
+            var ind  = document.getElementById('radarTypeIndicator');
+            if (nx)  nx.style.display  = (type === 'WSR-88D') ? 'block' : 'none';
+            if (tw)  tw.style.display  = (type === 'TDWR')    ? 'block' : 'none';
+            if (ind) ind.textContent   = type === 'TDWR'
+                ? '🛬 TDWR auto-selected (zoom>10)'
+                : '📡 NEXRAD WSR-88D';
+        }
+        function hasTdwrNearby(lat, lon) {
+            /* Returns nearest TDWR site if within 90km, else null */
+            if (!tdwrSiteList || !tdwrSiteList.length) return null;
+            return nearestSite(lat, lon, tdwrSiteList, 90);
+        }
+        function nearestSite(lat, lon, list, maxRangeKm) {
+            if (!list || !list.length) return null;
             var best = null, bestDist = Infinity;
-            siteList.forEach(function(s) {
-                var dlat = s.lat - lat;
-                var dlon = (s.lon - lon) * Math.cos(lat * Math.PI / 180);
-                var d = dlat*dlat + dlon*dlon;
-                if (d < bestDist) { bestDist = d; best = s; }
+            var cosLat = Math.cos(lat * Math.PI / 180);
+            list.forEach(function(s) {
+                var dlat = (s.lat - lat) * 111.32;
+                var dlon = (s.lon - lon) * 111.32 * cosLat;
+                var distKm = Math.sqrt(dlat*dlat + dlon*dlon);
+                // Only consider sites whose coverage includes the map center
+                var effectiveRange = maxRangeKm || s.range_km || 230;
+                if (distKm < effectiveRange && distKm < bestDist) {
+                    bestDist = distKm; best = s;
+                }
             });
             return best;
         }
         function loadSiteList(prod, cb) {
-            fetch(NIDS_API + '/sites?product=' + prod)
+            fetch(NIDS_API + '/sites?product=' + prod + '&radar_type=WSR-88D')
                 .then(function(r) { return r.json(); })
                 .then(function(d) { siteList = d.sites || []; cb(); })
                 .catch(function() { siteList = []; cb(); });
         }
-        function siteBounds(lat, lon) {
+        function loadTdwrSiteList(prod, cb) {
+            fetch(NIDS_API + '/sites?product=' + prod + '&radar_type=TDWR')
+                .then(function(r) { return r.json(); })
+                .then(function(d) { tdwrSiteList = d.sites || []; cb(); })
+                .catch(function() { tdwrSiteList = []; cb(); });
+        }
+        function ensureSiteLists(cb) {
+            /* Load both WSR-88D and TDWR site lists if not cached, then call cb */
+            var needed = 0, done = 0;
+            if (!siteList)      needed++;
+            if (!tdwrSiteList)  needed++;
+            if (needed === 0) { cb(); return; }
+            function check() { if (++done === needed) cb(); }
+            if (!siteList)     loadSiteList('N0B', check);
+            if (!tdwrSiteList) loadTdwrSiteList('TZ0', check);
+        }
+        function siteBounds(lat, lon, range_km) {
+            range_km = range_km || 230;
             var kmlat = 111.32;
             var kmlon = kmlat * Math.cos(lat * Math.PI / 180);
-            var lr = 230/kmlat, lo = 230/kmlon;
+            var lr = range_km/kmlat, lo = range_km/kmlon;
             return [[lat-lr, lon-lo], [lat+lr, lon+lo]];
         }
 
@@ -2282,10 +2379,12 @@
             /* Hide MRMS colorbar */
             var cb = document.getElementById('mrmsColorbar');
             if (cb) cb.style.display = 'none';
+            document.body.classList.remove('mrms-colorbar-open');
+            document.body.classList.add('nids-active');
             /* Show latest frame */
             nidsGoFrame(frames.length - 1);
             var lbl = document.getElementById('mrmsLocalLabel');
-            if (lbl) lbl.textContent = currentSite + ' ' + currentProd;
+            if (lbl) lbl.textContent = (currentType === 'TDWR' ? 'TDWR · ' : 'WSR-88D · ') + currentSite + ' ' + currentProd;
             /* Wire play button to NIDS animation */
             var playBtn = document.getElementById('mBtnPlay');
             if (playBtn) {
@@ -2340,10 +2439,19 @@
                 tl.removeEventListener('click', tl._nidsHandler);
                 tl._nidsHandler = null;
             }
-            /* Restore MRMS colorbar */
+            /* Restore MRMS colorbar and tiles only if back at low zoom */
+            var _restoreZoom = window._capMap ? window._capMap.getZoom() : 0;
             var cb = document.getElementById('mrmsColorbar');
-            if (cb && isRadarEnabled()) cb.style.display = '';
-            if (typeof window.mlLoadIndex === 'function') window.mlLoadIndex();
+            if (_restoreZoom <= ZOOM_THRESHOLD) {
+                document.body.classList.remove('nids-active');
+                if (cb && isRadarEnabled()) { cb.style.display = 'block'; document.body.classList.add('mrms-colorbar-open'); }
+                if (typeof window.mlLoadIndex === 'function') window.mlLoadIndex();
+            } else {
+                /* Still in NIDS/TDWR zoom range — keep colorbar hidden */
+                if (cb) cb.style.display = 'none';
+                document.body.classList.remove('mrms-colorbar-open');
+                /* nids-active stays on body — colorbar stays hidden */
+            }
             var lbl = document.getElementById('mrmsLocalLabel');
             if (lbl) lbl.textContent = 'Base Reflectivity';
             setRadarStatus('');
@@ -2370,11 +2478,12 @@
             var map = window._capMap;
             if (nidsLayer && map) { map.removeLayer(nidsLayer); nidsLayer = null; }
             document.getElementById('nidsLegend').style.display = 'none';
+            var typeEl = document.getElementById('nidsLegendType');
+            if (typeEl) { typeEl.style.display = 'none'; typeEl.textContent = ''; }
             restoreTimeline();
             currentSite = null;
         }
 
-        /* ── Load NIDS history and populate timeline ── */
         function loadNidsHistory(site, prod) {
             var mins = parseInt(document.getElementById('mrmsLocalDuration').value) || 120;
             var hours = mins / 60;
@@ -2389,41 +2498,80 @@
                 .catch(function() {});
         }
 
-        /* ── Main update ── */
-        function updateRadarSource() {
+                function updateRadarSource() {
+            /* Unified auto-switching:
+               zoom <= ZOOM_THRESHOLD       -- MRMS (handled elsewhere)
+               zoom 9-10                    -- nearest WSR-88D
+               zoom > ZOOM_TDWR_THRESHOLD   -- TDWR if within 90km, else WSR-88D
+            */
             var map = window._capMap;
             if (!map || !isRadarEnabled()) {
-                removeNidsLayer(); setRadarStatus(''); return;
-            }
-            if (map.getZoom() <= ZOOM_THRESHOLD) {
-                if (nidsActive) removeNidsLayer();
+                removeNidsLayer(); setRadarStatus('');
+                document.body.classList.remove('nids-active');
                 return;
+            }
+            var zoom = map.getZoom();
+            if (zoom <= ZOOM_THRESHOLD) {
+                /* Always clean up NIDS/TDWR when back at MRMS zoom — don't rely on nidsActive flag */
+                if (nidsLayer || nidsActive) removeNidsLayer();
+                /* Explicitly hide NIDS legend in case removeNidsLayer missed it */
+                var _nl = document.getElementById('nidsLegend');
+                if (_nl) _nl.style.display = 'none';
+                /* Restore MRMS if user has it enabled and we're back at low zoom */
+                if (window.mlIsActive && window.mlIsActive() && window.mlLoadIndex) {
+                    window.mlLoadIndex();
+                }
+                return;
+            }
+            /* NIDS is taking over at this zoom — suppress MRMS local tiles */
+            if (window.mlStop && window.mlIsActive && window.mlIsActive()) {
+                window.mlStop();
             }
             if (renderPending) return;
             renderPending = true;
 
-            var prod   = getProduct();
             var center = map.getCenter();
 
-            if (prod !== currentProd) {
-                siteList = null; currentSite = null; currentProd = prod;
-                if (nidsLayer) removeNidsLayer();
-            }
+            ensureSiteLists(function() {
+                var useTdwr  = false;
+                var tdwrSite = null;
+                if (zoom > ZOOM_TDWR_THRESHOLD) {
+                    tdwrSite = hasTdwrNearby(center.lat, center.lng);
+                    if (tdwrSite) useTdwr = true;
+                }
 
-            loadSiteList(prod, function() {
-                var site = nearestSite(center.lat, center.lng);
+                var newType = useTdwr ? 'TDWR' : 'WSR-88D';
+                var prod    = useTdwr
+                    ? (document.querySelector('input[name="tdwrProduct"]:checked') || {value:'TZ0'}).value
+                    : (document.querySelector('input[name="radarProduct"]:checked')  || {value:'N0B'}).value;
+
+                if (newType !== currentType) {
+                    removeNidsLayer();
+                    currentSite = null;
+                    currentType = newType;
+                    currentProd = prod;
+                    showRadarTypeUI(newType);
+                }
+
+                var site = useTdwr
+                    ? tdwrSite
+                    : nearestSite(center.lat, center.lng, siteList, 230);
+
                 if (!site) { renderPending = false; return; }
-                if (site.site_id === currentSite && nidsLayer && nidsActive) {
+                if (site.site_id === currentSite && prod === currentProd &&
+                    nidsLayer && nidsActive) {
                     renderPending = false; return;
                 }
 
-                setRadarStatus('Loading ' + site.site_id + '…');
+                setRadarStatus('Loading ' + site.site_id + '...');
 
                 fetch(NIDS_API + '/' + site.site_id + '/' + prod + '/meta')
                     .then(function(r) { if (!r.ok) throw new Error(r.status); return r.json(); })
                     .then(function(meta) {
-                        var bounds = siteBounds(meta.lat, meta.lon);
-                        var url = NIDS_API + '/' + site.site_id + '/' + prod + '?_=' + Date.now();
+                        var rng    = meta.range_km || (useTdwr ? 90 : 230);
+                        var bounds = siteBounds(meta.lat, meta.lon, rng);
+                        var url    = NIDS_API + '/' + site.site_id + '/' + prod
+                                   + '?_=' + Date.now();
                         if (nidsLayer) {
                             nidsLayer.setUrl(url); nidsLayer.setBounds(bounds);
                         } else {
@@ -2432,30 +2580,55 @@
                             }).addTo(map);
                         }
                         currentSite = site.site_id;
+                        currentProd = prod;
+                        currentType = newType;
+
                         document.getElementById('nidsLegend').style.display = 'block';
-                        updateLegendForProduct(prod);
-                        var age = meta.age_secs < 60 ? '<1 min' : Math.round(meta.age_secs/60) + ' min ago';
+                        updateLegendForProduct(useTdwr ? 'TZ0' : prod);
+                        var age = (meta.age_secs||0) < 60 ? '<1 min'
+                            : Math.round((meta.age_secs||0)/60) + ' min ago';
                         document.getElementById('nidsLegendSite').textContent =
                             site.site_id + ' · ' + prod + ' · ' + age;
-                        setRadarStatus(site.site_id + ' ' + prod);
+                        var typeEl = document.getElementById('nidsLegendType');
+                        if (typeEl) {
+                            typeEl.textContent = useTdwr
+                                ? 'TDWR · 90km'
+                                : ('NEXRAD WSR-88D · ' + rng + 'km');
+                            typeEl.style.display = 'block';
+                        }
+                        var titleEl = document.getElementById('nidsLegendTitle');
+                        if (titleEl) titleEl.textContent = useTdwr
+                            ? 'TDWR Reflectivity'
+                            : 'Base Reflectivity';
+
+                        setRadarStatus(site.site_id + ' ' + prod
+                            + (useTdwr ? ' (TDWR)' : ''));
                         renderPending = false;
-                        /* Load history to take over timeline */
                         loadNidsHistory(site, prod);
                     })
-                    .catch(function() { setRadarStatus('No data'); renderPending = false; });
+                    .catch(function() {
+                        setRadarStatus('No data');
+                        renderPending = false;
+                    });
             });
         }
 
-        /* ── DOM wiring ── */
+        /* ---- DOM wiring ---- */
         document.addEventListener('DOMContentLoaded', function() {
-            /* Expose mlGoFrame to window scope once MRMS JS has set it */
             var poll = setInterval(function() {
                 if (!window._capMap) return;
                 clearInterval(poll);
                 window._capMap.on('zoomend moveend', function() {
-                    if (isRadarEnabled()) { currentSite = null; updateRadarSource(); }
+                    if (isRadarEnabled()) {
+                        var z = window._capMap.getZoom();
+                        if ((z > ZOOM_TDWR_THRESHOLD) !== (currentType === 'TDWR')) {
+                            currentSite = null;
+                            tdwrSiteList = null; /* force fresh TDWR list at threshold crossing */
+                        }
+                        updateRadarSource();
+                    }
                 });
-            }, 200);
+            }); // close DOMContentLoaded poll
 
             var tog = document.getElementById('mrmsLocalToggle');
             if (tog) {
@@ -2464,9 +2637,12 @@
                     if (sub) sub.style.display = this.checked ? 'block' : 'none';
                     if (!this.checked) {
                         removeNidsLayer(); setRadarStatus('');
+                        currentType = 'WSR-88D';
+                        showRadarTypeUI('WSR-88D');
                         if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
                     } else {
-                        updateRadarSource();
+                        siteList = null; tdwrSiteList = null; currentSite = null;
+                        ensureSiteLists(function() { updateRadarSource(); });
                         refreshTimer = setInterval(function() {
                             currentSite = null; updateRadarSource();
                         }, REFRESH_MS);
@@ -2476,7 +2652,12 @@
 
             document.querySelectorAll('input[name="radarProduct"]').forEach(function(r) {
                 r.addEventListener('change', function() {
-                    if (isRadarEnabled()) { currentSite = null; updateRadarSource(); }
+                    if (isRadarEnabled()) { currentProd = null; updateRadarSource(); }
+                });
+            });
+            document.querySelectorAll('input[name="tdwrProduct"]').forEach(function(r) {
+                r.addEventListener('change', function() {
+                    if (isRadarEnabled()) { currentProd = null; updateRadarSource(); }
                 });
             });
         });
