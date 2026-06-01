@@ -303,6 +303,7 @@
             display: none; position: fixed; bottom: 215px; left: 10px; z-index: 1001;
         }
         body.radar-open #mrmsColorbar { bottom: 270px; }
+        body.nids-active #mrmsColorbar { display: none !important; }
         #mrmsColorbar .cb-panel {
             background: rgba(255,255,255,0.93); border-radius: 6px;
             padding: 5px 8px; box-shadow: 0 1px 6px rgba(0,0,0,0.3);
@@ -2378,6 +2379,8 @@
             /* Hide MRMS colorbar */
             var cb = document.getElementById('mrmsColorbar');
             if (cb) cb.style.display = 'none';
+            document.body.classList.remove('mrms-colorbar-open');
+            document.body.classList.add('nids-active');
             /* Show latest frame */
             nidsGoFrame(frames.length - 1);
             var lbl = document.getElementById('mrmsLocalLabel');
@@ -2436,10 +2439,19 @@
                 tl.removeEventListener('click', tl._nidsHandler);
                 tl._nidsHandler = null;
             }
-            /* Restore MRMS colorbar */
+            /* Restore MRMS colorbar and tiles only if back at low zoom */
+            var _restoreZoom = window._capMap ? window._capMap.getZoom() : 0;
             var cb = document.getElementById('mrmsColorbar');
-            if (cb && isRadarEnabled()) cb.style.display = '';
-            if (typeof window.mlLoadIndex === 'function') window.mlLoadIndex();
+            if (_restoreZoom <= ZOOM_THRESHOLD) {
+                document.body.classList.remove('nids-active');
+                if (cb && isRadarEnabled()) { cb.style.display = 'block'; document.body.classList.add('mrms-colorbar-open'); }
+                if (typeof window.mlLoadIndex === 'function') window.mlLoadIndex();
+            } else {
+                /* Still in NIDS/TDWR zoom range — keep colorbar hidden */
+                if (cb) cb.style.display = 'none';
+                document.body.classList.remove('mrms-colorbar-open');
+                /* nids-active stays on body — colorbar stays hidden */
+            }
             var lbl = document.getElementById('mrmsLocalLabel');
             if (lbl) lbl.textContent = 'Base Reflectivity';
             setRadarStatus('');
@@ -2472,7 +2484,21 @@
             currentSite = null;
         }
 
-        function updateRadarSource() {
+        function loadNidsHistory(site, prod) {
+            var mins = parseInt(document.getElementById('mrmsLocalDuration').value) || 120;
+            var hours = mins / 60;
+            fetch(NIDS_API + '/' + site.site_id + '/' + prod + '/history?hours=' + hours)
+                .then(function(r) { return r.json(); })
+                .then(function(d) {
+                    if (!d.frames || !d.frames.length) return;
+                    /* Newest first — reverse for timeline (oldest→newest) */
+                    var frames = d.frames.slice().reverse();
+                    hijackTimeline(frames);
+                })
+                .catch(function() {});
+        }
+
+                function updateRadarSource() {
             /* Unified auto-switching:
                zoom <= ZOOM_THRESHOLD       -- MRMS (handled elsewhere)
                zoom 9-10                    -- nearest WSR-88D
@@ -2480,11 +2506,17 @@
             */
             var map = window._capMap;
             if (!map || !isRadarEnabled()) {
-                removeNidsLayer(); setRadarStatus(''); return;
+                removeNidsLayer(); setRadarStatus('');
+                document.body.classList.remove('nids-active');
+                return;
             }
             var zoom = map.getZoom();
             if (zoom <= ZOOM_THRESHOLD) {
-                if (nidsActive) removeNidsLayer();
+                /* Always clean up NIDS/TDWR when back at MRMS zoom — don't rely on nidsActive flag */
+                if (nidsLayer || nidsActive) removeNidsLayer();
+                /* Explicitly hide NIDS legend in case removeNidsLayer missed it */
+                var _nl = document.getElementById('nidsLegend');
+                if (_nl) _nl.style.display = 'none';
                 /* Restore MRMS if user has it enabled and we're back at low zoom */
                 if (window.mlIsActive && window.mlIsActive() && window.mlLoadIndex) {
                     window.mlLoadIndex();
