@@ -532,6 +532,42 @@
         <label class="checkbox-label">
             <input type="checkbox" id="tstmToggle"> TRW Probability (LAMP)
         </label>
+        <div style="margin-top:4px;margin-bottom:2px;">
+            <label style="font-size:11px;color:#ccc;display:flex;align-items:center;gap:6px;">
+                Radar opacity
+                <input type="range" id="radarOpacity" min="0" max="100" value="75"
+                       style="flex:1;accent-color:#4a9c6f;cursor:pointer;">
+                <span id="radarOpacityVal" style="font-size:10px;color:#888;min-width:28px;">75%</span>
+            </label>
+        </div>
+        <div class="divider"></div>
+        <h3>Satellite</h3>
+        <label class="checkbox-label">
+            <input type="checkbox" id="satToggle"> GOES Satellite
+        </label>
+        <div id="satSubOptions" style="display:none;margin-left:16px;margin-top:2px;font-size:11px;">
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;margin-bottom:2px;">
+                <input type="radio" name="satProduct" value="ir" id="satIR" checked
+                       style="accent-color:#2c5f41;"> IR (Cloud Tops)
+            </label>
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;margin-bottom:2px;">
+                <input type="radio" name="satProduct" value="vis" id="satVis"
+                       style="accent-color:#2c5f41;"> Visible
+            </label>
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;">
+                <input type="radio" name="satProduct" value="wv" id="satWV"
+                       style="accent-color:#2c5f41;"> Water Vapor
+            </label>
+            <div style="margin-top:4px;">
+                <label style="font-size:10px;color:#ccc;display:flex;align-items:center;gap:6px;">
+                    Opacity
+                    <input type="range" id="satOpacity" min="0" max="100" value="75"
+                           style="flex:1;accent-color:#4a9c6f;cursor:pointer;">
+                    <span id="satOpacityVal" style="font-size:10px;color:#888;min-width:28px;">75%</span>
+                </label>
+            </div>
+            <div id="satStatus" style="font-size:10px;color:#888;margin-top:3px;"></div>
+        </div>
         <div class="divider"></div>
         <h3>Wind Flow</h3>
         <label class="checkbox-label">
@@ -1631,8 +1667,9 @@
                         if(!mlFrames.length) mlFrames=all.slice(-10);
                         mlLayers={};
                         mlFrames.forEach(function(f){
+                            var _mlOp = (window._radarOpacity !== undefined) ? window._radarOpacity : 0.75;
                             mlLayers[f.timestamp]=L.tileLayer(ML_TILE_BASE+f.timestamp+'/{z}/{x}/{y}.png',{
-                                opacity:0,maxZoom:7,minZoom:3,zIndex:410,
+                                opacity:_mlOp,maxZoom:7,minZoom:3,zIndex:410,
                                 errorTileUrl:'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
                                 attribution:'MRMS &copy; NOAA/NSSL — Local'
                             });
@@ -1738,6 +1775,22 @@
                     '<span>-30</span><span>0</span><span>20</span><span>40</span><span>60</span><span>75</span>';
             }
 
+            /* Radar opacity slider */
+            var radarOpSlider = document.getElementById('radarOpacity');
+            var radarOpVal    = document.getElementById('radarOpacityVal');
+            if (radarOpSlider) {
+                /* Initialize from slider default value */
+                window._radarOpacity = parseInt(radarOpSlider.value) / 100;
+                radarOpSlider.addEventListener('input', function() {
+                    var pct = parseInt(this.value);
+                    if (radarOpVal) radarOpVal.textContent = pct + '%';
+                    var op = pct / 100;
+                    Object.values(mlLayers || {}).forEach(function(l) {
+                        if (l && l.setOpacity) l.setOpacity(op);
+                    });
+                    window._radarOpacity = op;
+                });
+            }
             document.getElementById('mrmsLocalToggle').addEventListener('change',function(){
                 var bar=document.getElementById('mrmsPlayerBar');
                 var cb=document.getElementById('mrmsColorbar');
@@ -1783,6 +1836,9 @@
             });
             document.getElementById('mrmsPlaySpeed').addEventListener('change',function(){
                 if(mlPlaying){ mlPause(); mlPlay(); }
+                if(typeof nidsAnimPlaying !== 'undefined' && nidsAnimPlaying) {
+                    nidsAnimPause(); nidsAnimPlay();
+                }
             });
             document.getElementById('mBtnFirst').addEventListener('click',function(){mlPause();mlGoFrame(0);});
             document.getElementById('mBtnPrev').addEventListener('click', function(){mlPause();mlGoFrame(mlCurrent-1);});
@@ -2322,7 +2378,10 @@
             if (!window._nidsFrames || !window._nidsFrames.length) return;
             idx = Math.max(0, Math.min(idx, window._nidsFrames.length - 1));
             var frame = window._nidsFrames[idx];
-            if (nidsLayer) nidsLayer.setUrl(frame.url);
+            if (nidsLayer) {
+                nidsLayer.setUrl(frame.url);
+                if (window._radarOpacity !== undefined) nidsLayer.setOpacity(window._radarOpacity);
+            }
             window.mlCurrent = idx;
 
             /* Update timeline display */
@@ -2350,9 +2409,8 @@
             if (nidsAnimPlaying) return;
             nidsAnimPlaying = true;
             document.getElementById('mBtnPlay').innerHTML = '&#9646;&#9646;';
-            var spd = 600;
             var sel = document.getElementById('mrmsPlaySpeed');
-            if (sel) { var v=parseInt(sel.value); if(!isNaN(v)) spd=v; }
+            var spd = sel ? (parseInt(sel.value) || 500) : 500;
             nidsAnimTimer = setInterval(function() {
                 if (!window._nidsFrames || !window._nidsFrames.length) return;
                 nidsGoFrame((window.mlCurrent + 1) % window._nidsFrames.length);
@@ -2576,7 +2634,7 @@
                             nidsLayer.setUrl(url); nidsLayer.setBounds(bounds);
                         } else {
                             nidsLayer = L.imageOverlay(url, bounds, {
-                                opacity: 0.85, interactive: false, zIndex: 350
+                                opacity: (window._radarOpacity !== undefined ? window._radarOpacity : 0.85), interactive: false, zIndex: 420
                             }).addTo(map);
                         }
                         currentSite = site.site_id;
@@ -2666,6 +2724,95 @@
     })();
     </script>
 
+
+    <!-- ── GOES Satellite overlay via nowCOAST GeoServer WMS ──────────────── -->
+    <script>
+    (function() {
+        'use strict';
+        /*
+         * nowCOAST GeoServer satellite WMS — GOES-East + GOES-West composited
+         * per channel, updated every 5 minutes. Single layer covers CONUS,
+         * AK, HI, PR, GU. No East/West selection needed.
+         * Endpoint: https://nowcoast.noaa.gov/geoserver/satellite/wms
+         */
+        var NOWCOAST_WMS = 'https://nowcoast.noaa.gov/geoserver/satellite/wms';
+        var SAT_LAYERS = {
+            'ir':  'global_longwave_imagery_mosaic',   /* GOES-E/W+GMGSI IR, ~2km */
+            'vis': 'global_visible_imagery_mosaic',    /* GOES-E/W+GMGSI Visible */
+            'wv':  'global_water_vapor_imagery_mosaic' /* GOES-E/W+GMGSI Water Vapor */
+        };
+        var SAT_LABELS = {
+            'ir':  'GOES E+W IR',
+            'vis': 'GOES E+W Visible',
+            'wv':  'GOES E+W Water Vapor'
+        };
+        var satLayer  = null;
+
+        function getMap() { return window._capMap; }
+
+        function loadSat() {
+            var map = getMap(); if (!map) return;
+            var prod = document.querySelector('input[name="satProduct"]:checked');
+            var key  = prod ? prod.value : 'ir';
+            var statusEl = document.getElementById('satStatus');
+            if (statusEl) statusEl.textContent = 'Loading…';
+            if (satLayer) { map.removeLayer(satLayer); satLayer = null; }
+            satLayer = L.tileLayer.wms(NOWCOAST_WMS, {
+                layers:      SAT_LAYERS[key],
+                format:      'image/png',
+                transparent: true,
+                opacity:     (window._satOpacity !== undefined) ? window._satOpacity : 0.75,
+                version:     '1.3.0',
+                attribution: 'GOES-E/W © NOAA/NESDIS via <a href="https://nowcoast.noaa.gov" target="_blank">nowCOAST</a>',
+                zIndex:      395
+            });
+            satLayer.on('load', function() {
+                if (statusEl) statusEl.textContent = SAT_LABELS[key] + ' · updated ~5 min';
+            });
+            satLayer.on('tileerror', function() {
+                if (statusEl) statusEl.textContent = 'nowCOAST unavailable';
+            });
+            satLayer.addTo(map);
+        }
+
+        function removeSat() {
+            var map = getMap();
+            if (satLayer && map) { map.removeLayer(satLayer); satLayer = null; }
+            var statusEl = document.getElementById('satStatus');
+            if (statusEl) statusEl.textContent = '';
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            var tog = document.getElementById('satToggle');
+            if (tog) {
+                tog.addEventListener('change', function() {
+                    var sub = document.getElementById('satSubOptions');
+                    if (sub) sub.style.display = this.checked ? 'block' : 'none';
+                    if (this.checked) { loadSat(); }
+                    else { removeSat(); }
+                });
+            }
+            document.querySelectorAll('input[name="satProduct"]').forEach(function(r) {
+                r.addEventListener('change', function() {
+                    if (document.getElementById('satToggle') &&
+                        document.getElementById('satToggle').checked) loadSat();
+                });
+            });
+            var satOpSlider = document.getElementById('satOpacity');
+            var satOpVal    = document.getElementById('satOpacityVal');
+            if (satOpSlider) {
+                /* Initialize from slider default value */
+                window._satOpacity = parseInt(satOpSlider.value) / 100;
+                satOpSlider.addEventListener('input', function() {
+                    var pct = parseInt(this.value);
+                    if (satOpVal) satOpVal.textContent = pct + '%';
+                    if (satLayer) satLayer.setOpacity(pct / 100);
+                    window._satOpacity = pct / 100;
+                });
+            }
+        });
+    })();
+    </script>
 </body>
 </html>
 
