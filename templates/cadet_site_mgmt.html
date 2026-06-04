@@ -342,25 +342,6 @@ async function submitForm() {
     showAlert(id ? 'Site updated.' : 'Site added successfully.', 'success');
     cancelEdit();
     loadSites();
-
-// ── Event delegation for dynamically-rendered notification buttons ───────────
-document.addEventListener('click', function(e) {
-  const btn = e.target.closest('[data-action]');
-  if (!btn) return;
-  const action = btn.dataset.action;
-  const siteId = parseInt(btn.dataset.site);
-
-  if (action === 'add-recipient') {
-    addRecipient(siteId);
-  } else if (action === 'test-sms') {
-    const name = btn.dataset.name || 'this site';
-    testSms(siteId, name);
-  } else if (action === 'delete-recipient') {
-    const recId = parseInt(btn.dataset.recipient);
-    const name  = btn.dataset.name || '';
-    deleteRecipient(recId, siteId, name);
-  }
-});
   } catch(e) {
     showAlert('Error saving site: ' + e.message, 'error');
   }
@@ -379,6 +360,24 @@ async function deleteSite(id, name) {
 }
 
 loadSites();
+
+// ── Event delegation for dynamically-rendered notification buttons ───────────
+document.addEventListener('click', function(e) {
+  const btn = e.target.closest('[data-action]');
+  if (!btn) return;
+  const action = btn.dataset.action;
+  const siteId = parseInt(btn.dataset.site);
+  if (action === 'add-recipient') {
+    addRecipient(siteId);
+  } else if (action === 'test-sms') {
+    const name = btn.dataset.name || 'this site';
+    testSms(siteId, name);
+  } else if (action === 'delete-recipient') {
+    const recId = parseInt(btn.dataset.recipient);
+    const name  = btn.dataset.name || '';
+    deleteRecipient(recId, siteId, name);
+  }
+});
 
 // ── Notification recipient management ────────────────────────────────────────
 
@@ -435,9 +434,8 @@ async function addRecipient(siteId) {
       const err = await resp.json().catch(() => ({}));
       throw new Error(err.error || 'HTTP ' + resp.status);
     }
-    document.getElementById('notif-name-' + siteId).value    = '';
-    document.getElementById('notif-phone-' + siteId).value   = '';
-    document.getElementById('notif-carrier-' + siteId).value = '';
+    document.getElementById('notif-name-' + siteId).value  = '';
+    document.getElementById('notif-phone-' + siteId).value = '';
     showAlert('Recipient added.', 'success');
     // Small delay to ensure DB write completes before re-fetch
     setTimeout(() => loadRecipients(siteId), 200);
