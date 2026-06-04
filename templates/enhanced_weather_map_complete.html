@@ -1644,7 +1644,7 @@
         document.addEventListener('DOMContentLoaded', function() {
             var ML_INDEX    = '/CAP_WxCOP/static/mrms_tiles/composite/CONUS/index.json';
             var ML_TILE_BASE= '/CAP_WxCOP/static/mrms_tiles/composite/CONUS/';
-            var GLM_API     = '/CAP_WxCOP/api/glm/flashes';
+            var GLM_API     = '/CAP_WxCOP/api/weather-enhanced/glm/flashes';
             function getMap() { return window._capMap; }
 
             // ── MRMS Local Loop Player ───────────────────────────────────────
@@ -1861,8 +1861,8 @@
             // ── GLM Lightning ────────────────────────────────────────────────
             var glmLayer=null, glmRefreshTimer=null;
 
-            function glmColor(a){return a<5?'#ff0000':a<15?'#ffff00':'#00cc00';}
-            function glmSize(a){return a<5?14:a<15?11:9;}
+            function glmColor(a){return a<5?'#ff2200':a<15?'#ffee00':'#00ff44';}
+            function glmSize(a){return a<5?22:a<15?17:13;}
 
             function loadGLM(){
                 var m=getMap(); if(!m) return;
@@ -1889,7 +1889,7 @@
                             var zOff=age<5?2000:age<15?1000:500;
                             L.marker([lat,lon],{
                                 icon:L.divIcon({className:'',
-                                    html:'<div style="width:'+sz+'px;height:'+(sz*1.4)+'px;background:'+glmColor(age)+';clip-path:polygon(50% 0%,100% 40%,70% 40%,100% 100%,0% 100%,30% 40%,0% 40%);filter:drop-shadow(0 0 3px rgba(0,0,0,0.9));"></div>',
+                                    html:'<div style="width:'+sz+'px;height:'+(sz*1.5)+'px;background:'+glmColor(age)+';clip-path:polygon(50% 0%,100% 38%,65% 38%,95% 100%,5% 100%,35% 38%,0% 38%);filter:drop-shadow(0 0 4px '+glmColor(age)+') drop-shadow(0 0 2px rgba(0,0,0,1));"></div>',
                                     iconSize:[sz+6,sz+6],iconAnchor:[(sz+6)/2,(sz+6)/2]}),
                                 interactive:false,
                                 zIndexOffset:zOff

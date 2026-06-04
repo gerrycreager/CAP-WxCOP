@@ -5,8 +5,6 @@
 *.bak.*
 build/
 .cache/
-.cache/airports.csv
-.cache/runways.csv
 config_local.py
 dist/
 # Downloaded/cached data
@@ -31,7 +29,6 @@ hrrr_data/
 # IDE
 .idea/
 instance/
-ldm/
 /LDM/
 # LDM subtree inside app dir (symlinks/configs that shouldn't travel)
 *.log
@@ -56,6 +53,7 @@ simple_status_test.sh
 static/batch_maps/
 # Static generated outputs (wind maps, shapefiles)
 static/mrms_tiles/
+static/mrms_tiles.old/
 # Static MRMS tiles (path relative to app root, not /var/www/html)
 static/output/
 *.swo
@@ -74,7 +72,6 @@ venv/
 .vscode/
 .webassets-cache
 *.wsgi.bak
-wwa_ingest_state.txt
-*.html.*
-a.out
-nids_api.py
+static/geojson/
+static/mrms_tiles
+static/radar/

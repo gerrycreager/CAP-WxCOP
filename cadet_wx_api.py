@@ -23,6 +23,7 @@ Changelog vs original:
 
 import math
 import logging
+import requests as _requests
 from datetime import datetime, timezone, timedelta
 
 from flask import Blueprint, jsonify, request
@@ -32,6 +33,161 @@ import psycopg2.extras
 log = logging.getLogger(__name__)
 
 cadet_wx_bp = Blueprint('cadet_wx', __name__)
+
+# ---------------------------------------------------------------------------
+# SMS notification configuration — Twilio REST API
+# ---------------------------------------------------------------------------
+
+def _load_secrets(path='/etc/cap_wxcop_secrets.conf'):
+    """Load key=value secrets file, return dict."""
+    secrets = {}
+    try:
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if line and '=' in line and not line.startswith('#'):
+                    k, v = line.split('=', 1)
+                    secrets[k.strip()] = v.strip()
+    except Exception as e:
+        log.error(f"Failed to load secrets from {path}: {e}")
+    return secrets
+
+_secrets             = _load_secrets()
+TWILIO_ACCOUNT_SID   = _secrets.get('TWILIO_ACCOUNT_SID', '')
+TWILIO_AUTH_TOKEN    = _secrets.get('TWILIO_AUTH_TOKEN', '')
+TWILIO_MESSAGING_SVC = _secrets.get('TWILIO_MESSAGING_SVC', '')
+TWILIO_API_URL       = (f'https://api.twilio.com/2010-04-01/Accounts/'
+                        f'{TWILIO_ACCOUNT_SID}/Messages.json')
+
+NOTIFICATION_COOLDOWN_MIN = 15   # minutes between repeat alerts per site/type
+
+def _e164(phone):
+    """Normalize phone number to E.164 format (+1XXXXXXXXXX)."""
+    digits = ''.join(c for c in phone if c.isdigit())[-10:]
+    return f'+1{digits}'
+
+def _send_lightning_all_clear(site_id, site_name, watch_r, units):
+    """
+    Send All Clear SMS if the site had active lightning alerts in the last
+    30 minutes but has had none in the last 15 minutes. Send once per event.
+    """
+    try:
+        conn = _open_db()
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            # Was there a warning/watch in the last 30 min?
+            cur.execute("""
+                SELECT sent_at FROM observations.cadet_notification_log
+                WHERE site_id = %s
+                  AND alert_type IN ('lightning_red','lightning_yellow')
+                  AND sent_at > NOW() - INTERVAL '30 minutes'
+                ORDER BY sent_at DESC LIMIT 1
+            """, (site_id,))
+            last_alert = cur.fetchone()
+            if not last_alert:
+                conn.close()
+                return  # No recent alert — nothing to clear
+
+            # Was there already an All Clear sent after the last alert?
+            cur.execute("""
+                SELECT sent_at FROM observations.cadet_notification_log
+                WHERE site_id = %s
+                  AND alert_type = 'lightning_clear'
+                  AND sent_at > %s
+                ORDER BY sent_at DESC LIMIT 1
+            """, (site_id, last_alert['sent_at']))
+            if cur.fetchone():
+                conn.close()
+                return  # All Clear already sent for this event
+
+            # Has it been at least 15 minutes since the last alert?
+            age_min = (datetime.now(timezone.utc) -
+                       last_alert['sent_at']).total_seconds() / 60
+            if age_min < 15:
+                conn.close()
+                return  # Too soon
+
+        utcz = datetime.now(timezone.utc).strftime('%H%MZ')
+        msg = (f"CAP WxCOP Lightning ALL CLEAR — {site_name} {utcz}\n"
+               f"Lightning not detected within {watch_r:.0f} {units} "
+               f"in the last 15 minutes. Outdoor operations may resume.")
+        send_sms_notifications(site_id, site_name, 'lightning_clear', msg)
+        conn.close()
+
+    except Exception as e:
+        log.error(f"_send_lightning_all_clear error: {e}", exc_info=True)
+
+
+def send_sms_notifications(site_id, site_name, alert_type, message):
+    """
+    Send SMS notifications to all active recipients for a site via Twilio.
+    Enforces NOTIFICATION_COOLDOWN_MIN cooldown per site/alert_type.
+    Returns number of messages sent.
+    """
+    try:
+        conn = _open_db()
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            # Check cooldown (skip for All Clear — handled separately)
+            if alert_type != 'lightning_clear':
+                cur.execute(
+                    """SELECT sent_at FROM observations.cadet_notification_log
+                       WHERE site_id = %s AND alert_type = %s
+                         AND sent_at > NOW() - INTERVAL '15 minutes'
+                       ORDER BY sent_at DESC LIMIT 1""",
+                    (site_id, alert_type))
+                if cur.fetchone():
+                    log.info(f"SMS cooldown active for site {site_id} alert {alert_type}")
+                    conn.close()
+                    return 0
+
+            # Fetch active recipients
+            cur.execute(
+                """SELECT name, phone FROM observations.cadet_notification_recipients
+                   WHERE site_id = %s AND is_active = TRUE""",
+                (site_id,))
+            recipients = cur.fetchall()
+
+        if not recipients:
+            conn.close()
+            return 0
+
+        sent = 0
+        for r in recipients:
+            to_num = _e164(r['phone'])
+            try:
+                resp = _requests.post(
+                    TWILIO_API_URL,
+                    auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN),
+                    data={
+                        'To':                  to_num,
+                        'MessagingServiceSid': TWILIO_MESSAGING_SVC,
+                        'Body':                message,
+                    },
+                    timeout=10
+                )
+                if resp.status_code in (200, 201):
+                    sent += 1
+                    log.info(f"Twilio SMS sent to {r['name']} ({to_num}) status={resp.status_code}")
+                else:
+                    log.error(f"Twilio error for {to_num}: {resp.status_code} {resp.text[:200]}")
+            except Exception as e:
+                log.error(f"Twilio send error for {r['name']}: {e}")
+
+        # Log the notification
+        if sent > 0:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """INSERT INTO observations.cadet_notification_log
+                           (site_id, alert_type, recipient_count, details)
+                       VALUES (%s, %s, %s, %s)""",
+                    (site_id, alert_type, sent, message[:500]))
+                conn.commit()
+
+        conn.close()
+        return sent
+
+    except Exception as e:
+        log.error(f"send_sms_notifications error: {e}", exc_info=True)
+        return 0
 
 # ---------------------------------------------------------------------------
 # Stoplight thresholds — CAPR 60-2 / DAFMAN 91-203
@@ -276,14 +432,18 @@ GLM_WINDOW_MIN = 30
 NM_TO_DEG = 1.0 / 60.0
 
 
-def get_glm_lightning(cur, lat, lon):
+def get_glm_lightning(cur, lat, lon, warn_nm=None, watch_nm=None):
     """
     Query glm_flashes for recent flashes near (lat, lon).
-    Returns (within_5nm, within_10nm, nearest_nm, last_flash_time, flash_count)
+    warn_nm: warning radius in NM (default GLM_RED_NM)
+    watch_nm: watch radius in NM (default GLM_YELLOW_NM)
+    Returns (within_warn, within_watch, nearest_nm, last_flash_time, flash_count)
     """
+    if warn_nm is None:  warn_nm  = GLM_RED_NM
+    if watch_nm is None: watch_nm = GLM_YELLOW_NM
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=GLM_WINDOW_MIN)
-    lat_deg = GLM_YELLOW_NM * NM_TO_DEG
-    lon_deg = GLM_YELLOW_NM * NM_TO_DEG / max(math.cos(math.radians(lat)), 0.01)
+    lat_deg = watch_nm * NM_TO_DEG
+    lon_deg = watch_nm * NM_TO_DEG / max(math.cos(math.radians(lat)), 0.01)
 
     cur.execute("""
         SELECT lat, lon, flash_time
@@ -300,8 +460,8 @@ def get_glm_lightning(cur, lat, lon):
     if not rows:
         return False, False, None, None, 0
 
-    within_5nm = False
-    within_10nm = False
+    within_warn = False
+    within_watch = False
     nearest_nm = None
     last_time = None
     count = 0
@@ -310,7 +470,7 @@ def get_glm_lightning(cur, lat, lon):
         dlat = (row['lat'] - lat) * 60.0
         dlon = (row['lon'] - lon) * 60.0 * math.cos(math.radians(lat))
         dist_nm = math.sqrt(dlat**2 + dlon**2)
-        if dist_nm <= GLM_YELLOW_NM:
+        if dist_nm <= watch_nm:
             count += 1
             if nearest_nm is None or dist_nm < nearest_nm:
                 nearest_nm = dist_nm
@@ -319,11 +479,11 @@ def get_glm_lightning(cur, lat, lon):
                 ft = ft.replace(tzinfo=timezone.utc)
             if last_time is None or ft > last_time:
                 last_time = ft
-            if dist_nm <= GLM_RED_NM:
-                within_5nm = True
-            within_10nm = True
+            if dist_nm <= warn_nm:
+                within_warn = True
+            within_watch = True
 
-    return within_5nm, within_10nm, nearest_nm, last_time, count
+    return within_warn, within_watch, nearest_nm, last_time, count
 
 
 def glm_available(cur):
@@ -430,19 +590,35 @@ def build_current_stoplight(cur, site):
     wwa_phenoms = get_wwa_for_point(cur, lat, lon)
 
     # --- GLM lightning (with WWA proxy fallback) ---
+    # Per-site configurable radii with defaults
+    warn_radius = float(site.get('lightning_warning_radius') or 10.0)
+    watch_radius = float(site.get('lightning_watch_radius') or 20.0)
+    radius_units = site.get('lightning_radius_units') or 'NM'
+    # Convert to NM for calculation
+    _conv = {'NM': 1.0, 'SM': 0.868976, 'KM': 0.539957}
+    warn_nm  = warn_radius  * _conv.get(radius_units, 1.0)
+    watch_nm = watch_radius * _conv.get(radius_units, 1.0)
+
     use_glm = glm_available(cur)
     if use_glm:
-        within_5nm, within_10nm, nearest_nm, last_flash_time, flash_count = \
-            get_glm_lightning(cur, lat, lon)
+        within_warn, within_watch, nearest_nm, last_flash_time, flash_count = \
+            get_glm_lightning(cur, lat, lon, warn_nm, watch_nm)
+        within_5nm  = within_warn
+        within_10nm = within_watch
         glm_data = {
-            'within_5nm':        within_5nm,
-            'within_10nm':       within_10nm,
+            'within_warn':       within_warn,
+            'within_watch':      within_watch,
+            'within_5nm':        within_warn,   # legacy compat
+            'within_10nm':       within_watch,  # legacy compat
             'nearest_nm':        round(nearest_nm, 2) if nearest_nm is not None else None,
             'last_flash_time':   last_flash_time.isoformat() if last_flash_time else None,
             'flash_count_30min': flash_count,
             'source':            'GLM',
+            'warn_radius':       warn_nm,
+            'watch_radius':      watch_nm,
+            'radius_units':      radius_units,
         }
-        ltg_color = lightning_color(within_5nm, within_10nm)
+        ltg_color = lightning_color(within_warn, within_watch)
     else:
         # Proxy: Tornado/Severe Wx warning → RED, watch → YELLOW
         has_warning = any(sig == 'W' for ph, sig in wwa_phenoms if ph in ('TO','SV'))
@@ -663,6 +839,9 @@ def _site_to_dict(row: dict) -> dict:
         'activity_type': row.get('site_type'),
         'description':   row.get('description'),
         'is_active':     row.get('is_active', True),
+        'lightning_warning_radius': row.get('lightning_warning_radius', 10.0),
+        'lightning_watch_radius':   row.get('lightning_watch_radius', 20.0),
+        'lightning_radius_units':   row.get('lightning_radius_units', 'NM'),
     }
 
 
@@ -674,7 +853,9 @@ def get_sites():
             cur.execute("""
                 SELECT id, site_name, unit, site_type, station_id,
                        wx_station_override, lat, lon, elevation_ft,
-                       description, cap_region, is_active
+                       description, cap_region, is_active,
+                       lightning_warning_radius, lightning_watch_radius,
+                       lightning_radius_units
                 FROM observations.cadet_sites
                 WHERE is_active = TRUE
                 ORDER BY cap_region, site_name
@@ -767,7 +948,9 @@ def get_current():
         with _cursor(conn) as cur:
             cur.execute("""
                 SELECT id, site_name, unit, site_type, station_id,
-                       wx_station_override, lat, lon, cap_region
+                       wx_station_override, lat, lon, cap_region,
+                       lightning_warning_radius, lightning_watch_radius,
+                       lightning_radius_units
                 FROM observations.cadet_sites
                 WHERE is_active = TRUE
                 ORDER BY id
@@ -781,6 +964,31 @@ def get_current():
                     log.error(f"Current stoplight site {site['id']}: {e}", exc_info=True)
                     results.append(_no_data_result(site['id'], site['site_name'], site.get('lat'), site.get('lon')))
         conn.close()
+
+        # Check lightning and send SMS notifications
+        for site in results:
+            ltg = site.get('lightning') or {}
+            sid = site.get('site_id')
+            sname = site.get('site_name', '')
+            if ltg.get('source') == 'GLM':
+                warn_r  = ltg.get('warn_radius', 10)
+                watch_r = ltg.get('watch_radius', 20)
+                units   = ltg.get('radius_units', 'NM')
+                utcz = datetime.now(timezone.utc).strftime('%H%MZ')
+                if ltg.get('within_warn'):
+                    msg = (f"CAP WxCOP Lightning WARNING — {sname} {utcz}\n"
+                           f"Lightning detected within {warn_r:.0f} {units}. "
+                           f"Cease outdoor operations and take cover immediately.")
+                    send_sms_notifications(sid, sname, 'lightning_red', msg)
+                elif ltg.get('within_watch'):
+                    msg = (f"CAP WxCOP Lightning WATCH — {sname} {utcz}\n"
+                           f"Lightning detected within {watch_r:.0f} {units}. "
+                           f"Prepare to take cover.")
+                    send_sms_notifications(sid, sname, 'lightning_yellow', msg)
+                else:
+                    # No current lightning — check if we need to send All Clear
+                    _send_lightning_all_clear(sid, sname, watch_r, units)
+
         return jsonify({
             'sites':     results,
             'count':     len(results),
@@ -853,5 +1061,257 @@ def get_site_forecast(site_id):
         })
     except Exception as e:
         log.error(f"/api/cadet_wx/site/{site_id}/forecast: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+# CRUD endpoints to append to cadet_wx_api.py
+# Add after the existing get_sites() GET route
+
+@cadet_wx_bp.route('/api/cadet_wx/sites', methods=['POST'])
+def create_site():
+    """Create a new cadet site."""
+    try:
+        data = request.get_json(force=True)
+        if not data:
+            return jsonify({'error': 'No JSON body'}), 400
+        required = ['site_name', 'site_type', 'lat', 'lon']
+        for f in required:
+            if f not in data:
+                return jsonify({'error': f'Missing field: {f}'}), 400
+        conn = _open_db()
+        cur  = conn.cursor()
+        cur.execute("""
+            INSERT INTO observations.cadet_sites
+                (site_name, unit, site_type, station_id, wx_station_override,
+                 lat, lon, elevation_ft, description, cap_region, is_active,
+                 lightning_warning_radius, lightning_watch_radius, lightning_radius_units)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            RETURNING id
+        """, (
+            data['site_name'],
+            data.get('unit'),
+            data.get('site_type', 'ground'),
+            data.get('station_id'),
+            data.get('wx_station_override'),
+            float(data['lat']),
+            float(data['lon']),
+            data.get('elevation_ft'),
+            data.get('description'),
+            data.get('cap_region'),
+            data.get('is_active', True),
+            float(data.get('lightning_warning_radius', 10.0)),
+            float(data.get('lightning_watch_radius', 20.0)),
+            data.get('lightning_radius_units', 'NM'),
+        ))
+        new_id = cur.fetchone()[0]
+        conn.commit()
+        conn.close()
+        return jsonify({'id': new_id, 'status': 'created'}), 201
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@cadet_wx_bp.route('/api/cadet_wx/sites/<int:site_id>', methods=['PUT'])
+def update_site(site_id):
+    """Update an existing cadet site."""
+    try:
+        data = request.get_json(force=True)
+        if not data:
+            return jsonify({'error': 'No JSON body'}), 400
+        conn = _open_db()
+        cur  = conn.cursor()
+        cur.execute("""
+            UPDATE observations.cadet_sites SET
+                site_name                = COALESCE(%s, site_name),
+                unit                     = COALESCE(%s, unit),
+                site_type                = COALESCE(%s, site_type),
+                station_id               = COALESCE(%s, station_id),
+                wx_station_override      = COALESCE(%s, wx_station_override),
+                lat                      = COALESCE(%s, lat),
+                lon                      = COALESCE(%s, lon),
+                elevation_ft             = COALESCE(%s, elevation_ft),
+                description              = COALESCE(%s, description),
+                cap_region               = COALESCE(%s, cap_region),
+                is_active                = COALESCE(%s, is_active),
+                lightning_warning_radius = COALESCE(%s, lightning_warning_radius),
+                lightning_watch_radius   = COALESCE(%s, lightning_watch_radius),
+                lightning_radius_units   = COALESCE(%s, lightning_radius_units)
+            WHERE id = %s
+        """, (
+            data.get('site_name'),
+            data.get('unit'),
+            data.get('site_type'),
+            data.get('station_id'),
+            data.get('wx_station_override'),
+            float(data['lat']) if 'lat' in data else None,
+            float(data['lon']) if 'lon' in data else None,
+            data.get('elevation_ft'),
+            data.get('description'),
+            data.get('cap_region'),
+            data.get('is_active'),
+            float(data['lightning_warning_radius']) if 'lightning_warning_radius' in data else None,
+            float(data['lightning_watch_radius'])   if 'lightning_watch_radius'   in data else None,
+            data.get('lightning_radius_units'),
+            site_id,
+        ))
+        if cur.rowcount == 0:
+            conn.close()
+            return jsonify({'error': f'Site {site_id} not found'}), 404
+        conn.commit()
+        conn.close()
+        return jsonify({'id': site_id, 'status': 'updated'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@cadet_wx_bp.route('/api/cadet_wx/sites/<int:site_id>', methods=['DELETE'])
+def delete_site(site_id):
+    """Delete a cadet site."""
+    try:
+        conn = _open_db()
+        cur  = conn.cursor()
+        cur.execute('DELETE FROM observations.cadet_sites WHERE id = %s',
+                    (site_id,))
+        if cur.rowcount == 0:
+            conn.close()
+            return jsonify({'error': f'Site {site_id} not found'}), 404
+        conn.commit()
+        conn.close()
+        return jsonify({'id': site_id, 'status': 'deleted'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# Notification recipient endpoints
+# ---------------------------------------------------------------------------
+
+@cadet_wx_bp.route('/api/cadet_wx/sites/<int:site_id>/recipients', methods=['GET'])
+def get_recipients(site_id):
+    """List SMS notification recipients for a site."""
+    try:
+        conn = _open_db()
+        with _cursor(conn) as cur:
+            cur.execute("""
+                SELECT id, name, phone, carrier, is_active, created_at
+                FROM observations.cadet_notification_recipients
+                WHERE site_id = %s
+                ORDER BY name
+            """, (site_id,))
+            rows = []
+            for r in cur.fetchall():
+                d = dict(r)
+                d['created_at'] = d['created_at'].isoformat() if d.get('created_at') else None
+                rows.append(d)
+        conn.close()
+        return jsonify({'recipients': rows, 'count': len(rows), 'site_id': site_id})
+    except Exception as e:
+        log.error(f"GET recipients site {site_id}: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@cadet_wx_bp.route('/api/cadet_wx/sites/<int:site_id>/recipients', methods=['POST'])
+def add_recipient(site_id):
+    """Add an SMS notification recipient to a site."""
+    try:
+        data = request.get_json(force=True) or {}
+        for f in ('name', 'phone', 'carrier'):
+            if not data.get(f):
+                return jsonify({'error': f'Missing field: {f}'}), 400
+        carrier = data.get('carrier', '').lower() or 'twilio'
+        phone = ''.join(c for c in data['phone'] if c.isdigit())
+        if len(phone) < 10:
+            return jsonify({'error': 'Phone must be 10 digits'}), 400
+        conn = _open_db()
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO observations.cadet_notification_recipients
+                    (site_id, name, phone, carrier, is_active)
+                VALUES (%s, %s, %s, %s, %s)
+                RETURNING id
+            """, (site_id, data['name'].strip(), phone, carrier or 'twilio',
+                    data.get('is_active', True)))
+            new_id = cur.fetchone()[0]
+            conn.commit()
+        conn.close()
+        return jsonify({'id': new_id, 'status': 'created'}), 201
+    except Exception as e:
+        log.error(f"POST recipient site {site_id}: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@cadet_wx_bp.route('/api/cadet_wx/recipients/<int:recipient_id>', methods=['DELETE'])
+def delete_recipient(recipient_id):
+    """Delete an SMS notification recipient."""
+    try:
+        conn = _open_db()
+        with conn.cursor() as cur:
+            cur.execute('DELETE FROM observations.cadet_notification_recipients WHERE id = %s',
+                        (recipient_id,))
+            if cur.rowcount == 0:
+                conn.close()
+                return jsonify({'error': 'Recipient not found'}), 404
+            conn.commit()
+        conn.close()
+        return jsonify({'id': recipient_id, 'status': 'deleted'})
+    except Exception as e:
+        log.error(f"DELETE recipient {recipient_id}: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@cadet_wx_bp.route('/api/cadet_wx/sites/<int:site_id>/test_sms', methods=['POST'])
+def test_sms(site_id):
+    """Send a test SMS to all recipients for a site."""
+    try:
+        conn = _open_db()
+        with _cursor(conn) as cur:
+            cur.execute('SELECT site_name FROM observations.cadet_sites WHERE id = %s', (site_id,))
+            row = cur.fetchone()
+        conn.close()
+        if not row:
+            return jsonify({'error': 'Site not found'}), 404
+        site_name = row['site_name']
+        msg = (f"CAP WxCOP TEST — {site_name}\n"
+               f"This is a test notification from CAP WxCOP.\n"
+               f"{datetime.now(timezone.utc).strftime('%H%MZ')}")
+        # Bypass cooldown for test — send directly
+        try:
+            conn = _open_db()
+            with _cursor(conn) as cur:
+                cur.execute("""
+                    SELECT name, phone, carrier
+                    FROM observations.cadet_notification_recipients
+                    WHERE site_id = %s AND is_active = TRUE
+                """, (site_id,))
+                recipients = cur.fetchall()
+            conn.close()
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+        sent = 0
+        for r in recipients:
+            to_num = _e164(r['phone'])
+            try:
+                resp = _requests.post(
+                    TWILIO_API_URL,
+                    auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN),
+                    data={
+                        'To':                  to_num,
+                        'MessagingServiceSid': TWILIO_MESSAGING_SVC,
+                        'Body':                msg,
+                    },
+                    timeout=10
+                )
+                if resp.status_code in (200, 201):
+                    sent += 1
+                    log.info(f"Test SMS sent to {r['name']} ({to_num})")
+                else:
+                    log.error(f"Test SMS error {to_num}: {resp.status_code} {resp.text[:200]}")
+            except Exception as e:
+                log.error(f"Test SMS error: {e}")
+
+        return jsonify({'sent': sent, 'site_name': site_name,
+                        'recipients': len(recipients)})
+    except Exception as e:
+        log.error(f"test_sms site {site_id}: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
