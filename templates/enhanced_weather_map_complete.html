@@ -502,7 +502,7 @@
                     <input type="radio" name="radarProduct" id="radarN0B" value="N0B" checked
                            style="accent-color:#2c5f41;"> Reflectivity (N0B)
                 </label>
-                <label style="display:flex;align-items:center;gap:5px;cursor:pointer;">
+                <label id="radarN0HLabel" style="display:flex;align-items:center;gap:5px;cursor:pointer;">
                     <input type="radio" name="radarProduct" id="radarN0H" value="N0H"
                            style="accent-color:#2c5f41;"> Hydrometeor Class (N0H)
                 </label>
@@ -2313,6 +2313,15 @@
             var nx   = document.getElementById('nexradProducts');
             var tw   = document.getElementById('tdwrProducts');
             var ind  = document.getElementById('radarTypeIndicator');
+            var n0hL = document.getElementById('radarN0HLabel');
+            /* N0H tiles only exist for NIDS WSR-88D — hide otherwise */
+            if (n0hL) n0hL.style.display = (type === 'WSR-88D') ? 'flex' : 'none';
+            /* If switching away from WSR-88D with N0H selected, revert to N0B */
+            if (type !== 'WSR-88D') {
+                var n0h = document.getElementById('radarN0H');
+                var n0b = document.getElementById('radarN0B');
+                if (n0h && n0h.checked && n0b) { n0b.checked = true; }
+            }
             if (nx)  nx.style.display  = (type === 'WSR-88D') ? 'block' : 'none';
             if (tw)  tw.style.display  = (type === 'TDWR')    ? 'block' : 'none';
             if (ind) ind.textContent   = type === 'TDWR'
@@ -2673,6 +2682,10 @@
 
         /* ---- DOM wiring ---- */
         document.addEventListener('DOMContentLoaded', function() {
+            /* N0H only available at NIDS zoom (Z>=8) — hidden at MRMS startup */
+            var n0hL = document.getElementById('radarN0HLabel');
+            if (n0hL) n0hL.style.display = 'none';
+
             var poll = setInterval(function() {
                 if (!window._capMap) return;
                 clearInterval(poll);
@@ -2710,7 +2723,13 @@
 
             document.querySelectorAll('input[name="radarProduct"]').forEach(function(r) {
                 r.addEventListener('change', function() {
-                    if (isRadarEnabled()) { currentProd = null; updateRadarSource(); }
+                    if (isRadarEnabled()) {
+                        currentProd = null;
+                        updateRadarSource();
+                        if (typeof updateLegendForProduct === 'function') {
+                            updateLegendForProduct(this.value);
+                        }
+                    }
                 });
             });
             document.querySelectorAll('input[name="tdwrProduct"]').forEach(function(r) {
