@@ -77,6 +77,18 @@
     .form-actions { display: flex; gap: 10px; margin-top: 4px; }
     .loading { text-align: center; color: #888; padding: 20px; font-style: italic; }
     .empty   { text-align: center; color: #aaa; padding: 30px; font-size: 0.9rem; }
+    .btn-notify { background: #7c3aed; color: #fff; }
+    .btn-test   { background: #0369a1; color: #fff; }
+    .notif-panel { background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 4px;
+                   padding: 14px; margin-top: 10px; display: none; }
+    .notif-panel.open { display: block; }
+    .notif-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 10px; }
+    .notif-form input, .notif-form select { padding: 6px 8px; border: 1px solid #ccc;
+        border-radius: 4px; font-size: 0.85rem; }
+    .notif-form input[type=text] { flex: 1; min-width: 120px; }
+    .recipient-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; margin-top: 6px; }
+    .recipient-table th { background: #e9ecef; padding: 6px 10px; text-align: left; }
+    .recipient-table td { padding: 6px 10px; border-bottom: 1px solid #eee; }
   </style>
 </head>
 <body>
@@ -155,6 +167,24 @@
           <option value="other">Other</option>
         </select>
       </div>
+      <div class="form-group">
+        <label>Lightning Units</label>
+        <select id="f-ltg-units">
+          <option value="NM">NM (nautical miles)</option>
+          <option value="SM">SM (statute miles)</option>
+          <option value="KM">KM (kilometers)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Warning Radius</label>
+        <input type="number" id="f-warn-radius" placeholder="10" step="0.5" min="1" max="50" value="10">
+        <span class="hint">Default 10 NM — shelter immediately</span>
+      </div>
+      <div class="form-group">
+        <label>Watch Radius</label>
+        <input type="number" id="f-watch-radius" placeholder="20" step="0.5" min="1" max="100" value="20">
+        <span class="hint">Default 20 NM — prepare to shelter</span>
+      </div>
     </div>
     <div class="form-actions">
       <button class="btn btn-save" onclick="submitForm()">💾 Save Site</button>
@@ -199,9 +229,26 @@ async function loadSites() {
         <td>${s.elevation_ft != null ? s.elevation_ft + ' ft' : '—'}</td>
         <td>${s.activity_type || '—'}</td>
         <td>
+          <button class="btn btn-notify" onclick="toggleNotifPanel(${s.site_id})">📲 Manage</button>
+        </td>
+        <td>
           <div class="actions">
             <button class="btn btn-edit" onclick="editSite(${s.site_id})">✎ Edit</button>
             <button class="btn btn-delete" onclick="deleteSite(${s.site_id}, '${s.name.replace(/'/g,"\\'")}')">✕ Delete</button>
+          </div>
+        </td>
+      </tr>
+      <tr id="notif-row-${s.site_id}" style="display:none">
+        <td colspan="9" style="padding:0 12px 12px">
+          <div class="notif-panel open" id="notif-panel-${s.site_id}">
+            <strong style="font-size:0.85rem;">📲 SMS Recipients — ${s.name}</strong>
+            <div class="notif-form" style="margin-top:8px;">
+              <input type="text" id="notif-name-${s.site_id}" placeholder="Name">
+              <input type="text" id="notif-phone-${s.site_id}" placeholder="10-digit phone" maxlength="10">
+              <button class="btn btn-save" data-action="add-recipient" data-site="${s.site_id}">+ Add</button>
+              <button class="btn btn-test" data-action="test-sms" data-site="${s.site_id}" data-name="${s.name.replace(/'/g,'&apos;')}">📤 Test SMS</button>
+            </div>
+            <div id="notif-list-${s.site_id}"></div>
           </div>
         </td>
       </tr>`).join('');
@@ -209,7 +256,7 @@ async function loadSites() {
       <table>
         <thead><tr>
           <th>Site Name</th><th>Region</th><th>ICAO</th>
-          <th>Lat</th><th>Lon</th><th>Elevation</th><th>Activity</th><th>Actions</th>
+          <th>Lat</th><th>Lon</th><th>Elevation</th><th>Activity</th><th>Notifications</th><th>Actions</th>
         </tr></thead>
         <tbody>${rows}</tbody>
       </table>`;
@@ -232,7 +279,10 @@ async function editSite(id) {
     document.getElementById('f-lat').value         = s.lat != null ? s.lat : '';
     document.getElementById('f-lon').value         = s.lon != null ? s.lon : '';
     document.getElementById('f-elev').value        = s.elevation_ft != null ? s.elevation_ft : '';
-    document.getElementById('f-activity').value    = s.activity_type || '';
+    document.getElementById('f-activity').value     = s.activity_type || '';
+    document.getElementById('f-ltg-units').value    = s.lightning_radius_units || 'NM';
+    document.getElementById('f-warn-radius').value  = s.lightning_warning_radius != null ? s.lightning_warning_radius : 10;
+    document.getElementById('f-watch-radius').value = s.lightning_watch_radius != null ? s.lightning_watch_radius : 20;
     document.getElementById('form-title').textContent = `Edit Site: ${s.name}`;
     document.getElementById('cancel-btn').style.display = 'inline-block';
     document.querySelector('.card:last-child').scrollIntoView({behavior:'smooth'});
@@ -245,8 +295,11 @@ function cancelEdit() {
   ['edit-id','f-name','f-short-name','f-icao','f-lat','f-lon','f-elev'].forEach(id => {
     document.getElementById(id).value = '';
   });
-  document.getElementById('f-region').value   = '';
-  document.getElementById('f-activity').value = '';
+  document.getElementById('f-region').value      = '';
+  document.getElementById('f-activity').value    = '';
+  document.getElementById('f-ltg-units').value   = 'NM';
+  document.getElementById('f-warn-radius').value  = '10';
+  document.getElementById('f-watch-radius').value = '20';
   document.getElementById('form-title').textContent = 'Add New Site';
   document.getElementById('cancel-btn').style.display = 'none';
 }
@@ -267,8 +320,11 @@ async function submitForm() {
     cap_region:    region,
     station_id: document.getElementById('f-icao').value.trim().toUpperCase() || null,
     lat, lon,
-    elevation_ft:  parseInt(document.getElementById('f-elev').value) || null,
-    site_type: document.getElementById('f-activity').value || 'ground',
+    elevation_ft:               parseInt(document.getElementById('f-elev').value) || null,
+    site_type:                  document.getElementById('f-activity').value || 'ground',
+    lightning_radius_units:     document.getElementById('f-ltg-units').value || 'NM',
+    lightning_warning_radius:   parseFloat(document.getElementById('f-warn-radius').value) || 10,
+    lightning_watch_radius:     parseFloat(document.getElementById('f-watch-radius').value) || 20,
   };
 
   try {
@@ -286,6 +342,25 @@ async function submitForm() {
     showAlert(id ? 'Site updated.' : 'Site added successfully.', 'success');
     cancelEdit();
     loadSites();
+
+// ── Event delegation for dynamically-rendered notification buttons ───────────
+document.addEventListener('click', function(e) {
+  const btn = e.target.closest('[data-action]');
+  if (!btn) return;
+  const action = btn.dataset.action;
+  const siteId = parseInt(btn.dataset.site);
+
+  if (action === 'add-recipient') {
+    addRecipient(siteId);
+  } else if (action === 'test-sms') {
+    const name = btn.dataset.name || 'this site';
+    testSms(siteId, name);
+  } else if (action === 'delete-recipient') {
+    const recId = parseInt(btn.dataset.recipient);
+    const name  = btn.dataset.name || '';
+    deleteRecipient(recId, siteId, name);
+  }
+});
   } catch(e) {
     showAlert('Error saving site: ' + e.message, 'error');
   }
@@ -304,6 +379,96 @@ async function deleteSite(id, name) {
 }
 
 loadSites();
+
+// ── Notification recipient management ────────────────────────────────────────
+
+function toggleNotifPanel(siteId) {
+  const row = document.getElementById('notif-row-' + siteId);
+  if (!row) return;
+  const visible = row.style.display !== 'none';
+  row.style.display = visible ? 'none' : '';
+  if (!visible) {
+    loadRecipients(siteId);
+  }
+}
+
+async function loadRecipients(siteId) {
+  const wrap = document.getElementById('notif-list-' + siteId);
+  if (!wrap) return;
+  try {
+    const resp = await fetch(`${BASE}/api/cadet_wx/sites/${siteId}/recipients`);
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    const recs = data.recipients || [];
+    if (!recs.length) {
+      wrap.innerHTML = '<div style="font-size:0.8rem;color:#888;margin-top:4px;">No recipients configured.</div>';
+      return;
+    }
+    const rows = recs.map(r => `
+      <tr>
+        <td>${r.name}</td>
+        <td>${r.phone.replace(/(\d{3})(\d{3})(\d{4})/, '($1) $2-$3')}</td>
+        <td><button class="btn btn-delete" style="padding:2px 8px;font-size:0.75rem"
+            data-action="delete-recipient" data-site="${siteId}" data-recipient="${r.id}"
+            data-name="${r.name.replace(/'/g,'&apos;')}">✕</button></td>
+      </tr>`).join('');
+    wrap.innerHTML = `<table class="recipient-table">
+      <thead><tr><th>Name</th><th>Phone</th><th></th></tr></thead>
+      <tbody>${rows}</tbody></table>`;
+  } catch(e) {
+    wrap.innerHTML = `<div style="color:#c00;font-size:0.8rem;">Error: ${e.message}</div>`;
+  }
+}
+
+async function addRecipient(siteId) {
+  const name  = document.getElementById('notif-name-' + siteId).value.trim();
+  const phone = document.getElementById('notif-phone-' + siteId).value.replace(/\D/g,'');
+  if (!name)             { showAlert('Recipient name required.', 'error'); return; }
+  if (phone.length < 10) { showAlert('10-digit phone number required.', 'error'); return; }
+  try {
+    const resp = await fetch(`${BASE}/api/cadet_wx/sites/${siteId}/recipients`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name, phone})
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error || 'HTTP ' + resp.status);
+    }
+    document.getElementById('notif-name-' + siteId).value    = '';
+    document.getElementById('notif-phone-' + siteId).value   = '';
+    document.getElementById('notif-carrier-' + siteId).value = '';
+    showAlert('Recipient added.', 'success');
+    // Small delay to ensure DB write completes before re-fetch
+    setTimeout(() => loadRecipients(siteId), 200);
+  } catch(e) {
+    showAlert('Error adding recipient: ' + e.message, 'error');
+  }
+}
+
+async function deleteRecipient(recipientId, siteId, name) {
+  if (!confirm(`Remove "${name}" from notifications?`)) return;
+  try {
+    const resp = await fetch(`${BASE}/api/cadet_wx/recipients/${recipientId}`, {method:'DELETE'});
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    showAlert(`Removed ${name}.`, 'success');
+    loadRecipients(siteId);
+  } catch(e) {
+    showAlert('Error removing recipient: ' + e.message, 'error');
+  }
+}
+
+async function testSms(siteId, siteName) {
+  if (!confirm(`Send test SMS to all recipients for "${siteName}"?`)) return;
+  try {
+    const resp = await fetch(`${BASE}/api/cadet_wx/sites/${siteId}/test_sms`, {method:'POST'});
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    showAlert(`Test SMS sent to ${data.sent} of ${data.recipients} recipients.`, 'success');
+  } catch(e) {
+    showAlert('Error sending test: ' + e.message, 'error');
+  }
+}
 </script>
 </body>
 </html>

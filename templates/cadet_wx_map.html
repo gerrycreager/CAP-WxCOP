@@ -433,7 +433,7 @@ function fmtWind(spd, gust) {
 // Auto-refresh every 5 min
 // ---------------------------------------------------------------------------
 loadData();
-setInterval(loadData, 5 * 60 * 1000);
+setInterval(loadData, 60 * 1000);  // refresh every 60 seconds
 
 // ── GLM Lightning ────────────────────────────────────────────────────────────
 var glmLayer = null, glmTimer = null;
@@ -478,7 +478,7 @@ function loadGLM() {
 document.getElementById('glmToggle').addEventListener('change', function(){
   if(this.checked){
     loadGLM();
-    glmTimer = setInterval(loadGLM, 120000);
+    glmTimer = setInterval(loadGLM, 60000);  // refresh every 60 seconds
   } else {
     if(glmLayer){ map.removeLayer(glmLayer); glmLayer=null; }
     if(glmTimer){ clearInterval(glmTimer); glmTimer=null; }
