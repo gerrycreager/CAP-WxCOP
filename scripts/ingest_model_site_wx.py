@@ -85,6 +85,13 @@ AIGFS_LOOKBACK   = 4                          # look back up to 4 cycles (24 hrs
 DB_DSN      = os.environ.get('DB_DSN',
                              'dbname=avwx_data user=avwx_user host=192.168.0.60')
 
+# GFS 0.25° — global model for OCONUS personnel weather (full variable set)
+# File: /LDM/models/gfs/0p25/YYYYMMDD/gfs_0p25_YYYYMMDD_HHz_fFFF.grib2
+GFS_BASE        = Path('/LDM/models/gfs/0p25')
+GFS_CYCLES      = [0, 6, 12, 18]          # 4 cycles/day
+GFS_LOOKBACK    = 4                        # look back up to 4 cycles (24 hrs)
+GFS_FCST_HOURS  = list(range(0, 25, 3))   # F000-F024 at 3-hr steps (matches CONDUIT delivery)
+
 # Forecast hours to ingest (F00 = analysis, F01-F24 = forecast)
 FCST_HOURS  = list(range(0, 19))   # F00-F18: HRRR hourly cycles go to F18
 
@@ -196,6 +203,7 @@ def parse_precip_type(grbs_by_shortname, idx):
     """
     Determine precip type from categorical grib2 fields.
     CRAIN, CSNOW, CICEP, CFRZR — value=1 means category is present.
+    Keys are lowercase to match FIELD_SPECS storage convention.
     Returns: 'rain', 'snow', 'sleet', 'fzra', or None
     """
     def get_val(name):
@@ -207,13 +215,13 @@ def parse_precip_type(grbs_by_shortname, idx):
         except Exception:
             return 0
 
-    if get_val('CFRZR') == 1:
+    if get_val('cfrzr') == 1:
         return 'fzra'
-    if get_val('CSNOW') == 1:
+    if get_val('csnow') == 1:
         return 'snow'
-    if get_val('CICEP') == 1:
+    if get_val('cicep') == 1:
         return 'sleet'
-    if get_val('CRAIN') == 1:
+    if get_val('crain') == 1:
         return 'rain'
     return None
 
@@ -433,6 +441,189 @@ def ingest_aigfs_cycle(conn, cycle_dt, aigfs_path, sites, verbose=False):
     return total_inserted
 
 
+
+# ---------------------------------------------------------------------------
+# GFS file discovery and ingest
+# ---------------------------------------------------------------------------
+
+def find_latest_gfs_cycle():
+    """
+    Find the most recent GFS 0.25° cycle with F000 and F024 both present.
+    GFS cycles run at 00/06/12/18Z. Files land ~3.5 hours after cycle time.
+    F024 is used as the completion sentinel — CONDUIT delivers GFS to F024
+    at 3-hr steps; F048 is not reliably delivered and is not needed for the
+    24-hour operational planning window.
+    Returns (cycle_dt, cycle_date_dir) or (None, None).
+    """
+    now_utc = datetime.now(timezone.utc)
+    for hours_back in range(0, GFS_LOOKBACK * 6 + 1, 6):
+        candidate  = now_utc - timedelta(hours=hours_back)
+        cycle_hour = (candidate.hour // 6) * 6
+        cycle_dt   = candidate.replace(hour=cycle_hour, minute=0,
+                                       second=0, microsecond=0)
+        date_str   = cycle_dt.strftime('%Y%m%d')
+        hour_str   = cycle_dt.strftime('%H')
+        date_dir   = GFS_BASE / date_str
+        f000 = date_dir / f'gfs_0p25_{date_str}_{hour_str}z_f000.grib2'
+        f024 = date_dir / f'gfs_0p25_{date_str}_{hour_str}z_f024.grib2'
+        if not (f000.exists() and f000.stat().st_size > 0):
+            continue
+        if not (f024.exists() and f024.stat().st_size > 0):
+            log.info(f"GFS {date_str}/{hour_str}Z: F000 present but F024 not yet "
+                     f"complete — trying previous cycle")
+            continue
+        age = now_utc.timestamp() - f024.stat().st_mtime
+        if age < FILE_STABILITY_SECS:
+            log.info(f"GFS {date_str}/{hour_str}Z: F024 too recent ({age:.0f}s) — waiting")
+            continue
+        log.info(f"Latest complete GFS cycle: {date_str}/{hour_str}Z")
+        return cycle_dt, date_dir
+    log.warning(f"No complete GFS cycle found in last {GFS_LOOKBACK*6} hours")
+    return None, None
+
+
+def gfs_file(date_dir, cycle_dt, fhour):
+    """Return path to GFS 0.25° grib2 file for a given forecast hour."""
+    date_str  = cycle_dt.strftime('%Y%m%d')
+    hour_str  = cycle_dt.strftime('%H')
+    fname     = f'gfs_0p25_{date_str}_{hour_str}z_f{fhour:03d}.grib2'
+    return date_dir / fname
+
+
+def ingest_gfs_cycle(conn, cycle_dt, date_dir, sites, verbose=False):
+    """
+    Ingest GFS 0.25° forecast hours for OCONUS sites.
+    GFS is used for OCONUS personnel weather because it has the full variable
+    set (TMP, DPT, UGRD, VGRD, APCP, CAPE, DSWRF) unlike AIGFS which only
+    has TMP and wind.
+    """
+    model_name     = 'GFS'
+    now_utc        = datetime.now(timezone.utc)
+    total_inserted = 0
+
+    # Build grid tree from F000
+    f000_path = gfs_file(date_dir, cycle_dt, 0)
+    if not f000_path.exists():
+        log.error(f"GFS F000 not found: {f000_path}")
+        return 0
+
+    log.info(f"Building GFS grid tree from {f000_path.name}")
+    f000_fields = load_grib_fields(f000_path)
+    ref_msg = next((v for v in f000_fields.values() if v is not None), None)
+    if ref_msg is None:
+        log.error("No usable fields in GFS F000")
+        return 0
+
+    tree, grid_shape = build_kdtree(ref_msg)
+
+    # Pre-compute grid indices for all OCONUS sites
+    site_indices = {}
+    for site in sites:
+        idx = site_grid_index(tree, grid_shape, site['lat'], site['lon'])
+        site_indices[site['id']] = idx
+        if verbose:
+            log.info(f"  GFS site {site['site_name']}: grid index {idx}")
+
+    # Process each forecast step
+    for fhour in GFS_FCST_HOURS:
+        fpath = gfs_file(date_dir, cycle_dt, fhour)
+        if not fpath.exists():
+            if verbose:
+                log.info(f"  GFS F{fhour:03d}: file not available, skipping")
+            continue
+
+        age = now_utc.timestamp() - fpath.stat().st_mtime
+        if age < FILE_STABILITY_SECS:
+            log.info(f"  GFS F{fhour:03d}: file still being written, skipping")
+            continue
+
+        valid_time = cycle_dt + timedelta(hours=fhour)
+        fields     = load_grib_fields(fpath)
+        records    = []
+
+        for site in sites:
+            idx = site_indices[site['id']]
+
+            def val(key, scale=1.0, offset=0.0):
+                msg = fields.get(key)
+                if msg is None:
+                    return None
+                try:
+                    v = float(msg.values.flat[idx])
+                    if v > 9e20:
+                        return None
+                    return v * scale + offset
+                except Exception:
+                    return None
+
+            # Raw extractions — same shortnames as HRRR
+            tmp_k     = val('2t')
+            dpt_k     = val('2d')
+            u_ms      = val('10u')
+            v_ms      = val('10v')
+            gust_ms   = val('gust')
+            prate_kgs = val('prate')
+            apcp_m    = val('tp')
+            cape      = val('cape')
+            dswrf     = val('dswrf')
+            cb_m      = val('cloudbase')
+
+            # Unit conversions
+            tmp_c_val    = kelvin_to_c(tmp_k)
+            dpt_c_val    = kelvin_to_c(dpt_k)
+            wspd_kts, wdir = uv_to_speed_dir(u_ms, v_ms)
+            gust_kts     = ms_to_kts(gust_ms)
+            prate_mmhr   = round(prate_kgs * 3600.0, 3) if prate_kgs is not None else None
+            precip_mm_val = round(apcp_m * 1000.0, 2) if apcp_m is not None else None
+            cape_val     = round(cape, 1) if cape is not None else None
+            dswrf_val    = round(dswrf, 1) if dswrf is not None else None
+            ceil_ft      = round(cb_m * 3.28084) if cb_m is not None else None
+
+            # Precip type
+            ptype = parse_precip_type(fields, idx)
+
+            # Derived thermal fields
+            hi_c  = heat_index_c(tmp_c_val, dpt_c_val)
+            wc_c  = wind_chill_c(tmp_c_val, wspd_kts)
+            u_ms_val = u_ms or 0
+            v_ms_val = v_ms or 0
+            ws_ms = math.sqrt(u_ms_val**2 + v_ms_val**2)
+            wbgt  = wbgt_liljegren(tmp_c_val, dpt_c_val, dswrf_val, ws_ms)
+
+            records.append({
+                'site_id':          site['id'],
+                'model_name':       model_name,
+                'model_run':        cycle_dt,
+                'valid_time':       valid_time,
+                'forecast_hour':    fhour,
+                'wind_dir':         wdir,
+                'wind_speed_kts':   wspd_kts,
+                'wind_gust_kts':    gust_kts,
+                'tmp_c':            tmp_c_val,
+                'dpt_c':            dpt_c_val,
+                'heat_index_c':     hi_c,
+                'wind_chill_c':     wc_c,
+                'precip_mm':        precip_mm_val,
+                'precip_rate_mmhr': prate_mmhr,
+                'precip_type':      ptype,
+                'dswrf_wm2':        dswrf_val,
+                'wbgt_c':           wbgt,
+                'cape_jkg':         cape_val,
+                'ceil_ft':          ceil_ft,
+                'ingested_at':      now_utc,
+            })
+
+        n = upsert_site_wx(conn, records)
+        total_inserted += n
+        if verbose:
+            log.info(f"  GFS F{fhour:03d}: {n} site records upserted "
+                     f"(valid {valid_time.strftime('%Y-%m-%d %H:%MZ')})")
+
+    log.info(f"GFS cycle {cycle_dt.strftime('%Y-%m-%d %HZ')}: "
+             f"{total_inserted} total records upserted across "
+             f"{len(sites)} OCONUS sites")
+    return total_inserted
+
 # ---------------------------------------------------------------------------
 # Grid index lookup
 # ---------------------------------------------------------------------------
@@ -466,25 +657,95 @@ FIELD_SPECS = [
     ('prate', 'surface',           0,    'PRATE surface'),
     ('tp',    'surface',           0,    'APCP surface'),
     ('cape',  'surface',           0,    'CAPE surface'),
-    ('dswrf', 'surface',           0,    'DSWRF surface'),
+    ('dswrf', 'surface',           0,    'DSWRF surface (HRRR)'),
+    ('sdswrf','surface',           0,    'DSWRF surface (GFS)'),
     ('crain', 'surface',           0,    'CRAIN surface'),
     ('csnow', 'surface',           0,    'CSNOW surface'),
     ('cicep', 'surface',           0,    'CICEP surface'),
     ('cfrzr', 'surface',           0,    'CFRZR surface'),
+    ('vis',   'surface',           0,    'VIS surface'),
 ]
 
-# Cloud base height (not always present in all HRRR versions)
-CEIL_SPEC = ('gh', 'cloudBase', 0, 'HGT cloud base')
+# Cloud ceiling height.
+# HRRR: shortName='ceil', typeOfLevel='cloudCeiling'
+# GFS:  shortName='gh',   typeOfLevel='cloudBase' (less reliable)
+# Try HRRR form first; fall back to GFS form in load_grib_fields.
+CEIL_SPEC_HRRR = ('ceil', 'cloudCeiling')
+CEIL_SPEC_GFS  = ('gh',   'cloudBase')
+
+
+# wgrib2 match pattern for surface/near-surface fields
+# Covers all fields in FIELD_SPECS plus DSWRF for WBGT
+WGRIB2_MATCH = (
+    ":(TMP|DPT|UGRD|VGRD|GUST|PRATE|APCP|CAPE|CRAIN|CSNOW|CICEP|CFRZR|VIS)"
+    ":(2 m above ground|10 m above ground|surface):"
+    "|:DSWRF:surface:"
+    "|:CEIL:cloudCeiling:"
+)
+WGRIB2_BIN = '/usr/local/bin/wgrib2'
+
+
+def _wgrib2_subset(grib_path, out_path):
+    """
+    Use wgrib2 to extract surface/near-surface fields into a small subset file.
+    Reduces 467MB GFS file to ~6MB containing only what we need.
+    Returns True on success, False on failure.
+    """
+    import subprocess
+    try:
+        result = subprocess.run(
+            [WGRIB2_BIN, str(grib_path),
+             '-match', WGRIB2_MATCH,
+             '-grib', str(out_path)],
+            capture_output=True, timeout=120
+        )
+        if result.returncode != 0 and not out_path.exists():
+            log.warning(f"wgrib2 subset failed for {grib_path.name}: "
+                        f"{result.stderr.decode()[:200]}")
+            return False
+        return out_path.exists() and out_path.stat().st_size > 0
+    except Exception as e:
+        log.warning(f"wgrib2 subset error for {grib_path.name}: {e}")
+        return False
 
 
 def load_grib_fields(grib_path):
     """
-    Load all needed grib2 fields from an HRRR sfc file.
+    Load needed grib2 fields from a model sfc file.
+    For large GFS files (>100MB): uses wgrib2 to extract a small subset
+    first, then reads with pygrib — ~18x faster than scanning the full file.
+    For small HRRR files: reads directly with pygrib.
     Returns dict: key -> grib message (or None if not found).
     """
+    import tempfile, os
     fields = {}
+
+    # Use wgrib2 pre-extraction for large files (GFS ~467MB, HRRR ~25MB)
+    use_subset = (
+        os.path.exists(WGRIB2_BIN) and
+        grib_path.stat().st_size > 100_000_000  # >100MB
+    )
+
+    read_path = grib_path
+    tmp_path   = None
+
+    if use_subset:
+        tmp_fd, tmp_name = tempfile.mkstemp(
+            suffix='.grib2', prefix='wxcop_subset_', dir='/tmp'
+        )
+        os.close(tmp_fd)
+        tmp_path = Path(tmp_name)
+        tmp_path.unlink(missing_ok=True)  # ensure no stale file
+        if _wgrib2_subset(grib_path, tmp_path):
+            read_path = tmp_path
+        else:
+            log.warning(f"wgrib2 subset failed, falling back to full file: "
+                        f"{grib_path.name}")
+            tmp_path.unlink(missing_ok=True)
+            tmp_path = None
+
     try:
-        grbs = pygrib.open(str(grib_path))
+        grbs = pygrib.open(str(read_path))
         for shortname, level_type, level, desc in FIELD_SPECS:
             try:
                 msgs = grbs.select(shortName=shortname,
@@ -495,17 +756,27 @@ def load_grib_fields(grib_path):
             except Exception:
                 fields[shortname] = None
 
-        # Cloud base (optional)
-        try:
-            msgs = grbs.select(shortName=CEIL_SPEC[0],
-                               typeOfLevel=CEIL_SPEC[1])
-            fields['cloudbase'] = msgs[0] if msgs else None
-        except Exception:
-            fields['cloudbase'] = None
+        # Cloud ceiling — try HRRR shortName first, fall back to GFS form
+        fields['cloudbase'] = None
+        for sn, tol in (CEIL_SPEC_HRRR, CEIL_SPEC_GFS):
+            try:
+                msgs = grbs.select(shortName=sn, typeOfLevel=tol)
+                if msgs:
+                    fields['cloudbase'] = msgs[0]
+                    break
+            except Exception:
+                continue
+
+        # Normalize GFS sdswrf -> dswrf for unified downstream access
+        if fields.get('sdswrf') is not None and fields.get('dswrf') is None:
+            fields['dswrf'] = fields['sdswrf']
 
         grbs.close()
     except Exception as e:
-        log.error(f"Failed to open {grib_path}: {e}")
+        log.error(f"Failed to open {read_path}: {e}")
+    finally:
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
 
     return fields
 
@@ -552,7 +823,7 @@ def upsert_site_wx(conn, records):
                 wind_dir, wind_speed_kts, wind_gust_kts,
                 tmp_c, dpt_c, heat_index_c, wind_chill_c,
                 precip_mm, precip_rate_mmhr, precip_type,
-                dswrf_wm2, wbgt_c, cape_jkg, ceil_ft,
+                dswrf_wm2, wbgt_c, cape_jkg, ceil_ft, vis_m,
                 ingested_at
             ) VALUES %s
             ON CONFLICT (site_id, model_run, forecast_hour)
@@ -571,6 +842,7 @@ def upsert_site_wx(conn, records):
                 wbgt_c           = EXCLUDED.wbgt_c,
                 cape_jkg         = EXCLUDED.cape_jkg,
                 ceil_ft          = EXCLUDED.ceil_ft,
+                vis_m            = EXCLUDED.vis_m,
                 ingested_at      = EXCLUDED.ingested_at
         """, [
             (r['site_id'], r['model_name'], r['model_run'], r['valid_time'],
@@ -579,7 +851,7 @@ def upsert_site_wx(conn, records):
              r['heat_index_c'], r['wind_chill_c'],
              r['precip_mm'], r['precip_rate_mmhr'], r['precip_type'],
              r['dswrf_wm2'], r['wbgt_c'], r['cape_jkg'], r['ceil_ft'],
-             r['ingested_at'])
+             r.get('vis_m'), r['ingested_at'])
             for r in records
         ])
     conn.commit()
@@ -663,6 +935,7 @@ def ingest_cycle(conn, cycle_dt, cycle_dir, sites, verbose=False):
             apcp_m   = val('tp')     # m accumulated
             cape     = val('cape')
             dswrf    = val('dswrf')
+            vis_raw  = val('vis')    # visibility in metres
 
             # Ceiling
             cb_m = val('cloudbase')
@@ -677,6 +950,7 @@ def ingest_cycle(conn, cycle_dt, cycle_dir, sites, verbose=False):
             precip_mm_val = round(apcp_m * 1000.0, 2) if apcp_m is not None else None
             cape_val   = round(cape, 1) if cape is not None else None
             dswrf_val  = round(dswrf, 1) if dswrf is not None else None
+            vis_m_val  = round(vis_raw) if vis_raw is not None else None
 
             # Precip type
             ptype = parse_precip_type(fields, idx)
@@ -709,6 +983,7 @@ def ingest_cycle(conn, cycle_dt, cycle_dir, sites, verbose=False):
                 'wbgt_c':         wbgt,
                 'cape_jkg':       cape_val,
                 'ceil_ft':        ceil_ft,
+                'vis_m':          vis_m_val,
                 'ingested_at':    now_utc,
             })
 
@@ -730,10 +1005,13 @@ def ingest_cycle(conn, cycle_dt, cycle_dir, sites, verbose=False):
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Ingest HRRR (CONUS) and AIGFS (OCONUS) data for cadet sites')
+        description='Ingest HRRR (CONUS) and GFS (OCONUS) data for cadet sites')
     parser.add_argument('-v', '--verbose', action='store_true')
     parser.add_argument('--cycle', help='Force HRRR cycle YYYYMMDD_HH (e.g. 20260327_18)')
-    parser.add_argument('--aigfs-cycle', help='Force AIGFS cycle YYYYMMDD_HH (e.g. 20260327_18)')
+    parser.add_argument('--gfs-cycle', help='Force GFS cycle for OCONUS sites YYYYMMDD_HH (e.g. 20260408_12)')
+    parser.add_argument('--oconus-only', action='store_true', help='Skip HRRR, ingest OCONUS sites only')
+    parser.add_argument('--conus-only',  action='store_true', help='Skip GFS, ingest CONUS sites only')
+    parser.add_argument('--aigfs-cycle', help='(Deprecated) Force AIGFS cycle YYYYMMDD_HH — use --gfs-cycle instead')
     args = parser.parse_args()
 
     # Lockfile — prevent concurrent cron runs
@@ -764,11 +1042,11 @@ def main():
 
         log.info(f"  CONUS (HRRR): {len(conus_sites)} sites — "
                  f"{[s['site_name'] for s in conus_sites]}")
-        log.info(f"  OCONUS (AIGFS): {len(oconus_sites)} sites — "
+        log.info(f"  OCONUS (GFS): {len(oconus_sites)} sites — "
                  f"{[s['site_name'] for s in oconus_sites]}")
 
         # ── HRRR ingest for CONUS sites ───────────────────────────────────────
-        if conus_sites:
+        if conus_sites and not args.oconus_only:
             if args.cycle:
                 dt = datetime.strptime(args.cycle, '%Y%m%d_%H').replace(
                     tzinfo=timezone.utc)
@@ -788,26 +1066,27 @@ def main():
                     ingest_cycle(conn, cycle_dt, cycle_dir, conus_sites,
                                  verbose=args.verbose)
 
-        # ── AIGFS ingest for OCONUS sites ─────────────────────────────────────
-        if oconus_sites:
-            if args.aigfs_cycle:
-                dt = datetime.strptime(args.aigfs_cycle, '%Y%m%d_%H').replace(
+        # ── GFS ingest for OCONUS sites ───────────────────────────────────────
+        # GFS used for OCONUS because it has full variable set for personnel
+        # impacts (TMP, DPT, UGRD, VGRD, APCP, CAPE, DSWRF, WBGT).
+        # AIGFS retained for aviation wind constraints but not personnel wx.
+        if oconus_sites and not args.conus_only:
+            if args.gfs_cycle:
+                dt = datetime.strptime(args.gfs_cycle, '%Y%m%d_%H').replace(
                     tzinfo=timezone.utc)
-                date_str  = dt.strftime('%Y%m%d')
-                hour_str  = dt.strftime('%H')
-                fpath     = AIGFS_BASE / f'AIGFS_{date_str}_{hour_str}00_sfc.grib2'
-                if not fpath.exists():
-                    log.error(f"AIGFS file not found: {fpath}")
+                date_dir = GFS_BASE / dt.strftime('%Y%m%d')
+                if not date_dir.exists():
+                    log.error(f"GFS date directory not found: {date_dir}")
                 else:
-                    ingest_aigfs_cycle(conn, dt, fpath, oconus_sites,
-                                       verbose=args.verbose)
+                    ingest_gfs_cycle(conn, dt, date_dir, oconus_sites,
+                                     verbose=args.verbose)
             else:
-                aigfs_dt, aigfs_path = find_latest_aigfs_cycle()
-                if aigfs_dt is None:
-                    log.error("No complete AIGFS cycle available")
+                gfs_dt, gfs_date_dir = find_latest_gfs_cycle()
+                if gfs_dt is None:
+                    log.error("No complete GFS cycle available for OCONUS sites")
                 else:
-                    ingest_aigfs_cycle(conn, aigfs_dt, aigfs_path, oconus_sites,
-                                       verbose=args.verbose)
+                    ingest_gfs_cycle(conn, gfs_dt, gfs_date_dir, oconus_sites,
+                                     verbose=args.verbose)
 
     except Exception as e:
         log.error(f"Ingest failed: {e}", exc_info=True)
