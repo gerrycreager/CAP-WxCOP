@@ -179,6 +179,12 @@
         <input type="checkbox" id="glmToggle" style="margin-right:4px;">
         Show lightning flashes
       </label>
+      <br>
+      <label style="font-size:0.8rem;cursor:pointer;margin-top:6px;display:block;">
+        <input type="checkbox" id="mrmsToggle" style="margin-right:4px;">
+        Show MRMS Composite ⟳
+      </label>
+      <div id="mrmsStatus" style="font-size:0.72rem;color:#8bc4a8;margin-top:2px;display:none;">Loading…</div>
       <select id="glmMinutes" style="width:100%;font-size:0.78rem;margin-top:4px;
               background:#1a2540;border:1px solid #334;color:#ccd;padding:2px;">
         <option value="5">Last 5 min</option>
@@ -248,6 +254,7 @@ L.control.layers(baseLayers, {}, {position: 'topright'}).addTo(map);
 let siteData     = [];
 let markers      = {};
 let selectedSite = null;
+  _selectedSiteObj = null;
 
 // ---------------------------------------------------------------------------
 // Color helpers
@@ -347,6 +354,7 @@ const CAT_LABELS = {
 
 function showDetail(site) {
   selectedSite = site.site_id;
+  _selectedSiteObj = site; // for alarm radius filtering
   renderSidebarList();
 
   const panel = document.getElementById('detail-panel');
@@ -439,7 +447,84 @@ setInterval(loadData, 60 * 1000);  // refresh every 60 seconds
 var glmLayer = null, glmTimer = null;
 var GLM_API = '/CAP_WxCOP/api/glm/flashes';
 
-function glmColor(a){ return a<5?'#ff3333':a<15?'#ffff00':'#00cc00'; }
+
+            /* ── Web Audio alarm engine ─────────────────────────────────── */
+            var _audioCtx=null, _alarmState=null, _selectedSiteObj=null;
+            function _getAudio(){
+                if(!_audioCtx) _audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+                return _audioCtx;
+            }
+            function _beep(freq,dur,t0,ctx){
+                var o=ctx.createOscillator(),g=ctx.createGain();
+                o.connect(g);g.connect(ctx.destination);
+                o.frequency.value=freq;o.type='sine';
+                g.gain.setValueAtTime(0,t0);
+                g.gain.linearRampToValueAtTime(0.45,t0+0.01);
+                g.gain.setValueAtTime(0.45,t0+dur-0.02);
+                g.gain.linearRampToValueAtTime(0,t0+dur);
+                o.start(t0);o.stop(t0+dur);
+            }
+            function alarmWatch(){
+                /* 3 short beeps 880Hz */
+                var ctx=_getAudio(),t=ctx.currentTime+0.05;
+                for(var i=0;i<3;i++) _beep(880,0.15,t+i*0.25,ctx);
+            }
+            function alarmWarning(){
+                /* 5 long × 2 groups 1047Hz */
+                var ctx=_getAudio(),t=ctx.currentTime+0.05;
+                for(var i=0;i<5;i++) _beep(1047,0.4,t+i*0.55,ctx);
+                var t2=t+5*0.55+0.6;
+                for(var i=0;i<5;i++) _beep(1047,0.4,t2+i*0.55,ctx);
+            }
+            function alarmAllClear(){
+                /* 2 beeps × 3 groups 660Hz */
+                var ctx=_getAudio(),t=ctx.currentTime+0.05;
+                for(var g=0;g<3;g++){_beep(660,0.2,t+g*0.9,ctx);_beep(660,0.2,t+g*0.9+0.3,ctx);}
+            }
+    
+        function _distNM(lat1,lon1,lat2,lon2){
+            var R=3440.065; // Earth radius in NM
+            var dLat=(lat2-lat1)*Math.PI/180;
+            var dLon=(lon2-lon1)*Math.PI/180;
+            var a=Math.sin(dLat/2)*Math.sin(dLat/2)+
+                  Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*
+                  Math.sin(dLon/2)*Math.sin(dLon/2);
+            return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+        }
+        function _toNM(dist,units){
+            if(units==='KM') return dist*0.539957;
+            if(units==='SM') return dist*0.868976;
+            return dist; // NM
+        }
+
+        function _checkAlarmState(features){
+            // Only alarm if a site is selected and has coordinates
+            if(!_selectedSiteObj||!_selectedSiteObj.lat||!_selectedSiteObj.lon){
+                return; // no site selected — no alarm
+            }
+            var slat=_selectedSiteObj.lat, slon=_selectedSiteObj.lon;
+            var warnR=_toNM(_selectedSiteObj.lightning_warning_radius||10, _selectedSiteObj.lightning_radius_units||'NM');
+            var watchR=_toNM(_selectedSiteObj.lightning_watch_radius||20,  _selectedSiteObj.lightning_radius_units||'NM');
+            var hasWarn=false,hasWatch=false,now=Date.now();
+            (features||[]).forEach(function(f){
+                if(!f.properties||!f.properties.flash_time) return;
+                var age=(now-new Date(f.properties.flash_time).getTime())/60000;
+                if(age<0||age>60) return;
+                var lon=f.geometry.coordinates[0],lat=f.geometry.coordinates[1];
+                var d=_distNM(slat,slon,lat,lon);
+                if(age<5  && d<=warnR) hasWarn=true;
+                if(age<15 && d<=watchR) hasWatch=true;
+            });
+            var ns=hasWarn?'warning':hasWatch?'watch':null;
+            if(ns!==_alarmState){
+                if(ns==='warning')    alarmWarning();
+                else if(ns==='watch') alarmWatch();
+                else if(_alarmState!==null) alarmAllClear();
+                _alarmState=ns;
+            }
+        }
+
+            function glmColor(a){ return a<5?'#ff3333':a<15?'#ffff00':'#00cc00'; }
 function glmSize(a) { return a<5?14:a<15?11:9; }
 
 function loadGLM() {
@@ -467,6 +552,7 @@ function loadGLM() {
         count++;
       });
       if(document.getElementById('glmToggle').checked) glmLayer.addTo(map);
+      _checkAlarmState(data.features||[], minutes);
       if(statusEl) statusEl.textContent = count+' flashes · '+
           new Date().toUTCString().slice(17,25)+'Z';
     })
@@ -488,6 +574,35 @@ document.getElementById('glmToggle').addEventListener('change', function(){
 document.getElementById('glmMinutes').addEventListener('change', function(){
   if(document.getElementById('glmToggle').checked) loadGLM();
 });
+
+          /* ── MRMS Composite live tile ──────────────────────────────────── */
+          var mrmsLayer=null, mrmsTimer=null;
+          var MRMS_URL='/CAP_WxCOP/static/mrms_tiles/composite/CONUS/latest/{z}/{x}/{y}.png';
+          function loadMRMS(){
+              if(!document.getElementById('mrmsToggle').checked) return;
+              var statusEl=document.getElementById('mrmsStatus');
+              if(mrmsLayer){ map.removeLayer(mrmsLayer); mrmsLayer=null; }
+              mrmsLayer=L.tileLayer(MRMS_URL+'?_='+Date.now(),{
+                  opacity:0.7, tileSize:256, zIndex:410,
+                  attribution:'MRMS © NOAA/NSSL'
+              });
+              mrmsLayer.addTo(map);
+              if(statusEl) statusEl.textContent=new Date().toUTCString().slice(17,25)+'Z';
+          }
+          document.addEventListener('DOMContentLoaded',function(){
+              document.getElementById('mrmsToggle').addEventListener('change',function(){
+                  var statusEl=document.getElementById('mrmsStatus');
+                  if(this.checked){
+                      statusEl.style.display='block';
+                      loadMRMS();
+                      mrmsTimer=setInterval(loadMRMS,120000);
+                  } else {
+                      statusEl.style.display='none';
+                      if(mrmsLayer){map.removeLayer(mrmsLayer);mrmsLayer=null;}
+                      if(mrmsTimer){clearInterval(mrmsTimer);mrmsTimer=null;}
+                  }
+              });
+          });
 </script>
 </body>
 </html>

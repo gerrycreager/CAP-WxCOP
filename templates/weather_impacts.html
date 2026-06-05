@@ -262,6 +262,15 @@
 
         <div id="statusBar">Loading…</div>
 
+        <!-- Weather overlays -->
+        <div class="sb-section">
+            <div class="sb-label">Weather Overlays</div>
+            <label class="toggle-row"><input type="checkbox" id="mrmsToggle"> MRMS Composite ⟳</label>
+            <div id="mrmsStatus" style="font-size:10px;color:#888;min-height:12px;"></div>
+            <label class="toggle-row" style="margin-top:4px;"><input type="checkbox" id="glmToggle"> GLM Lightning</label>
+            <div id="glmStatus" style="font-size:10px;color:#888;min-height:12px;"></div>
+        </div>
+
         <!-- Wind streamlines -->
         <div class="sb-section">
             <div class="sb-label">Wind Flow</div>
@@ -348,10 +357,94 @@ var map, symbolsLayer, labelsLayer, highlightLayer, baseLayers;
 var currentOp      = 'vfr';
 var currentHour    = 1;
 var allData        = [];   // full airport array for current hour
-var selectedStation = null;
+var selectedStation = null; _selectedApt = null;
 var availableHours = [];
 var modelRun       = null;
 var pollTimer      = null;
+
+
+        /* ── Web Audio alarm engine ─────────────────────────────────── */
+        var _audioCtx=null, _alarmState=null, _selectedApt=null;
+        function _getAudio(){if(!_audioCtx)_audioCtx=new(window.AudioContext||window.webkitAudioContext)();return _audioCtx;}
+        function _beep(freq,dur,t0,ctx){var o=ctx.createOscillator(),g=ctx.createGain();o.connect(g);g.connect(ctx.destination);o.frequency.value=freq;o.type='sine';g.gain.setValueAtTime(0,t0);g.gain.linearRampToValueAtTime(0.45,t0+0.01);g.gain.setValueAtTime(0.45,t0+dur-0.02);g.gain.linearRampToValueAtTime(0,t0+dur);o.start(t0);o.stop(t0+dur);}
+        function alarmWatch(){var ctx=_getAudio(),t=ctx.currentTime+0.05;for(var i=0;i<3;i++)_beep(880,0.15,t+i*0.25,ctx);}
+        function alarmWarning(){var ctx=_getAudio(),t=ctx.currentTime+0.05;for(var i=0;i<5;i++)_beep(1047,0.4,t+i*0.55,ctx);var t2=t+5*0.55+0.6;for(var i=0;i<5;i++)_beep(1047,0.4,t2+i*0.55,ctx);}
+        function alarmAllClear(){var ctx=_getAudio(),t=ctx.currentTime+0.05;for(var g=0;g<3;g++){_beep(660,0.2,t+g*0.9,ctx);_beep(660,0.2,t+g*0.9+0.3,ctx);}}
+
+        function _distNM(lat1,lon1,lat2,lon2){
+            var R=3440.065; // Earth radius in NM
+            var dLat=(lat2-lat1)*Math.PI/180;
+            var dLon=(lon2-lon1)*Math.PI/180;
+            var a=Math.sin(dLat/2)*Math.sin(dLat/2)+
+                  Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*
+                  Math.sin(dLon/2)*Math.sin(dLon/2);
+            return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+        }
+        function _toNM(dist,units){
+            if(units==='KM') return dist*0.539957;
+            if(units==='SM') return dist*0.868976;
+            return dist; // NM
+        }
+
+        function _checkAlarmState(features){
+            // Only alarm if a station is selected and has coordinates
+            if(!_selectedApt||!_selectedApt.lat||!_selectedApt.lon) return;
+            var slat=_selectedApt.lat, slon=_selectedApt.lon;
+            var warnR=10, watchR=20; // fixed 10/20 NM for Flight Impacts
+            var hasWarn=false,hasWatch=false,now=Date.now();
+            (features||[]).forEach(function(f){
+                if(!f.properties||!f.properties.flash_time) return;
+                var age=(now-new Date(f.properties.flash_time).getTime())/60000;
+                if(age<0||age>60) return;
+                var lon=f.geometry.coordinates[0],lat=f.geometry.coordinates[1];
+                var d=_distNM(slat,slon,lat,lon);
+                if(age<5  && d<=warnR) hasWarn=true;
+                if(age<15 && d<=watchR) hasWatch=true;
+            });
+            var ns=hasWarn?'warning':hasWatch?'watch':null;
+            if(ns!==_alarmState){
+                if(ns==='warning')    alarmWarning();
+                else if(ns==='watch') alarmWatch();
+                else if(_alarmState!==null) alarmAllClear();
+                _alarmState=ns;
+            }
+        }
+
+        /* ── GLM Lightning ──────────────────────────────────────────── */
+        var glmLayer=null, glmTimer=null;
+        var GLM_API='/CAP_WxCOP/api/weather-enhanced/glm/flashes';
+        function glmColor(a){return a<5?'#ff3333':a<15?'#ffff00':'#00cc00';}
+        function glmSize(a){return a<5?14:a<15?10:8;}
+        function loadGLM(){
+            fetch(GLM_API+'?minutes=60').then(function(r){return r.json();}).then(function(data){
+                if(glmLayer){map.removeLayer(glmLayer);glmLayer=null;}
+                glmLayer=L.layerGroup();
+                var now=Date.now(),count=0;
+                (data.features||[]).slice().sort(function(a,b){return a.properties.flash_time<b.properties.flash_time?-1:1;}).forEach(function(f){
+                    if(!f.geometry||!f.geometry.coordinates)return;
+                    var lon=f.geometry.coordinates[0],lat=f.geometry.coordinates[1];
+                    var age=(now-new Date(f.properties.flash_time).getTime())/60000;
+                    if(age<0||age>60)return;
+                    var sz=glmSize(age);
+                    L.marker([lat,lon],{icon:L.divIcon({className:'',html:'<div style="width:'+sz+'px;height:'+(sz*1.5)+'px;background:'+glmColor(age)+';clip-path:polygon(50% 0%,100% 38%,65% 38%,95% 100%,5% 100%,35% 38%,0% 38%);filter:drop-shadow(0 0 3px '+glmColor(age)+')"></div>',iconSize:[sz,sz],iconAnchor:[sz/2,sz/2]}),interactive:false,zIndexOffset:age<5?2000:age<15?1000:500}).addTo(glmLayer);
+                    count++;
+                });
+                if(document.getElementById('glmToggle').checked)glmLayer.addTo(map);
+                _checkAlarmState(data.features);
+                var el=document.getElementById('glmStatus');if(el)el.textContent=count+' flashes · '+new Date().toUTCString().slice(17,25)+'Z';
+            }).catch(function(){var el=document.getElementById('glmStatus');if(el)el.textContent='GLM unavailable';});
+        }
+
+        /* ── MRMS Composite live tile ───────────────────────────────── */
+        var mrmsLayer=null, mrmsTimer=null;
+        var MRMS_URL='/CAP_WxCOP/static/mrms_tiles/composite/CONUS/latest/{z}/{x}/{y}.png';
+        function loadMRMS(){
+            if(!document.getElementById('mrmsToggle').checked)return;
+            if(mrmsLayer){map.removeLayer(mrmsLayer);mrmsLayer=null;}
+            mrmsLayer=L.tileLayer(MRMS_URL+'?_='+Date.now(),{opacity:0.7,tileSize:256,zIndex:410,attribution:'MRMS © NOAA/NSSL'});
+            mrmsLayer.addTo(map);
+            var el=document.getElementById('mrmsStatus');if(el)el.textContent=new Date().toUTCString().slice(17,25)+'Z';
+        }
 
 // ── Map init ──────────────────────────────────────────────────────────────
 function initMap() {
@@ -446,6 +539,7 @@ function loadData() {
             updateStatus(data);
             document.getElementById('loading').style.display = 'none';
             if (selectedStation) {
+                _selectedApt = allData.find(function(a){return a.station_id===selectedStation;})||null;
                 var apt = allData.find(function(a) { return a.station_id === selectedStation; });
                 // Don't reload full detail on pan — just update banner if airport in view
             }
@@ -528,6 +622,8 @@ function updateMarkers() {
 // ── Station detail panel ──────────────────────────────────────────────────
 function loadStationDetail(stationId) {
     selectedStation = stationId;
+    // Store apt object for alarm radius filtering
+    _selectedApt = allData.find(function(a){return a.station_id===stationId;})||null;
     document.getElementById('detailStation').textContent = stationId;
     document.getElementById('detailName').textContent = 'Loading…';
     document.getElementById('detailBanner').className = 'banner-UNKNOWN';
@@ -802,6 +898,14 @@ document.addEventListener('DOMContentLoaded', function() {
     loadData();
     // Auto-refresh every 5 min
     pollTimer = setInterval(function() { loadData(); }, 5 * 60 * 1000);
+    document.getElementById('mrmsToggle').addEventListener('change',function(){
+        if(this.checked){loadMRMS();mrmsTimer=setInterval(loadMRMS,120000);}
+        else{if(mrmsLayer){map.removeLayer(mrmsLayer);mrmsLayer=null;}if(mrmsTimer){clearInterval(mrmsTimer);mrmsTimer=null;}}
+    });
+    document.getElementById('glmToggle').addEventListener('change',function(){
+        if(this.checked){loadGLM();glmTimer=setInterval(loadGLM,60000);}
+        else{if(glmLayer){map.removeLayer(glmLayer);glmLayer=null;}if(glmTimer){clearInterval(glmTimer);glmTimer=null;}}
+    });
 });
 
 // ── PDF Generation ────────────────────────────────────────────────────────

@@ -1862,7 +1862,7 @@
             var glmLayer=null, glmRefreshTimer=null;
 
             function glmColor(a){return a<5?'#ff2200':a<15?'#ffee00':'#00ff44';}
-            function glmSize(a){return a<5?22:a<15?17:13;}
+            function glmSize(a){return a<5?14:a<15?10:8;}
 
             function loadGLM(){
                 var m=getMap(); if(!m) return;
@@ -1898,6 +1898,7 @@
                         });
                         if(document.getElementById('glmToggle').checked) glmLayer.addTo(m);
                         if(statusEl) statusEl.textContent=count+' flashes · last '+minutes+' min · '+new Date().toUTCString().slice(17,25)+'Z';
+
                     })
                     .catch(function(e){if(statusEl)statusEl.textContent='GLM load failed';console.warn(e);});
             }
