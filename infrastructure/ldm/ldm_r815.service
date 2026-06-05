@@ -1,0 +1,18 @@
+[Unit]
+Description=Unidata Local Data Manager (r815)
+After=network.target
+
+[Service]
+Type=forking
+User=ldm
+ExecStartPre=/bin/bash -c 'ipcs -s | awk \'/ldm/{print $2}\' | xargs -r ipcrm -s'
+ExecStartPre=/home/ldm/bin/ldmadmin delqueue
+ExecStartPre=/home/ldm/bin/ldmadmin mkqueue -f
+ExecStart=/home/ldm/bin/ldmadmin start -o 60
+ExecStop=/home/ldm/bin/ldmadmin stop
+PIDFile=/home/ldm/ldmd.pid
+Restart=on-failure
+SuccessExitStatus=1
+
+[Install]
+WantedBy=multi-user.target
