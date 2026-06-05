@@ -445,7 +445,7 @@ setInterval(loadData, 60 * 1000);  // refresh every 60 seconds
 
 // ── GLM Lightning ────────────────────────────────────────────────────────────
 var glmLayer = null, glmTimer = null;
-var GLM_API = '/CAP_WxCOP/api/glm/flashes';
+var GLM_API = '/CAP_WxCOP/api/weather-enhanced/glm/flashes';
 
 
             /* ── Web Audio alarm engine ─────────────────────────────────── */
@@ -577,17 +577,29 @@ document.getElementById('glmMinutes').addEventListener('change', function(){
 
           /* ── MRMS Composite live tile ──────────────────────────────────── */
           var mrmsLayer=null, mrmsTimer=null;
-          var MRMS_URL='/CAP_WxCOP/static/mrms_tiles/composite/CONUS/latest/{z}/{x}/{y}.png';
+          var MRMS_INDEX='/CAP_WxCOP/static/mrms_tiles/composite/CONUS/index.json';
           function loadMRMS(){
               if(!document.getElementById('mrmsToggle').checked) return;
-              var statusEl=document.getElementById('mrmsStatus');
-              if(mrmsLayer){ map.removeLayer(mrmsLayer); mrmsLayer=null; }
-              mrmsLayer=L.tileLayer(MRMS_URL+'?_='+Date.now(),{
-                  opacity:0.7, tileSize:256, zIndex:410,
-                  attribution:'MRMS © NOAA/NSSL'
-              });
-              mrmsLayer.addTo(map);
-              if(statusEl) statusEl.textContent=new Date().toUTCString().slice(17,25)+'Z';
+              fetch(MRMS_INDEX+'?_='+Date.now())
+                .then(function(r){return r.json();})
+                .then(function(idx){
+                  var frames=idx.frames||[];
+                  if(!frames.length) return;
+                  var frame=frames[frames.length-1];
+                  var tileUrl=frame.tile_url;
+                  if(mrmsLayer){map.removeLayer(mrmsLayer);mrmsLayer=null;}
+                  mrmsLayer=L.tileLayer(tileUrl+'?_='+Date.now(),{
+                      opacity:0.7,tileSize:256,zIndex:410,
+                      attribution:'MRMS © NOAA/NSSL'
+                  });
+                  mrmsLayer.addTo(map);
+                  var el=document.getElementById('mrmsStatus');
+                  if(el) el.textContent=(frame.valid_time||idx.latest)+' UTC';
+                })
+                .catch(function(){
+                  var el=document.getElementById('mrmsStatus');
+                  if(el) el.textContent='MRMS unavailable';
+                });
           }
           document.addEventListener('DOMContentLoaded',function(){
               document.getElementById('mrmsToggle').addEventListener('change',function(){
