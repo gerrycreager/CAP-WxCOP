@@ -36,6 +36,7 @@ import numpy as np
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
+import gc
 import cfgrib
 import psycopg2
 from psycopg2.extras import execute_values
@@ -44,7 +45,7 @@ from scipy.spatial import KDTree
 # ── Configuration ──────────────────────────────────────────────────────────────
 AIGFS_DIR       = Path('/LDM/models/AIGFS')
 LOCKFILE        = '/home/ldm/var/run/ingest_aigfs_impacts.lock'
-CFGRIB_IDX_DIR  = '/tmp/cfgrib_aigfs_idx'
+CFGRIB_IDX_DIR  = '/var/cache/cap_wxcop/cfgrib_aigfs_idx'
 
 DB_HOST = '192.168.0.60'
 DB_NAME = 'avwx_data'
@@ -157,10 +158,13 @@ def build_global_kdtree(sfc_file):
     os.makedirs(CFGRIB_IDX_DIR, exist_ok=True)
     ds = cfgrib.open_dataset(str(sfc_file),
                              filter_by_keys={'shortName': '10u'})
-    lats = ds['latitude'].values   # 1D, 721 points
-    lons = ds['longitude'].values  # 1D, 1440 points, 0-359.75
-    lons_180 = np.where(lons > 180, lons - 360, lons)
-    ds.close()
+    try:
+        lats = ds['latitude'].values   # 1D, 721 points
+        lons = ds['longitude'].values  # 1D, 1440 points, 0-359.75
+        lons_180 = np.where(lons > 180, lons - 360, lons)
+    finally:
+        ds.close()
+        del ds
 
     # Build 2D meshgrid
     LON2D, LAT2D = np.meshgrid(lons_180, lats)
@@ -177,10 +181,13 @@ def read_aigfs_wind(sfc_file):
     os.makedirs(CFGRIB_IDX_DIR, exist_ok=True)
     u_ds = cfgrib.open_dataset(str(sfc_file), filter_by_keys={'shortName': '10u'})
     v_ds = cfgrib.open_dataset(str(sfc_file), filter_by_keys={'shortName': '10v'})
-    u = u_ds['u10'].values   # (n_steps, nlat, nlon)
-    v = v_ds['v10'].values
-    u_ds.close()
-    v_ds.close()
+    try:
+        u = u_ds['u10'].values   # (n_steps, nlat, nlon)
+        v = v_ds['v10'].values
+    finally:
+        u_ds.close()
+        v_ds.close()
+        del u_ds, v_ds
     return u, v
 
 
@@ -189,8 +196,11 @@ def read_aigfs_temp(sfc_file):
     os.makedirs(CFGRIB_IDX_DIR, exist_ok=True)
     try:
         ds = cfgrib.open_dataset(str(sfc_file), filter_by_keys={'shortName': '2t'})
-        t = ds['t2m'].values
-        ds.close()
+        try:
+            t = ds['t2m'].values
+        finally:
+            ds.close()
+            del ds
         return t
     except Exception as e:
         log.warning(f"Could not read t2m: {e}")
@@ -292,8 +302,11 @@ def main():
 
         for step_idx in range(n_steps):
             # AIGFS steps are 6-hourly: F000, F006, F012, ...
-            fhr = step_idx * 6
-            valid_time = cycle_dt + timedelta(hours=fhr)
+            # Write each step for all hourly slots it covers (fhr to fhr+5)
+            base_fhr = step_idx * 6
+            fhr_range = range(base_fhr, min(base_fhr + 6, 49))
+            fhr = base_fhr  # used for logging
+            valid_time = cycle_dt + timedelta(hours=base_fhr)
 
             # Extract wind at airport grid points
             u_flat = u_all[step_idx].flatten()
@@ -441,6 +454,11 @@ def main():
                         seen[key] = row
             rows = list(seen.values())
 
+            for fhr_slot in fhr_range:
+                slot_valid_time = cycle_dt + timedelta(hours=fhr_slot)
+                slot_rows = [(r[0], r[1], r[2], r[3], slot_valid_time, fhr_slot,
+                              *r[6:]) for r in rows]
+
             with conn.cursor() as cur:
                 execute_values(cur, """
                     INSERT INTO observations.airport_wx_impacts
@@ -466,11 +484,11 @@ def main():
                         best_runway_hdg = EXCLUDED.best_runway_hdg,
                         source_priority = EXCLUDED.source_priority,
                         ingested_at     = EXCLUDED.ingested_at
-                """, rows)
+                """, slot_rows)
             conn.commit()
             total += len(rows)
-            log.info(f"  AIGFS {sector_name} F{fhr:03d}: {len(rows)} upserted "
-                     f"(valid {valid_time.strftime('%Y-%m-%d %H:%MZ')})")
+            log.info(f"  AIGFS {sector_name} F{base_fhr:03d}-F{min(base_fhr+5,48):03d}: "
+                     f"{len(rows)} airports x {len(fhr_range)} hours upserted")
 
     elapsed = (datetime.now() - t0).total_seconds()
     log.info(f"Total: {total} records in {elapsed:.0f}s")
@@ -492,12 +510,22 @@ def main():
     except Exception as e:
         log.warning(f"Scour failed: {e}")
 
+    # Release large numpy arrays before exit to avoid cfgrib/eccodes segfault
+    del u_all, v_all
+    if t_all is not None:
+        del t_all
+    gc.collect()
+
     log.info("AIGFS impacts ingest complete")
     log.info("=" * 60)
 
     fcntl.flock(lock_fd, fcntl.LOCK_UN)
     lock_fd.close()
     conn.close()
+
+    # os._exit bypasses CPython/eccodes C-library teardown that causes segfault
+    # All resources explicitly released above — safe to skip normal shutdown
+    os._exit(0)
 
 
 if __name__ == '__main__':
