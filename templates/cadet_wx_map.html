@@ -193,7 +193,7 @@
       </select>
       <div style="margin-top:5px;font-size:0.72rem;line-height:1.7;">
         <span style="color:#ff3333;">⚡</span> 0–5 min — Stop if within 5NM<br>
-        <span style="color:#ff8800;">⚡</span> 5–15 min — Caution<br>
+        <span style="color:#ffe000;">⚡</span> 5–15 min — Caution<br>
         <span style="color:#00cc44;">⚡</span> 15–30 min — Resume if clear
       </div>
       <div id="glmStatus" style="font-size:0.7rem;color:#778;margin-top:3px;"></div>
@@ -524,7 +524,7 @@ var GLM_API = '/CAP_WxCOP/api/weather-enhanced/glm/flashes';
             }
         }
 
-            function glmColor(a){ return a<5?'#ff3333':a<15?'#ffff00':'#00cc00'; }
+            function glmColor(a){ return a<5?'#ff3333':a<15?'#ffe000':'#00cc00'; }
 function glmSize(a) { return a<5?14:a<15?11:9; }
 
 function loadGLM() {

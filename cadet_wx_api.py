@@ -31,6 +31,16 @@ import psycopg2
 import psycopg2.extras
 
 log = logging.getLogger(__name__)
+if not log.handlers:
+    _fh = logging.FileHandler('/var/log/cap_wxcop_cadet_api.log')
+    _fh.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(message)s'))
+    log.addHandler(_fh)
+    log.setLevel(logging.INFO)
+if not log.handlers:
+    _fh = logging.FileHandler('/var/log/cap_wxcop_cadet_api.log')
+    _fh.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(message)s'))
+    log.addHandler(_fh)
+    log.setLevel(logging.INFO)
 
 cadet_wx_bp = Blueprint('cadet_wx', __name__)
 
