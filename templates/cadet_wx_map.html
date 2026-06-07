@@ -186,10 +186,10 @@
         <option value="30">Last 30 min</option>
       </select>
       <!-- Legend colors MUST match glmColor() in JS below -->
-      <div style="margin-top:5px;font-size:0.72rem;line-height:1.7;">
-        <span style="color:#ff3333;">&#9889;</span> 0&ndash;5 min &mdash; Stop if within 5NM<br>
-        <span style="color:#ffe000;">&#9889;</span> 5&ndash;15 min &mdash; Caution<br>
-        <span style="color:#00cc00;">&#9889;</span> 15&ndash;30 min &mdash; Resume if clear
+      <div style="margin-top:5px;font-size:0.72rem;line-height:1.9;">
+        <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ff0000;box-shadow:0 0 4px #ff0000;vertical-align:middle;margin-right:4px;"></span> 0&ndash;5 min &mdash; Stop if within 5NM<br>
+        <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#ffdd00;box-shadow:0 0 3px #ffdd00;vertical-align:middle;margin-right:4px;"></span> 5&ndash;15 min &mdash; Caution<br>
+        <span style="display:inline-block;width:5px;height:5px;border-radius:50%;background:#00ee00;box-shadow:0 0 3px #00ee00;vertical-align:middle;margin-right:4px;"></span> 15&ndash;30 min &mdash; Resume if clear
       </div>
       <div id="glmStatus" style="font-size:0.7rem;color:#778;margin-top:3px;"></div>
     </div>
@@ -484,8 +484,8 @@ function _checkAlarmState(features, minutes) {
 var glmLayer = null, glmTimer = null;
 var GLM_API  = '/CAP_WxCOP/api/weather-enhanced/glm/flashes';
 
-function glmColor(a) { return a < 5 ? '#ff3333' : a < 15 ? '#ffe000' : '#00cc00'; }
-function glmSize(a)  { return a < 5 ? 14 : a < 15 ? 11 : 9; }
+function glmColor(a) { return a < 5 ? '#ff0000' : a < 15 ? '#ffdd00' : '#00ee00'; }
+function glmSize(a)  { return a < 5 ? 10 : a < 15 ? 7 : 5; }
 
 function loadGLM() {
   var minutes  = parseInt(document.getElementById('glmMinutes').value) || 15;
@@ -515,9 +515,8 @@ function loadGLM() {
         L.marker([f.geometry.coordinates[1], f.geometry.coordinates[0]], {
           icon: L.divIcon({
             className: '',
-            html: '<span style="font-size:' + sz + 'px;color:' + col +
-                  ';text-shadow:0 0 3px rgba(0,0,0,0.9);line-height:1;display:block;">&#9889;</span>',
-            iconSize: [sz+4, sz+4], iconAnchor: [(sz+4)/2, (sz+4)/2],
+            html: '<div style="width:'+sz+'px;height:'+sz+'px;border-radius:50%;background:'+col+';box-shadow:0 0 '+(sz/2)+'px '+col+';opacity:0.85;"></div>',
+            iconSize: [sz, sz], iconAnchor: [sz/2, sz/2],
           }),
           interactive: false, zIndexOffset: zOff,
         }).addTo(glmLayer);
