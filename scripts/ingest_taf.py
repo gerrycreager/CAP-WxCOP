@@ -271,11 +271,7 @@ def insert_taf(conn, taf):
                 (SELECT location FROM observations.airports WHERE station_id = %s)
             )
             ON CONFLICT (station_id, issue_time)
-            DO UPDATE SET
-                valid_from = EXCLUDED.valid_from,
-                valid_to   = EXCLUDED.valid_to,
-                raw_text   = EXCLUDED.raw_text,
-                location   = EXCLUDED.location
+            DO NOTHING
         """, (
             taf['station_id'], taf['issue_time'],
             taf['valid_from'], taf['valid_to'],
