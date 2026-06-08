@@ -461,6 +461,8 @@ def get_glm_lightning(cur, lat, lon, warn_nm=None, watch_nm=None):
         WHERE flash_time >= %s
           AND lat BETWEEN %s AND %s
           AND lon BETWEEN %s AND %s
+          AND flash_quality_flag = 0
+          AND flash_energy >= 1e-14
         ORDER BY flash_time DESC
     """, (cutoff,
           lat - lat_deg, lat + lat_deg,
@@ -502,6 +504,7 @@ def glm_available(cur):
         cur.execute("""
             SELECT 1 FROM observations.glm_flashes
             WHERE flash_time > NOW() - INTERVAL '10 minutes'
+              AND flash_quality_flag = 0
             LIMIT 1
         """)
         return cur.fetchone() is not None

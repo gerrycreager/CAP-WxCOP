@@ -405,19 +405,23 @@ def get_glm_flashes():
         # Base query — bbox filter optional
         if all(v is not None for v in [min_lat, max_lat, min_lon, max_lon]):
             cur.execute("""
-                SELECT flash_time, lat, lon, energy, satellite
+                SELECT flash_time, lat, lon, flash_energy, satellite
                 FROM observations.glm_flashes
                 WHERE flash_time >= %s
                   AND lat  BETWEEN %s AND %s
                   AND lon  BETWEEN %s AND %s
+                  AND flash_quality_flag = 0
+                  AND flash_energy >= 1e-14
                 ORDER BY flash_time DESC
                 LIMIT 50000
             """, (cutoff, min_lat, max_lat, min_lon, max_lon))
         else:
             cur.execute("""
-                SELECT flash_time, lat, lon, energy, satellite
+                SELECT flash_time, lat, lon, flash_energy, satellite
                 FROM observations.glm_flashes
                 WHERE flash_time >= %s
+                  AND flash_quality_flag = 0
+                  AND flash_energy >= 1e-14
                 ORDER BY flash_time DESC
                 LIMIT 50000
             """, (cutoff,))
@@ -429,7 +433,7 @@ def get_glm_flashes():
         now = datetime.utcnow()
 
         features = []
-        for flash_time, lat, lon, energy, satellite in rows:
+        for flash_time, lat, lon, flash_energy, satellite in rows:
             # Age in minutes (flash_time may be tz-aware)
             ft = flash_time.replace(tzinfo=None) if flash_time.tzinfo else flash_time
             age_min = (now - ft).total_seconds() / 60.0
@@ -452,7 +456,7 @@ def get_glm_flashes():
                     'flash_time': ft.strftime('%Y-%m-%dT%H:%M:%SZ'),
                     'age_min':    round(age_min, 1),
                     'age_bucket': age_bucket,   # 0=red,1=yellow,2=green
-                    'energy':     float(energy) if energy else None,
+                    'energy':     float(flash_energy) if flash_energy else None,
                     'satellite':  satellite.strip() if satellite else None,
                 }
             })
