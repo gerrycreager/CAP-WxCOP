@@ -891,6 +891,19 @@ function initMap() {
     map.on('zoomend moveend', updateMarkers);
 }
 
+function buildHourBtns() {
+    var el = document.getElementById('hourBtns');
+    el.innerHTML = '';
+    QUICK_HOURS.forEach(function(h) {
+        var btn = document.createElement('button');
+        btn.className = 'hour-btn' + (h === currentHour ? ' active' : '');
+        btn.dataset.hour = h;
+        btn.textContent = 'F' + String(h).padStart(2,'0');
+        btn.addEventListener('click', function() { onHourChange(h); });
+        el.appendChild(btn);
+    });
+}
+
 // ── Boot ──────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function() {
     initMap();
