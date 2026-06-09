@@ -861,6 +861,36 @@ function setupControls() {
     tick(); setInterval(tick, 1000);
 })();
 
+function initMap() {
+    map = L.map('map', { center: [39.0, -98.0], zoom: 5, minZoom: 3, maxZoom: 18 });
+
+    baseLayers = {
+        street:    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                    { attribution: '&copy; OpenStreetMap', maxZoom: 18 }),
+        satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                    { attribution: '&copy; Esri', maxZoom: 18 }),
+        dark:      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+                    { attribution: '&copy; OSM/CARTO', subdomains: 'abcd', maxZoom: 18 }),
+        topo:      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
+                    { attribution: '&copy; Esri', maxZoom: 18 }),
+    };
+    baseLayers.street.addTo(map);
+    L.control.layers({
+        'Street':    baseLayers.street,
+        'Satellite': baseLayers.satellite,
+        'Dark':      baseLayers.dark,
+        'Topo':      baseLayers.topo,
+    }, {}, { position: 'topright' }).addTo(map);
+
+    L.control.scale({ position: 'bottomleft', imperial: true, metric: false }).addTo(map);
+
+    symbolsLayer   = L.featureGroup().addTo(map);
+    labelsLayer    = L.featureGroup().addTo(map);
+    highlightLayer = L.featureGroup().addTo(map);
+
+    map.on('zoomend moveend', updateMarkers);
+}
+
 // ── Boot ──────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function() {
     initMap();
