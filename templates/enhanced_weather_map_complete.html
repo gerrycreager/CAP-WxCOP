@@ -735,7 +735,7 @@
         function initMap() {
             map = L.map('map', { zoomControl: true });
             window._capMap = map;  // expose for GLM/MRMS local scope
-            map.fitBounds([[24.0, -125.0], [50.0, -66.0]], {maxZoom: 4});
+            map.setView([38.5, -96.5], 4);
 
 
             baseLayers = {
@@ -1306,7 +1306,8 @@
         function loadNoMetarAirports() {
             // Use fixed CONUS bounds to match the METAR fetch — dynamic map bounds
             // at initial zoom 5 may clip airports near the edges of the viewport.
-            var bounds = '-125,24,-66,50';
+            var _b = map.getBounds();
+            var bounds = _b.getWest().toFixed(2)+','+_b.getSouth().toFixed(2)+','+_b.getEast().toFixed(2)+','+_b.getNorth().toFixed(2);
             fetch('/CAP_WxCOP/api/weather/no-metar-airports?bounds=' + bounds + '&limit=5000')
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
@@ -1326,7 +1327,9 @@
         }
 
         function loadWeatherData() {
-            fetch('/CAP_WxCOP/api/weather-enhanced/metar/recent?bounds=-125,24,-66,50&limit=2500')
+            var _mb = map.getBounds();
+            var _mbnds = _mb.getWest().toFixed(2)+','+_mb.getSouth().toFixed(2)+','+_mb.getEast().toFixed(2)+','+_mb.getNorth().toFixed(2);
+            fetch('/CAP_WxCOP/api/weather-enhanced/metar/recent?bounds='+_mbnds+'&limit=2500')
                 .then(function(response) { return response.json(); })
                 .then(function(data) {
                     document.getElementById('loading').style.display = 'none';
