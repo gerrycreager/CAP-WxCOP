@@ -280,13 +280,29 @@ def main():
     log.info('=' * 65)
 
     total = {'ok': 0, 'skip': 0, 'fail': 0}
-    for dk in domains:
-        stats = fetch_domain(dk, cycle, dt, dry_run=args.dry_run)
-        for k in total:
-            total[k] += stats[k]
-        log.info(f'{DOMAINS[dk]["label"]}: '
-                 f'{stats["ok"]} fetched, {stats["skip"]} skipped, '
-                 f'{stats["fail"]} failed')
+    if len(domains) > 1 and not args.dry_run:
+        # Parallel fetch — each domain is independent
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        futures = {}
+        with ThreadPoolExecutor(max_workers=len(domains)) as ex:
+            for dk in domains:
+                futures[ex.submit(fetch_domain, dk, cycle, dt, args.dry_run)] = dk
+            for fut in as_completed(futures):
+                dk = futures[fut]
+                stats = fut.result()
+                for k in total:
+                    total[k] += stats[k]
+                log.info(f'{DOMAINS[dk]["label"]}: '
+                         f'{stats["ok"]} fetched, {stats["skip"]} skipped, '
+                         f'{stats["fail"]} failed')
+    else:
+        for dk in domains:
+            stats = fetch_domain(dk, cycle, dt, dry_run=args.dry_run)
+            for k in total:
+                total[k] += stats[k]
+            log.info(f'{DOMAINS[dk]["label"]}: '
+                     f'{stats["ok"]} fetched, {stats["skip"]} skipped, '
+                     f'{stats["fail"]} failed')
 
     log.info('=' * 65)
     log.info(f'Complete: {total["ok"]} fetched, {total["skip"]} skipped, '
