@@ -17,6 +17,10 @@ Usage:
   render_hrrr_winds.py              # auto-detect and render latest cycle
   render_hrrr_winds.py --force      # re-render even if output exists
   render_hrrr_winds.py --cycle 15z  # render a specific cycle
+
+Parallelization: each forecast hour is rendered in its own thread.
+19 FHRs run concurrently (I/O-bound, cfgrib reads dominate).
+Expected wall time: ~2-3 min vs ~10 min sequential.
 """
 import os
 import sys
@@ -28,6 +32,7 @@ import logging
 import argparse
 import warnings
 import tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -38,6 +43,7 @@ HRRR_BASE   = '/LDM/models/hrrr'
 OUTPUT_BASE = '/LDM/models/hrrr_winds'
 GRID_STEP   = 14        # subsample step — ~42km, ~700 pts CONUS
 MAX_CYCLES  = 3         # number of cycle dirs to keep on disk
+MAX_WORKERS = 6         # parallel FHR workers — I/O bound, limit NFS load
 LOG_FILE    = '/home/ldm/var/logs/hrrr_winds_render.log'
 
 LEVELS = ['SFC', '925', '850', '700', '600', '500']
@@ -172,7 +178,6 @@ def find_latest_cycle():
             if not cycle_dir.endswith('z'):
                 continue
             cyc = cycle_dir[:-1]  # strip trailing z
-            # Check F000 and F018 both exist
             f000 = find_hrrr_file(date, f'{cyc}z', 0)
             f018 = find_hrrr_file(date, f'{cyc}z', 18)
             if f000 and f018:
@@ -180,94 +185,133 @@ def find_latest_cycle():
     return None, None
 
 
-# ── Rendering ──────────────────────────────────────────────────────────────
-def render_cycle(date, cycle, force=False):
-    """Render all levels and forecast hours for one HRRR cycle."""
+# ── Per-FHR render (called in thread) ─────────────────────────────────────
+def render_fhr(fhr, date, cycle, out_dir, force):
+    """
+    Render all levels for one forecast hour.
+    Returns (fhr, index_entry_or_None, rendered_count, error_count).
+    Called concurrently — must be thread-safe (no shared mutable state).
+    """
     import cfgrib
     import numpy as np
 
+    grib_file = find_hrrr_file(date, cycle, fhr)
+    if not grib_file:
+        log.warning(f'  F{fhr:03d}: GRIB2 file not found, skipping')
+        return fhr, None, 0, 1
+
+    try:
+        datasets = cfgrib.open_datasets(grib_file)
+    except Exception as e:
+        log.error(f'  F{fhr:03d}: open_datasets failed: {e}')
+        return fhr, None, 0, 1
+
+    rendered = 0
+    errors   = 0
+    fhr_ok   = True
+
+    for level in LEVELS:
+        out_file = out_dir / f'winds_{level}_f{fhr:03d}.json'
+        if out_file.exists() and not force:
+            continue
+
+        try:
+            u, v, lats, lons = extract_level(datasets, level, np)
+            geojson = build_geojson(u, v, lats, lons)
+            geojson['metadata'] = {
+                'model':    'HRRR',
+                'cycle':    f'{date} {cycle}',
+                'fhr':      fhr,
+                'level':    level,
+                'label':    LEVEL_LABELS[level],
+                'n_pts':    len(geojson['features']),
+                'rendered': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+            }
+            # Atomic write via temp file — safe across threads (unique per fhr+level)
+            tmp = out_file.with_suffix(f'.{fhr:03d}_{level}.tmp')
+            with open(tmp, 'w') as f:
+                json.dump(geojson, f, separators=(',', ':'))
+            tmp.rename(out_file)
+            rendered += 1
+            log.info(f'  F{fhr:03d} {level}: {len(geojson["features"])} pts → {out_file.name}')
+        except Exception as e:
+            log.error(f'  F{fhr:03d} {level}: {e}')
+            errors += 1
+            fhr_ok = False
+
+    # Close datasets explicitly to free file handles
+    for ds in datasets:
+        try:
+            ds.close()
+        except Exception:
+            pass
+
+    index_entry = None
+    if fhr_ok and rendered > 0:
+        index_entry = {
+            'fhr':   fhr,
+            'files': {lv: f'winds_{lv}_f{fhr:03d}.json' for lv in LEVELS}
+        }
+
+    return fhr, index_entry, rendered, errors
+
+
+# ── Rendering ──────────────────────────────────────────────────────────────
+def render_cycle(date, cycle, force=False):
+    """Render all levels and forecast hours for one HRRR cycle in parallel."""
     out_dir = Path(OUTPUT_BASE) / date / cycle
     out_dir.mkdir(parents=True, exist_ok=True)
 
     log.info(f'Rendering cycle {date} {cycle} → {out_dir}')
-    rendered = 0
-    skipped  = 0
-    errors   = 0
-    index_entries = []
+    log.info(f'Parallel workers: {MAX_WORKERS}')
 
-    for fhr in range(0, 19):
-        grib_file = find_hrrr_file(date, cycle, fhr)
-        if not grib_file:
-            log.warning(f'  F{fhr:03d}: GRIB2 file not found, skipping')
-            errors += 1
-            continue
+    total_rendered = 0
+    total_skipped  = 0
+    total_errors   = 0
+    index_entries  = {}   # fhr → entry (dict for thread-safe insertion by key)
 
-        # Open datasets once per FHR, reuse for all levels
-        try:
-            datasets = cfgrib.open_datasets(grib_file)
-        except Exception as e:
-            log.error(f'  F{fhr:03d}: open_datasets failed: {e}')
-            errors += 1
-            continue
+    fhrs = list(range(0, 19))
 
-        fhr_ok = True
-        for level in LEVELS:
-            out_file = out_dir / f'winds_{level}_f{fhr:03d}.json'
-            if out_file.exists() and not force:
-                skipped += 1
-                continue
-
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = {
+            executor.submit(render_fhr, fhr, date, cycle, out_dir, force): fhr
+            for fhr in fhrs
+        }
+        for future in as_completed(futures):
+            fhr = futures[future]
             try:
-                u, v, lats, lons = extract_level(datasets, level, np)
-                geojson = build_geojson(u, v, lats, lons)
-                geojson['metadata'] = {
-                    'model':   'HRRR',
-                    'cycle':   f'{date} {cycle}',
-                    'fhr':     fhr,
-                    'level':   level,
-                    'label':   LEVEL_LABELS[level],
-                    'n_pts':   len(geojson['features']),
-                    'rendered': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
-                }
-                # Write atomically via temp file
-                tmp = out_file.with_suffix('.tmp')
-                with open(tmp, 'w') as f:
-                    json.dump(geojson, f, separators=(',', ':'))
-                tmp.rename(out_file)
-                rendered += 1
-                log.info(f'  F{fhr:03d} {level}: {len(geojson["features"])} pts → {out_file.name}')
+                fhr_result, idx_entry, rendered, errors = future.result()
+                total_rendered += rendered
+                total_errors   += errors
+                if idx_entry:
+                    index_entries[fhr_result] = idx_entry
             except Exception as e:
-                log.error(f'  F{fhr:03d} {level}: {e}')
-                errors += 1
-                fhr_ok = False
+                log.error(f'F{fhr:03d} worker exception: {e}')
+                total_errors += 1
 
-        # Build index entry for this FHR
-        if fhr_ok:
-            index_entries.append({
-                'fhr':   fhr,
-                'files': {lv: f'winds_{lv}_f{fhr:03d}.json' for lv in LEVELS}
-            })
-
-    # Write index.json
+    # Build index.json with entries sorted by FHR
     index = {
         'cycle':    f'{date} {cycle}',
         'date':     date,
         'levels':   [{'key': k, 'label': LEVEL_LABELS[k]} for k in LEVELS],
-        'fhrs':     index_entries,
+        'fhrs':     [index_entries[k] for k in sorted(index_entries.keys())],
         'rendered': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
     }
     with open(out_dir / 'index.json', 'w') as f:
         json.dump(index, f, indent=2)
 
-    # Update 'latest' symlink
+    # Update 'latest' symlink atomically
     latest_link = Path(OUTPUT_BASE) / 'latest'
-    if latest_link.is_symlink():
-        latest_link.unlink()
-    latest_link.symlink_to(out_dir)
+    tmp_link    = Path(OUTPUT_BASE) / 'latest.tmp'
+    if tmp_link.is_symlink():
+        tmp_link.unlink()
+    tmp_link.symlink_to(out_dir)
+    tmp_link.rename(latest_link)
     log.info(f'latest → {out_dir}')
 
-    log.info(f'Cycle {date} {cycle}: rendered={rendered} skipped={skipped} errors={errors}')
-    return rendered, errors
+    log.info(f'Cycle {date} {cycle}: rendered={total_rendered} '
+             f'skipped={total_skipped} errors={total_errors}')
+    return total_rendered, total_errors
 
 
 def scour_old_cycles():
@@ -275,17 +319,14 @@ def scour_old_cycles():
     base = Path(OUTPUT_BASE)
     if not base.exists():
         return
-    # Collect all date/cycle dirs sorted by name (chronological)
     dirs = sorted([
         d for d in base.glob('*/*z')
         if d.is_dir() and d.name.endswith('z')
     ])
-    # Remove all but the newest MAX_CYCLES
     to_remove = dirs[:-MAX_CYCLES] if len(dirs) > MAX_CYCLES else []
     for d in to_remove:
         log.info(f'Scouring old cycle: {d}')
         shutil.rmtree(d, ignore_errors=True)
-        # Remove parent date dir if empty
         try:
             d.parent.rmdir()
         except OSError:
@@ -294,6 +335,7 @@ def scour_old_cycles():
 
 # ── Main ───────────────────────────────────────────────────────────────────
 def main():
+    global MAX_WORKERS
     parser = argparse.ArgumentParser(description='Pre-render HRRR wind GeoJSON')
     parser.add_argument('--force',  action='store_true',
                         help='Re-render even if output files exist')
@@ -301,7 +343,11 @@ def main():
                         help='Specific cycle to render, e.g. 15z')
     parser.add_argument('--date',   type=str, default=None,
                         help='Date for specific cycle, e.g. 20260519 (default: today)')
+    parser.add_argument('--workers', type=int, default=MAX_WORKERS,
+                        help=f'Parallel workers (default: {MAX_WORKERS})')
     args = parser.parse_args()
+    MAX_WORKERS = args.workers
+
 
     log.info('=' * 60)
     log.info('HRRR wind render started')
