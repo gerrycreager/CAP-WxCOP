@@ -185,6 +185,41 @@
                 <div class="help-text">Optional notes (deployment details, contact info, etc.)</div>
             </div>
 
+            <div class="form-group" style="border-top:2px solid #e9ecef;padding-top:20px;margin-top:10px;">
+                <label for="host_station">Host Airfield Association</label>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;align-items:end;">
+                    <div>
+                        <div class="help-text" style="margin-bottom:4px;">Host Station ICAO</div>
+                        <input type="text"
+                               id="host_station"
+                               name="host_station"
+                               value="{{ assoc.host_station if assoc else '' }}"
+                               maxlength="4"
+                               placeholder="e.g. KBAK"
+                               style="text-transform:uppercase;">
+                    </div>
+                    <div>
+                        <div class="help-text" style="margin-bottom:4px;">Valid Until (UTC)</div>
+                        <input type="datetime-local"
+                               id="assoc_valid_to"
+                               name="assoc_valid_to"
+                               value="{{ assoc.valid_to.strftime('%Y-%m-%dT%H:%M') if assoc and assoc.valid_to else '' }}">
+                    </div>
+                    <div>
+                        <div class="help-text" style="margin-bottom:4px;">Association Notes</div>
+                        <input type="text"
+                               id="assoc_notes"
+                               name="assoc_notes"
+                               value="{{ assoc.notes if assoc else '' }}"
+                               placeholder="e.g. CAP encampment">
+                    </div>
+                </div>
+                <div class="help-text" style="margin-top:6px;">
+                    If set, clicking this KQ station or the host airfield will show both METAR (from host) and TAF (from this KQ station).
+                    Leave host station blank to remove association.
+                </div>
+            </div>
+
             <div class="btn-group">
                 <button type="submit" class="btn btn-primary">{{ action }} Station</button>
                 <a href="{{ url_for('kq_admin.list_stations') }}" class="btn btn-secondary">Cancel</a>

@@ -127,6 +127,9 @@ def add_station():
             longitude    = float(request.form.get('longitude'))
             elevation_ft = request.form.get('elevation_ft', '').strip()
             notes        = request.form.get('notes', '').strip()
+            host_station = request.form.get('host_station', '').strip().upper() or None
+            assoc_valid_to = request.form.get('assoc_valid_to', '').strip() or None
+            assoc_notes  = request.form.get('assoc_notes', '').strip() or None
 
             elevation_ft = int(elevation_ft) if elevation_ft else None
 
@@ -147,6 +150,28 @@ def add_station():
             """, (station_id, name, latitude, longitude, elevation_ft, notes))
 
             sync_station_to_airports(cur, station_id, 'upsert')
+
+            # Upsert host station association
+            if host_station:
+                from datetime import timezone
+                valid_to_dt = None
+                if assoc_valid_to:
+                    from datetime import datetime
+                    valid_to_dt = datetime.fromisoformat(assoc_valid_to).replace(tzinfo=timezone.utc)
+                cur.execute("""
+                    INSERT INTO observations.kq_associations
+                        (kq_station, host_station, valid_from, valid_to, notes)
+                    VALUES (%s, %s, NOW(), %s, %s)
+                    ON CONFLICT (kq_station, host_station, valid_from) DO NOTHING
+                """, (station_id, host_station, valid_to_dt, assoc_notes))
+            else:
+                # Remove any existing active association if host cleared
+                cur.execute("""
+                    DELETE FROM observations.kq_associations
+                    WHERE kq_station = %s
+                      AND (valid_to IS NULL OR valid_to >= NOW())
+                """, (station_id,))
+
             conn.commit()
             cur.close()
             conn.close()
@@ -157,7 +182,7 @@ def add_station():
         except Exception as e:
             flash(f'Error adding station: {e}', 'error')
 
-    return render_template('kq_station_form.html', station=None, action='Add')
+    return render_template('kq_station_form.html', station=None, assoc=None, action='Add')
 
 
 @kq_admin.route('/edit/<station_id>', methods=['GET', 'POST'])
@@ -171,6 +196,9 @@ def edit_station(station_id):
             longitude    = float(request.form.get('longitude'))
             elevation_ft = request.form.get('elevation_ft', '').strip()
             notes        = request.form.get('notes', '').strip()
+            host_station = request.form.get('host_station', '').strip().upper() or None
+            assoc_valid_to = request.form.get('assoc_valid_to', '').strip() or None
+            assoc_notes  = request.form.get('assoc_notes', '').strip() or None
 
             elevation_ft = int(elevation_ft) if elevation_ft else None
 
@@ -185,6 +213,32 @@ def edit_station(station_id):
             """, (name, latitude, longitude, elevation_ft, notes, station_id))
 
             sync_station_to_airports(cur, station_id, 'upsert')
+
+            # Update host station association
+            if host_station:
+                from datetime import datetime, timezone
+                valid_to_dt = None
+                if assoc_valid_to:
+                    valid_to_dt = datetime.fromisoformat(assoc_valid_to).replace(tzinfo=timezone.utc)
+                # Replace any existing active association
+                cur.execute("""
+                    DELETE FROM observations.kq_associations
+                    WHERE kq_station = %s
+                      AND (valid_to IS NULL OR valid_to >= NOW())
+                """, (station_id,))
+                cur.execute("""
+                    INSERT INTO observations.kq_associations
+                        (kq_station, host_station, valid_from, valid_to, notes)
+                    VALUES (%s, %s, NOW(), %s, %s)
+                """, (station_id, host_station, valid_to_dt, assoc_notes))
+            else:
+                # Clear association if host field is blank
+                cur.execute("""
+                    DELETE FROM observations.kq_associations
+                    WHERE kq_station = %s
+                      AND (valid_to IS NULL OR valid_to >= NOW())
+                """, (station_id,))
+
             conn.commit()
             cur.close()
             conn.close()
@@ -216,10 +270,27 @@ def edit_station(station_id):
             'active':      row[6],
         } if row else None
 
+        # Load active association if any
+        cur.execute("""
+            SELECT host_station, valid_to, notes
+            FROM observations.kq_associations
+            WHERE kq_station = %s
+              AND valid_from <= NOW()
+              AND (valid_to IS NULL OR valid_to >= NOW())
+            ORDER BY valid_from DESC LIMIT 1
+        """, (station_id,))
+        assoc_row = cur.fetchone()
+        assoc = {
+            'host_station': assoc_row[0],
+            'valid_to':     assoc_row[1],
+            'notes':        assoc_row[2],
+        } if assoc_row else None
+
         cur.close()
         conn.close()
 
-        return render_template('kq_station_form.html', station=station, action='Edit')
+        return render_template('kq_station_form.html', station=station,
+                               assoc=assoc, action='Edit')
 
     except Exception as e:
         flash(f'Error loading station: {e}', 'error')
