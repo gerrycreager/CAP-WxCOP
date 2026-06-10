@@ -98,8 +98,16 @@
 </head>
 <body>
     <div class="container">
-        <h1>{{ action }} KQ Station</h1>
-        <p class="subtitle">{% if station %}Update station {{ station.station_id }}{% else %}Add a new temporary weather station{% endif %}</p>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+            <div>
+                <h1 style="margin-bottom:4px;">{{ action }} KQ Station</h1>
+                <p class="subtitle" style="margin-bottom:0;">{% if station %}Update station {{ station.station_id }}{% else %}Add a new temporary weather station{% endif %}</p>
+            </div>
+            <div style="display:flex;gap:8px;">
+                <a href="/CAP_WxCOP/" class="btn btn-secondary">🏠 Home</a>
+                <a href="{{ url_for('kq_admin.list_stations') }}" class="btn btn-secondary">↩ Station List</a>
+            </div>
+        </div>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
