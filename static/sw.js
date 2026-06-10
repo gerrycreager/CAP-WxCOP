@@ -5,7 +5,7 @@
  * Everything else: network only.
  */
 
-const CACHE_NAME = 'cap-wxcop-v2';
+const CACHE_NAME = 'cap-wxcop-v3';
 
 // Only cache truly static assets — icons don't change
 const PRECACHE = [
