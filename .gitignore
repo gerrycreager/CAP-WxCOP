@@ -75,3 +75,4 @@ venv/
 static/geojson/
 static/mrms_tiles
 static/radar/
+wwa_ingest_state.txt

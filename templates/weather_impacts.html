@@ -1,5 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
+<!-- PWA -->
+    <link rel="manifest" href="/CAP_WxCOP/static/manifest.json">
+    <meta name="theme-color" content="#1a3a2a">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="WxCOP">
+    <link rel="apple-touch-icon" href="/CAP_WxCOP/static/icons/icon-192x192.png">
+    <script>if('serviceWorker' in navigator){navigator.serviceWorker.register('/CAP_WxCOP/static/sw.js',{scope:'/CAP_WxCOP/'});}</script>
 <head>
     <meta charset="UTF-8">
     <link rel="icon" href="data:,">
@@ -160,6 +168,25 @@
         .cell-RED    { color: #c62828; font-weight: 700; }
         .cell-YELLOW { color: #f57f17; font-weight: 600; }
 
+        /* PDF button */
+        .pdf-btn {
+            padding: 4px 10px; background: #c8a000; color: white; border: none;
+            border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 700;
+            letter-spacing: 0.03em; flex-shrink: 0; white-space: nowrap;
+        }
+        .pdf-btn:hover { background: #e0b800; }
+        .pdf-btn:disabled { background: #888; cursor: wait; }
+        #pdfOverlay {
+            display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.45); z-index: 3000;
+            align-items: center; justify-content: center;
+        }
+        #pdfOverlay.active { display: flex; }
+        #pdfOverlay .po-box {
+            background: white; padding: 24px 40px; border-radius: 8px;
+            font-size: 15px; color: #333; box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+
         /* Loading overlay */
         #loading { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
                    background: white; padding: 20px 40px; border-radius: 8px;
@@ -170,10 +197,13 @@
 <body>
 
 <div id="titleBar">
-    <a href="/" class="tb-home" title="Home">&#127968;</a>
+    <a href="/CAP_WxCOP/" class="tb-home" title="Home">&#127968;</a>
     <span class="tb-title">&#9992; CAP Flight Ops Impacts — CAPR 70-1</span>
     <span class="tb-utc" id="tbUtc"></span>
+    <button class="pdf-btn" id="pdfBtn" onclick="generatePDF()" title="Download PDF report">&#128196; PDF</button>
 </div>
+
+<div id="pdfOverlay"><div class="po-box">&#9881; Generating PDF…</div></div>
 
 <div id="main">
 
@@ -231,6 +261,27 @@
         </div>
 
         <div id="statusBar">Loading…</div>
+
+        <!-- Weather overlays -->
+        <div class="sb-section">
+            <div class="sb-label">Weather Overlays</div>
+            <label class="toggle-row"><input type="checkbox" id="mrmsToggle"> MRMS Composite ⟳</label>
+            <div id="mrmsStatus" style="font-size:10px;color:#888;min-height:12px;"></div>
+            <label class="toggle-row" style="margin-top:4px;"><input type="checkbox" id="glmToggle"> GLM Lightning</label>
+            <div id="glmStatus" style="font-size:10px;color:#888;min-height:12px;"></div>
+        </div>
+
+        <!-- Wind streamlines -->
+        <div class="sb-section">
+            <div class="sb-label">Wind Flow</div>
+            <label class="toggle-row">
+                <input type="checkbox" id="windToggle"> Streamlines (HRRR)
+            </label>
+            <div id="windControls" style="display:none;margin-top:4px;">
+                <select id="windLevelSelect" style="width:100%;font-size:12px;padding:2px;margin-bottom:3px;"></select>
+                <div id="windStatus" style="font-size:10px;color:#888;text-align:center;min-height:14px;"></div>
+            </div>
+        </div>
     </div>
 
     <!-- Map -->
@@ -240,6 +291,8 @@
     <div id="detailPanel">
         <div id="detailHeader">
             <button id="detailClose" onclick="closeDetail()">&#x2715;</button>
+            <button class="pdf-btn" id="detailPdfBtn" onclick="generatePDF()" title="Download PDF for this station"
+                    style="float:right;margin-right:28px;margin-top:2px;">&#128196; PDF</button>
             <div id="detailStation">—</div>
             <div id="detailName">—</div>
         </div>
@@ -271,10 +324,12 @@
 <div id="loading">Loading weather impacts…</div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script>
 // ── Constants ─────────────────────────────────────────────────────────────
-const API_BASE    = '/CAP_WxCOP_DEV/api/weather-impacts';
-const METAR_API   = '/CAP_WxCOP_DEV/api/weather/station';
+const API_BASE    = '/CAP_WxCOP/api/weather-impacts';
+const METAR_API   = '/CAP_WxCOP/api/weather/station';
 const COLOR_HEX   = { GREEN: '#43a047', YELLOW: '#fdd835', RED: '#e53935', UNKNOWN: '#bdbdbd' };
 const COLOR_LABEL = { GREEN: 'Go', YELLOW: 'Caution', RED: 'No-Go', UNKNOWN: 'No Data' };
 const QUICK_HOURS = [1, 3, 6, 9, 12, 18, 24];
@@ -302,55 +357,110 @@ var map, symbolsLayer, labelsLayer, highlightLayer, baseLayers;
 var currentOp      = 'vfr';
 var currentHour    = 1;
 var allData        = [];   // full airport array for current hour
-var selectedStation = null;
+var selectedStation = null; _selectedApt = null;
 var availableHours = [];
 var modelRun       = null;
 var pollTimer      = null;
 
-// ── Map init ──────────────────────────────────────────────────────────────
-function initMap() {
-    map = L.map('map', { center: [39.0, -98.0], zoom: 5, minZoom: 3, maxZoom: 18 });
 
-    baseLayers = {
-        street:    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-                    { attribution: '&copy; OpenStreetMap', maxZoom: 18 }),
-        satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-                    { attribution: '&copy; Esri', maxZoom: 18 }),
-        dark:      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-                    { attribution: '&copy; OSM/CARTO', subdomains: 'abcd', maxZoom: 18 }),
-        topo:      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
-                    { attribution: '&copy; Esri', maxZoom: 18 }),
-    };
-    baseLayers.street.addTo(map);
-    L.control.layers({
-        'Street':    baseLayers.street,
-        'Satellite': baseLayers.satellite,
-        'Dark':      baseLayers.dark,
-        'Topo':      baseLayers.topo,
-    }, {}, { position: 'topright' }).addTo(map);
+        /* ── Web Audio alarm engine ─────────────────────────────────── */
+        var _audioCtx=null, _alarmState=null, _selectedApt=null;
+        function _getAudio(){if(!_audioCtx)_audioCtx=new(window.AudioContext||window.webkitAudioContext)();return _audioCtx;}
+        function _beep(freq,dur,t0,ctx){var o=ctx.createOscillator(),g=ctx.createGain();o.connect(g);g.connect(ctx.destination);o.frequency.value=freq;o.type='sine';g.gain.setValueAtTime(0,t0);g.gain.linearRampToValueAtTime(0.45,t0+0.01);g.gain.setValueAtTime(0.45,t0+dur-0.02);g.gain.linearRampToValueAtTime(0,t0+dur);o.start(t0);o.stop(t0+dur);}
+        function alarmWatch(){var ctx=_getAudio(),t=ctx.currentTime+0.05;for(var i=0;i<3;i++)_beep(880,0.15,t+i*0.25,ctx);}
+        function alarmWarning(){var ctx=_getAudio(),t=ctx.currentTime+0.05;for(var i=0;i<5;i++)_beep(1047,0.4,t+i*0.55,ctx);var t2=t+5*0.55+0.6;for(var i=0;i<5;i++)_beep(1047,0.4,t2+i*0.55,ctx);}
+        function alarmAllClear(){var ctx=_getAudio(),t=ctx.currentTime+0.05;for(var g=0;g<3;g++){_beep(660,0.2,t+g*0.9,ctx);_beep(660,0.2,t+g*0.9+0.3,ctx);}}
 
-    L.control.scale({ position: 'bottomleft', imperial: true, metric: false }).addTo(map);
+        function _distNM(lat1,lon1,lat2,lon2){
+            var R=3440.065; // Earth radius in NM
+            var dLat=(lat2-lat1)*Math.PI/180;
+            var dLon=(lon2-lon1)*Math.PI/180;
+            var a=Math.sin(dLat/2)*Math.sin(dLat/2)+
+                  Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*
+                  Math.sin(dLon/2)*Math.sin(dLon/2);
+            return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+        }
+        function _toNM(dist,units){
+            if(units==='KM') return dist*0.539957;
+            if(units==='SM') return dist*0.868976;
+            return dist; // NM
+        }
 
-    symbolsLayer   = L.featureGroup().addTo(map);
-    labelsLayer    = L.featureGroup().addTo(map);
-    highlightLayer = L.featureGroup().addTo(map);
+        function _checkAlarmState(features){
+            // Only alarm if a station is selected and has coordinates
+            if(!_selectedApt||!_selectedApt.lat||!_selectedApt.lon) return;
+            var slat=_selectedApt.lat, slon=_selectedApt.lon;
+            var warnR=10, watchR=20; // fixed 10/20 NM for Flight Impacts
+            var hasWarn=false,hasWatch=false,now=Date.now();
+            (features||[]).forEach(function(f){
+                if(!f.properties||!f.properties.flash_time) return;
+                var age=(now-new Date(f.properties.flash_time).getTime())/60000;
+                if(age<0||age>60) return;
+                var lon=f.geometry.coordinates[0],lat=f.geometry.coordinates[1];
+                var d=_distNM(slat,slon,lat,lon);
+                if(age<5  && d<=warnR) hasWarn=true;
+                if(age<15 && d<=watchR) hasWatch=true;
+            });
+            var ns=hasWarn?'warning':hasWatch?'watch':null;
+            if(ns!==_alarmState){
+                if(ns==='warning')    alarmWarning();
+                else if(ns==='watch') alarmWatch();
+                else if(_alarmState!==null) alarmAllClear();
+                _alarmState=ns;
+            }
+        }
 
-    map.on('zoomend moveend', updateMarkers);
-}
+        /* ── GLM Lightning ──────────────────────────────────────────── */
+        var glmLayer=null, glmTimer=null;
+        var GLM_API='/CAP_WxCOP/api/weather-enhanced/glm/flashes';
+        function glmColor(a){return a<5?'#ff3333':a<15?'#ffff00':'#00cc00';}
+        function glmSize(a){return a<5?14:a<15?10:8;}
+        function loadGLM(){
+            fetch(GLM_API+'?minutes=60').then(function(r){return r.json();}).then(function(data){
+                if(glmLayer){map.removeLayer(glmLayer);glmLayer=null;}
+                glmLayer=L.layerGroup();
+                var now=Date.now(),count=0;
+                (data.features||[]).slice().sort(function(a,b){return a.properties.flash_time<b.properties.flash_time?-1:1;}).forEach(function(f){
+                    if(!f.geometry||!f.geometry.coordinates)return;
+                    var lon=f.geometry.coordinates[0],lat=f.geometry.coordinates[1];
+                    var age=(now-new Date(f.properties.flash_time).getTime())/60000;
+                    if(age<0||age>60)return;
+                    var sz=glmSize(age);
+                    L.marker([lat,lon],{icon:L.divIcon({className:'',html:'<div style="width:'+sz+'px;height:'+(sz*1.5)+'px;background:'+glmColor(age)+';clip-path:polygon(50% 0%,100% 38%,65% 38%,95% 100%,5% 100%,35% 38%,0% 38%);filter:drop-shadow(0 0 3px '+glmColor(age)+')"></div>',iconSize:[sz,sz],iconAnchor:[sz/2,sz/2]}),interactive:false,zIndexOffset:age<5?2000:age<15?1000:500}).addTo(glmLayer);
+                    count++;
+                });
+                if(document.getElementById('glmToggle').checked)glmLayer.addTo(map);
+                _checkAlarmState(data.features);
+                var el=document.getElementById('glmStatus');if(el)el.textContent=count+' flashes · '+new Date().toUTCString().slice(17,25)+'Z';
+            }).catch(function(){var el=document.getElementById('glmStatus');if(el)el.textContent='GLM unavailable';});
+        }
 
-// ── Quick-hour buttons ────────────────────────────────────────────────────
-function buildHourBtns() {
-    var el = document.getElementById('hourBtns');
-    el.innerHTML = '';
-    QUICK_HOURS.forEach(function(h) {
-        var btn = document.createElement('button');
-        btn.className = 'hour-btn' + (h === currentHour ? ' active' : '');
-        btn.dataset.hour = h;
-        btn.textContent = 'F' + String(h).padStart(2,'0');
-        btn.addEventListener('click', function() { onHourChange(h); });
-        el.appendChild(btn);
-    });
-}
+        /* ── MRMS Composite live tile ──────────────────────────────────── */
+          var mrmsLayer=null, mrmsTimer=null;
+          var MRMS_INDEX='/CAP_WxCOP/static/mrms_tiles/composite/CONUS/index.json';
+          function loadMRMS(){
+              if(!document.getElementById('mrmsToggle').checked) return;
+              fetch(MRMS_INDEX+'?_='+Date.now())
+                .then(function(r){return r.json();})
+                .then(function(idx){
+                  var frames=idx.frames||[];
+                  if(!frames.length) return;
+                  var frame=frames[frames.length-1];
+                  var tileUrl=frame.tile_url;
+                  if(mrmsLayer){map.removeLayer(mrmsLayer);mrmsLayer=null;}
+                  mrmsLayer=L.tileLayer(tileUrl+'?_='+Date.now(),{
+                      opacity:0.7,tileSize:256,zIndex:410,
+                      attribution:'MRMS © NOAA/NSSL'
+                  });
+                  mrmsLayer.addTo(map);
+                  var el=document.getElementById('mrmsStatus');
+                  if(el) el.textContent=(frame.valid_time||idx.latest)+' UTC';
+                })
+                .catch(function(){
+                  var el=document.getElementById('mrmsStatus');
+                  if(el) el.textContent='MRMS unavailable';
+                });
+          }
 
 function updateHourBtns(h) {
     document.querySelectorAll('.hour-btn').forEach(function(btn) {
@@ -400,6 +510,7 @@ function loadData() {
             updateStatus(data);
             document.getElementById('loading').style.display = 'none';
             if (selectedStation) {
+                _selectedApt = allData.find(function(a){return a.station_id===selectedStation;})||null;
                 var apt = allData.find(function(a) { return a.station_id === selectedStation; });
                 // Don't reload full detail on pan — just update banner if airport in view
             }
@@ -482,6 +593,8 @@ function updateMarkers() {
 // ── Station detail panel ──────────────────────────────────────────────────
 function loadStationDetail(stationId) {
     selectedStation = stationId;
+    // Store apt object for alarm radius filtering
+    _selectedApt = allData.find(function(a){return a.station_id===stationId;})||null;
     document.getElementById('detailStation').textContent = stationId;
     document.getElementById('detailName').textContent = 'Loading…';
     document.getElementById('detailBanner').className = 'banner-UNKNOWN';
@@ -687,6 +800,8 @@ function onHourChange(h) {
     updateHourLabel(h);
     loadData();
     if (selectedStation) loadStationDetail(selectedStation);
+    // Update wind layer forecast hour
+    if (typeof window._windSetFhr === 'function') window._windSetFhr(h);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -746,6 +861,49 @@ function setupControls() {
     tick(); setInterval(tick, 1000);
 })();
 
+function initMap() {
+    map = L.map('map', { center: [39.0, -98.0], zoom: 5, minZoom: 3, maxZoom: 18 });
+
+    baseLayers = {
+        street:    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                    { attribution: '&copy; OpenStreetMap', maxZoom: 18 }),
+        satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                    { attribution: '&copy; Esri', maxZoom: 18 }),
+        dark:      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+                    { attribution: '&copy; OSM/CARTO', subdomains: 'abcd', maxZoom: 18 }),
+        topo:      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
+                    { attribution: '&copy; Esri', maxZoom: 18 }),
+    };
+    baseLayers.street.addTo(map);
+    L.control.layers({
+        'Street':    baseLayers.street,
+        'Satellite': baseLayers.satellite,
+        'Dark':      baseLayers.dark,
+        'Topo':      baseLayers.topo,
+    }, {}, { position: 'topright' }).addTo(map);
+
+    L.control.scale({ position: 'bottomleft', imperial: true, metric: false }).addTo(map);
+
+    symbolsLayer   = L.featureGroup().addTo(map);
+    labelsLayer    = L.featureGroup().addTo(map);
+    highlightLayer = L.featureGroup().addTo(map);
+
+    map.on('zoomend moveend', updateMarkers);
+}
+
+function buildHourBtns() {
+    var el = document.getElementById('hourBtns');
+    el.innerHTML = '';
+    QUICK_HOURS.forEach(function(h) {
+        var btn = document.createElement('button');
+        btn.className = 'hour-btn' + (h === currentHour ? ' active' : '');
+        btn.dataset.hour = h;
+        btn.textContent = 'F' + String(h).padStart(2,'0');
+        btn.addEventListener('click', function() { onHourChange(h); });
+        el.appendChild(btn);
+    });
+}
+
 // ── Boot ──────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function() {
     initMap();
@@ -754,11 +912,484 @@ document.addEventListener('DOMContentLoaded', function() {
     loadData();
     // Auto-refresh every 5 min
     pollTimer = setInterval(function() { loadData(); }, 5 * 60 * 1000);
+    document.getElementById('mrmsToggle').addEventListener('change',function(){
+        if(this.checked){loadMRMS();mrmsTimer=setInterval(loadMRMS,120000);}
+        else{if(mrmsLayer){map.removeLayer(mrmsLayer);mrmsLayer=null;}if(mrmsTimer){clearInterval(mrmsTimer);mrmsTimer=null;}}
+    });
+    document.getElementById('glmToggle').addEventListener('change',function(){
+        if(this.checked){loadGLM();glmTimer=setInterval(loadGLM,60000);}
+        else{if(glmLayer){map.removeLayer(glmLayer);glmLayer=null;}if(glmTimer){clearInterval(glmTimer);glmTimer=null;}}
+    });
 });
+
+// ── PDF Generation ────────────────────────────────────────────────────────
+async function generatePDF() {
+    var overlay = document.getElementById('pdfOverlay');
+    var pdfBtn  = document.getElementById('pdfBtn');
+    var detBtn  = document.getElementById('detailPdfBtn');
+
+    overlay.classList.add('active');
+    pdfBtn.disabled = true;
+    if (detBtn) detBtn.disabled = true;
+
+    try {
+        var { jsPDF } = window.jspdf;
+        // Landscape letter: 279 x 216 mm, 10 mm margins
+        var PW = 279, PH = 216, M = 10;
+        var usableW = PW - 2 * M;
+
+        var doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'letter' });
+
+        // Shared helpers
+        function pad2(n) { return String(n).padStart(2, '0'); }
+        var now   = new Date();
+        var utcTs = now.getUTCFullYear() + '-' + pad2(now.getUTCMonth()+1) + '-' +
+                    pad2(now.getUTCDate()) + ' ' + pad2(now.getUTCHours()) + ':' +
+                    pad2(now.getUTCMinutes()) + 'Z';
+        var opLabel   = currentOp === 'ifr' ? 'IFR Fixed Wing' : 'VFR Fixed Wing';
+        var hourLabel = document.getElementById('hourLabel').textContent ||
+                        ('F+' + pad2(currentHour));
+
+        function drawPageHeader(d, pageNum, stationId) {
+            d.setFontSize(14); d.setFont(undefined,'bold'); d.setTextColor(0,0,0);
+            d.text('CAP Flight Ops Impacts \u2014 CAPR 70-1', M, M+6);
+            d.setFontSize(9); d.setFont(undefined,'normal');
+            var meta = 'Generated: ' + utcTs +
+                       '   Operation: ' + opLabel +
+                       '   Forecast Hour: ' + hourLabel +
+                       (modelRun ? '   Model Run: ' + fmtTime(modelRun) + 'Z' : '');
+            if (stationId) meta += '   Station: ' + stationId;
+            d.text(meta, M, M+11);
+            d.setDrawColor(44,95,65); d.setLineWidth(0.5);
+            d.line(M, M+14, PW-M, M+14);
+            if (pageNum) {
+                d.setFontSize(7); d.setTextColor(150,150,150);
+                d.text('Page ' + pageNum, PW-M, M+6, { align:'right' });
+                d.setTextColor(0,0,0);
+            }
+            return M + 18;
+        }
+
+        function drawPageFooter(d) {
+            d.setFontSize(7); d.setTextColor(150,150,150);
+            d.text('Civil Air Patrol \u2014 WxCOP \u2014 CAPR 70-1 Flight Ops Impacts \u2014 ' + utcTs,
+                   PW/2, PH-4, { align:'center' });
+            d.setTextColor(0,0,0);
+        }
+
+        // ── Page 1: Map ────────────────────────────────────────────────────
+        var yPos = drawPageHeader(doc, selectedStation ? 1 : null, null);
+
+        var mapEl     = document.getElementById('map');
+        var mapCanvas = await html2canvas(mapEl, {
+            useCORS: true, allowTaint: true, logging: false, scale: 1.5
+        });
+        var mapImgData = mapCanvas.toDataURL('image/jpeg', 0.85);
+
+        var mapW = usableW;
+        var mapH = Math.round(mapW * mapEl.offsetHeight / mapEl.offsetWidth);
+        mapH = Math.min(mapH, PH - yPos - M - 8);
+        doc.addImage(mapImgData, 'JPEG', M, yPos, mapW, mapH);
+
+        // Legend strip below map
+        var ly = yPos + mapH + 3;
+        if (ly < PH - M) {
+            var legItems = [
+                { color:[67,160,71],   label:'Go' },
+                { color:[253,216,53],  label:'Caution' },
+                { color:[229,57,53],   label:'No-Go' },
+                { color:[189,189,189], label:'No Data' },
+            ];
+            var lx = M;
+            doc.setFontSize(7);
+            legItems.forEach(function(li) {
+                doc.setFillColor(li.color[0], li.color[1], li.color[2]);
+                doc.circle(lx+2, ly+1.5, 2, 'F');
+                doc.setTextColor(60,60,60);
+                doc.text(li.label, lx+5.5, ly+2.5);
+                lx += 22;
+            });
+            doc.setFontSize(7); doc.setTextColor(150,150,150);
+            doc.text('Source: NOAA GLMP \u00b7 CAPR 70-1 \u00b7 Worst-parameter-wins per airport',
+                     PW-M, ly+2.5, { align:'right' });
+        }
+        drawPageFooter(doc);
+
+        // ── Page 2: Station detail ─────────────────────────────────────────
+        if (selectedStation) {
+            var detResp = await fetch(API_BASE + '/station/' + selectedStation + '?op=' + currentOp);
+            var detData = await detResp.json();
+            var station  = detData.station  || {};
+            var forecast = detData.forecast || [];
+            var curRow   = forecast.find(function(r) { return r.forecast_hour === currentHour; })
+                           || forecast[0];
+
+            doc.addPage();
+            var ry = drawPageHeader(doc, 2, selectedStation);
+
+            // Station name / meta
+            doc.setFontSize(13); doc.setFont(undefined,'bold'); doc.setTextColor(26,58,42);
+            doc.text(selectedStation + (station.name ? ' \u2014 ' + station.name : ''), M, ry+6);
+            doc.setFontSize(8); doc.setFont(undefined,'normal'); doc.setTextColor(80,80,80);
+            var stMeta = [];
+            if (station.is_military) stMeta.push('\u2605 Military');
+            if (station.elevation_ft) stMeta.push(station.elevation_ft + ' ft MSL');
+            if (stMeta.length) doc.text(stMeta.join(' \u00b7 '), M, ry+11);
+            doc.setTextColor(0,0,0);
+            ry += 14;
+
+            // Status banner
+            if (curRow) {
+                var bannerBg = { GREEN:[232,245,233], YELLOW:[255,253,231],
+                                 RED:[255,235,238],   UNKNOWN:[245,245,245] };
+                var bannerTc = { GREEN:[27,94,32],    YELLOW:[180,100,0],
+                                 RED:[183,28,28],     UNKNOWN:[100,100,100] };
+                var bc = bannerBg[curRow.color] || bannerBg.UNKNOWN;
+                var tc = bannerTc[curRow.color] || bannerTc.UNKNOWN;
+                doc.setFillColor(bc[0],bc[1],bc[2]);
+                doc.roundedRect(M, ry, usableW, 9, 1.5, 1.5, 'F');
+                doc.setFontSize(10); doc.setFont(undefined,'bold');
+                doc.setTextColor(tc[0],tc[1],tc[2]);
+                var bannerTxt = COLOR_LABEL[curRow.color] || curRow.color || '\u2014';
+                if (curRow.worst_param) bannerTxt += ' \u2014 ' + (PARAM_LABELS[curRow.worst_param] || curRow.worst_param);
+                if (curRow.valid_time)  bannerTxt += ' \u00b7 Valid ' + fmtTime(curRow.valid_time) + 'Z';
+                doc.text(bannerTxt, M + usableW/2, ry+6.2, { align:'center' });
+                doc.setTextColor(0,0,0);
+                ry += 12;
+            }
+
+            // Parameter grid (4 columns x 2 rows)
+            if (curRow) {
+                var paramDefs = [
+                    { label:'Ceiling',
+                      value: curRow.ceil_display || '\u2014' },
+                    { label:'Visibility',
+                      value: curRow.vis_display  || '\u2014' },
+                    { label:'Wind',
+                      value: (curRow.wind_dir !== null && curRow.wind_speed_kts !== null)
+                             ? curRow.wind_dir + '\u00b0 / ' + curRow.wind_speed_kts.toFixed(0) + ' kt'
+                             : '\u2014' },
+                    { label:'Crosswind',
+                      value: curRow.crosswind_kts !== null
+                             ? curRow.crosswind_kts.toFixed(1) + ' kt' : '\u2014' },
+                    { label:'Temp \u00b0F',
+                      value: curRow.tmp_f !== null ? curRow.tmp_f.toFixed(1) + '\u00b0F' : '\u2014' },
+                    { label:'Heat Index',
+                      value: curRow.heat_index_f !== null ? curRow.heat_index_f.toFixed(1) + '\u00b0F' : '\u2014' },
+                    { label:'Wind Chill',
+                      value: curRow.wind_chill_f !== null ? curRow.wind_chill_f.toFixed(1) + '\u00b0F' : '\u2014' },
+                    { label:'Tstm Prob',
+                      value: (curRow.tstm_prob !== null && curRow.tstm_prob !== undefined)
+                             ? curRow.tstm_prob + '%' : '\u2014' },
+                ];
+                var nCols  = 4;
+                var cellW  = (usableW - (nCols-1)*2) / nCols;
+                var cellH  = 10;
+                var cellGap = 2.5;
+                paramDefs.forEach(function(p, pi) {
+                    var col = pi % nCols;
+                    var row2 = Math.floor(pi / nCols);
+                    var px = M + col * (cellW + 2);
+                    var py = ry + row2 * (cellH + cellGap);
+                    doc.setFillColor(248,248,248);
+                    doc.roundedRect(px, py, cellW, cellH, 1, 1, 'F');
+                    doc.setFontSize(7); doc.setFont(undefined,'normal'); doc.setTextColor(120,120,120);
+                    doc.text(p.label, px + cellW/2, py+3.5, { align:'center' });
+                    doc.setFontSize(9); doc.setFont(undefined,'bold'); doc.setTextColor(40,40,40);
+                    doc.text(p.value, px + cellW/2, py+8.2, { align:'center' });
+                });
+                doc.setTextColor(0,0,0);
+                ry += Math.ceil(paramDefs.length / nCols) * (cellH + cellGap) + 4;
+            }
+
+            // 25-hour forecast table
+            doc.setFontSize(9); doc.setFont(undefined,'bold'); doc.setTextColor(44,95,65);
+            doc.text('25-Hour Forecast', M, ry+4);
+            ry += 7;
+            doc.setTextColor(0,0,0);
+
+            var tCols = [
+                { label:'Hr',         w:12 },
+                { label:'Valid Z',    w:20 },
+                { label:'Status',     w:28 },
+                { label:'Ceiling',    w:24 },
+                { label:'Vis',        w:20 },
+                { label:'Wind',       w:26 },
+                { label:'XWind',      w:20 },
+                { label:'Tmp \u00b0F', w:18 },
+                { label:'Tstm%',      w:16 },
+            ];
+            var tTotalW = tCols.reduce(function(s,c){ return s+c.w; }, 0);
+            var tScale  = usableW / tTotalW;
+            tCols.forEach(function(c){ c.w *= tScale; });
+
+            var rowH = 6;
+            doc.setFillColor(44,95,65);
+            doc.rect(M, ry, usableW, rowH+1, 'F');
+            doc.setFontSize(7.5); doc.setFont(undefined,'bold'); doc.setTextColor(255,255,255);
+            var hx = M;
+            tCols.forEach(function(c) {
+                doc.text(c.label, hx + c.w/2, ry + rowH - 0.5, { align:'center' });
+                hx += c.w;
+            });
+            ry += rowH + 1;
+
+            var statusColors = {
+                GREEN:[67,160,71], YELLOW:[253,216,53],
+                RED:[229,57,53],   UNKNOWN:[189,189,189]
+            };
+            doc.setFont(undefined,'normal'); doc.setFontSize(7.5);
+
+            forecast.forEach(function(fr, idx) {
+                if (ry + rowH > PH - M - 6) return;
+                var isSel = fr.forecast_hour === currentHour;
+                if (isSel) {
+                    doc.setFillColor(232,245,233);
+                    doc.rect(M, ry, usableW, rowH, 'F');
+                } else if (idx % 2 === 0) {
+                    doc.setFillColor(250,250,250);
+                    doc.rect(M, ry, usableW, rowH, 'F');
+                }
+                var windTxt = fr.wind_speed_kts !== null
+                    ? fr.wind_speed_kts.toFixed(0) +
+                      (fr.wind_gust_kts ? 'G'+fr.wind_gust_kts.toFixed(0) : '') + ' kt'
+                    : '\u2014';
+                var cells = [
+                    'F' + pad2(fr.forecast_hour),
+                    fr.valid_time ? fmtTime(fr.valid_time) : '\u2014',
+                    COLOR_LABEL[fr.color] || '\u2014',
+                    fr.ceil_display  || '\u2014',
+                    fr.vis_display   || '\u2014',
+                    windTxt,
+                    fr.crosswind_kts !== null ? fr.crosswind_kts.toFixed(1)+' kt' : '\u2014',
+                    fr.tmp_f !== null ? fr.tmp_f.toFixed(0)+'\u00b0' : '\u2014',
+                    (fr.tstm_prob !== null && fr.tstm_prob !== undefined) ? fr.tstm_prob+'%' : '\u2014',
+                ];
+                var sc  = statusColors[fr.color] || statusColors.UNKNOWN;
+                var cx3 = M;
+                cells.forEach(function(cell, ci) {
+                    var cw = tCols[ci].w;
+                    if (ci === 2) {
+                        doc.setFillColor(sc[0],sc[1],sc[2]);
+                        doc.circle(cx3+2.5, ry+rowH/2, 1.5, 'F');
+                        doc.setTextColor(0,0,0);
+                        doc.text(cell, cx3+5.5, ry+rowH-1);
+                    } else {
+                        doc.setTextColor(0,0,0);
+                        doc.text(cell, cx3+cw/2, ry+rowH-1, { align:'center' });
+                    }
+                    cx3 += cw;
+                });
+                doc.setDrawColor(220,220,220); doc.setLineWidth(0.1);
+                doc.line(M, ry+rowH, M+usableW, ry+rowH);
+                ry += rowH;
+            });
+
+            drawPageFooter(doc);
+        }
+
+        // Save
+        var fname = 'CAP_FlightOpsImpacts_' +
+            (selectedStation ? selectedStation + '_' : '') +
+            utcTs.replace(/[-: ]/g,'').replace('Z','') + 'Z.pdf';
+        doc.save(fname);
+
+    } catch(err) {
+        console.error('PDF generation failed:', err);
+        alert('PDF generation failed: ' + err.message);
+    } finally {
+        overlay.classList.remove('active');
+        pdfBtn.disabled = false;
+        var detBtn2 = document.getElementById('detailPdfBtn');
+        if (detBtn2) detBtn2.disabled = false;
+    }
+}
 
 window.addEventListener('error', function(e) {
     if (e.message && e.message.includes('message channel closed')) return true;
 });
 </script>
+
+    <!-- Wind streamlines legend -->
+    <div id="windLegend" style="display:none;position:fixed;bottom:10px;right:10px;
+         background:rgba(255,255,255,0.92);border:1px solid #ccc;border-radius:4px;
+         padding:6px 10px;z-index:1001;font-size:11px;font-family:sans-serif;min-width:120px;">
+        <div style="font-weight:700;font-size:11px;margin-bottom:4px;">&#127754; Wind Speed</div>
+        <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgba(100,149,237,0.85);"></span>&lt;5 kt</div>
+        <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgba(50,205,50,0.85);"></span>5–15 kt</div>
+        <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgba(255,215,0,0.85);"></span>15–25 kt</div>
+        <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgba(255,140,0,0.85);"></span>25–35 kt</div>
+        <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgba(220,50,50,0.85);"></span>35–50 kt</div>
+        <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgba(180,0,180,0.85);"></span>&gt;50 kt</div>
+        <div style="margin-top:4px;font-size:10px;color:#666;">HRRR · Forecast</div>
+    </div>
+
+    <script>
+    // Expose map as window._capMap for wind layer
+    document.addEventListener('DOMContentLoaded', function() {
+        if (typeof map !== 'undefined') window._capMap = map;
+        // Fallback: poll until map is defined
+        var _poll = setInterval(function() {
+            if (typeof map !== 'undefined') {
+                window._capMap = map;
+                clearInterval(_poll);
+            }
+        }, 200);
+    });
+
+    // ── HRRR Wind Streamlines ─────────────────────────────────────────────
+    (function() {
+        'use strict';
+        var WIND_API = '/CAP_WxCOP/api/winds/hrrr';
+        var LEVELS = [
+            { key:'SFC',  label:'Surface (10m AGL)' },
+            { key:'925',  label:'~3,000 ft MSL' },
+            { key:'850',  label:'~6,000 ft MSL' },
+            { key:'700',  label:'~10,000 ft MSL' },
+            { key:'600',  label:'~12,000 ft MSL' },
+            { key:'500',  label:'~18,000 ft MSL' },
+        ];
+        var windLayer   = null;
+        var windLevel   = 'SFC';
+        var windFhr     = 1;
+        var windEnabled = false;
+        var _cache      = {};
+
+        var WindCanvas = L.Layer.extend({
+            initialize: function() { this._data = null; },
+            onAdd: function(map) {
+                this._map    = map;
+                this._canvas = document.createElement('canvas');
+                this._canvas.style.cssText = 'position:absolute;pointer-events:none;opacity:0.82;';
+                map.getPane('overlayPane').appendChild(this._canvas);
+                this._ctx = this._canvas.getContext('2d');
+                map.on('moveend zoomend resize', this._draw, this);
+                this._resize(); if (this._data) this._draw();
+            },
+            onRemove: function(map) {
+                map.off('moveend zoomend resize', this._draw, this);
+                if (this._canvas && this._canvas.parentNode)
+                    this._canvas.parentNode.removeChild(this._canvas);
+            },
+            setData: function(d) { this._data = d; if (this._map) this._draw(); },
+            _resize: function() {
+                var s = this._map.getSize();
+                this._canvas.width = s.x; this._canvas.height = s.y;
+                L.DomUtil.setPosition(this._canvas,
+                    this._map.containerPointToLayerPoint([0,0]));
+            },
+            _draw: function() {
+                if (!this._canvas || !this._data) return;
+                this._resize();
+                var ctx = this._ctx, map = this._map;
+                var s   = map.getSize();
+                ctx.clearRect(0, 0, s.x, s.y);
+                var zoom = map.getZoom();
+                var aLen = Math.max(14, Math.min(32, zoom * 2.8));
+                var bounds = map.getBounds();
+                (this._data.features || []).forEach(function(f) {
+                    var coords = f.geometry.coordinates;
+                    var ll = L.latLng(coords[1], coords[0]);
+                    if (!bounds.contains(ll)) return;
+                    var pt  = map.latLngToContainerPoint(ll);
+                    var p   = f.properties;
+                    var rad = (p.dir + 180) * Math.PI / 180;
+                    var ux  =  Math.sin(rad);
+                    var uy  = -Math.cos(rad);
+                    var x1  = pt.x - ux * aLen * 0.5;
+                    var y1  = pt.y - uy * aLen * 0.5;
+                    var x2  = pt.x + ux * aLen * 0.5;
+                    var y2  = pt.y + uy * aLen * 0.5;
+                    var col = spdColor(p.spd);
+                    ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 1.4;
+                    ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+                    var ha = Math.atan2(y2-y1, x2-x1), hl = aLen * 0.3;
+                    ctx.beginPath(); ctx.moveTo(x2,y2);
+                    ctx.lineTo(x2 - hl*Math.cos(ha-0.45), y2 - hl*Math.sin(ha-0.45));
+                    ctx.lineTo(x2 - hl*Math.cos(ha+0.45), y2 - hl*Math.sin(ha+0.45));
+                    ctx.closePath(); ctx.fill();
+                });
+            }
+        });
+
+        function spdColor(k) {
+            if (k < 5)  return 'rgba(100,149,237,0.85)';
+            if (k < 15) return 'rgba(50,205,50,0.85)';
+            if (k < 25) return 'rgba(255,215,0,0.85)';
+            if (k < 35) return 'rgba(255,140,0,0.85)';
+            if (k < 50) return 'rgba(220,50,50,0.85)';
+            return 'rgba(180,0,180,0.85)';
+        }
+
+        function fetchWind(level, fhr, cb) {
+            // Cap fhr at 18 — HRRR only goes to F018
+            var hrrFhr = Math.min(fhr, 18);
+            var key = level + ':' + hrrFhr;
+            if (_cache[key]) { cb(null, _cache[key]); return; }
+            fetch(WIND_API + '?level=' + level + '&fhr=' + hrrFhr)
+                .then(function(r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+                .then(function(d) { _cache[key] = d; cb(null, d); })
+                .catch(function(e) { cb(e); });
+        }
+
+        function setStatus(msg) {
+            var el = document.getElementById('windStatus');
+            if (el) el.textContent = msg;
+        }
+
+        function loadWind() {
+            var map = window._capMap;
+            if (!map || !windEnabled) return;
+            setStatus('Loading…');
+            fetchWind(windLevel, windFhr, function(err, data) {
+                if (err) { setStatus('Unavailable'); return; }
+                if (!windLayer) { windLayer = new WindCanvas(); windLayer.addTo(map); }
+                windLayer.setData(data);
+                var m = data.metadata || {};
+                var fhrDisp = windFhr > 18 ? 'F+' + String(windFhr).padStart(2,'0') + ' (HRRR F18)' :
+                                             'F+' + String(m.fhr || windFhr).padStart(2,'0');
+                setStatus(m.cycle ? m.cycle + ' ' + fhrDisp : fhrDisp);
+                document.getElementById('windLegend').style.display = 'block';
+            });
+        }
+
+        function removeWind() {
+            var map = window._capMap;
+            if (windLayer && map) { map.removeLayer(windLayer); windLayer = null; }
+            setStatus('');
+            document.getElementById('windLegend').style.display = 'none';
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            var sel = document.getElementById('windLevelSelect');
+            if (sel) {
+                LEVELS.forEach(function(lv) {
+                    var o = document.createElement('option');
+                    o.value = lv.key; o.textContent = lv.label;
+                    sel.appendChild(o);
+                });
+                sel.addEventListener('change', function() {
+                    windLevel = this.value; _cache = {};
+                    if (windEnabled) loadWind();
+                });
+            }
+            var tog = document.getElementById('windToggle');
+            if (tog) {
+                tog.addEventListener('change', function() {
+                    windEnabled = this.checked;
+                    document.getElementById('windControls').style.display =
+                        windEnabled ? 'block' : 'none';
+                    if (windEnabled) loadWind(); else removeWind();
+                });
+            }
+        });
+
+        window._windSetFhr = function(fhr) {
+            windFhr = fhr; _cache = {};
+            if (windEnabled) loadWind();
+        };
+    })();
+    </script>
+
 </body>
 </html>
