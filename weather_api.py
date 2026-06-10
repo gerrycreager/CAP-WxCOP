@@ -255,13 +255,41 @@ def get_station_detail(station_id):
     """Get detailed weather information for a specific station"""
     try:
         station_id = station_id.upper()
-        
+
         conn = get_connection()
         cur = conn.cursor()
-        
+
+        # ── KQ association lookup ──────────────────────────────────────────
+        # Check if this station is part of an active KQ association.
+        # KQ stations have no METAR — fetch METAR from host, TAF from KQ.
+        # Host stations should also show the KQ TAF when association is active.
+        metar_station = station_id   # station to fetch METAR from
+        taf_station   = station_id   # station to fetch TAF from
+        kq_assoc      = None
+
+        cur.execute("""
+            SELECT kq_station, host_station, notes
+            FROM observations.kq_associations
+            WHERE (kq_station = %s OR host_station = %s)
+              AND valid_from <= NOW()
+              AND (valid_to IS NULL OR valid_to >= NOW())
+            ORDER BY valid_from DESC
+            LIMIT 1
+        """, (station_id, station_id))
+        assoc_row = cur.fetchone()
+        if assoc_row:
+            kq_station_id, host_station_id, assoc_notes = assoc_row
+            kq_assoc = {
+                'kq_station':   kq_station_id,
+                'host_station': host_station_id,
+                'notes':        assoc_notes
+            }
+            metar_station = host_station_id   # always get METAR from host
+            taf_station   = kq_station_id     # always get TAF from KQ
+
         # Get recent METARs for this station (last 6 hours)
         cur.execute("""
-            SELECT 
+            SELECT
                 m.station_id,
                 ST_Y(m.location) as latitude,
                 ST_X(m.location) as longitude,
@@ -293,14 +321,61 @@ def get_station_detail(station_id):
               AND m.observation_time >= NOW() - INTERVAL '6 hours'
             ORDER BY m.observation_time DESC
             LIMIT 10
-        """, (station_id,))
+        """, (metar_station,))
         
         metar_rows = cur.fetchall()
-        
-        if not metar_rows:
-            cur.close()
-            conn.close()
-            return jsonify({'error': f'No recent data found for station {station_id}'}), 404
+
+        if not metar_rows and not kq_assoc:
+            # Check if this is a KQ station — always show even without METAR
+            cur.execute("""
+                SELECT station_id, name, is_military,
+                       ST_Y(location::geometry) AS lat,
+                       ST_X(location::geometry) AS lon,
+                       elevation_ft
+                FROM observations.airports
+                WHERE station_id = %s AND (station_id LIKE 'KQ%%' OR is_military = true)
+            """, (station_id,))
+            apt_row = cur.fetchone()
+            if not apt_row:
+                cur.close()
+                conn.close()
+                return jsonify({'error': f'No recent data found for station {station_id}'}), 404
+            # KQ/military station with no METAR — return airport info only
+            # Still fetch TAF
+            taf_data = None
+            cur.execute("""
+                SELECT raw_text, valid_from, valid_to, issue_time
+                FROM observations.taf
+                WHERE station_id = %s AND valid_to >= NOW()
+                ORDER BY issue_time DESC LIMIT 1
+            """, (taf_station,))
+            taf_row = cur.fetchone()
+            if taf_row:
+                taf_data = {
+                    'raw_text':   taf_row[0],
+                    'valid_from': taf_row[1].strftime('%Y-%m-%dT%H:%M:%SZ') if taf_row[1] else None,
+                    'valid_to':   taf_row[2].strftime('%Y-%m-%dT%H:%M:%SZ') if taf_row[2] else None,
+                    'issue_time': taf_row[3].strftime('%Y-%m-%dT%H:%M:%SZ') if taf_row[3] else None,
+                    'station_id': taf_station,
+                }
+            cur.close(); conn.close()
+            return jsonify({
+                'station': {
+                    'station_id':  apt_row[0],
+                    'airport_name': apt_row[1],
+                    'is_military': True,
+                    'latitude':    float(apt_row[3]) if apt_row[3] else None,
+                    'longitude':   float(apt_row[4]) if apt_row[4] else None,
+                    'elevation_ft': apt_row[5],
+                    'airport_type': 'military',
+                },
+                'metars': [],
+                'taf': taf_data,
+                'kq_association': kq_assoc,
+                'metar_count': 0,
+                'metar_note': f'No METAR — KQ station. METAR would be from {metar_station}.' if kq_assoc else 'No recent METAR.',
+                'query_time': datetime.utcnow().isoformat()
+            })
         
         # Get TAF data if available
         taf_data = None
@@ -312,7 +387,7 @@ def get_station_detail(station_id):
                   AND valid_to >= NOW()
                 ORDER BY issue_time DESC
                 LIMIT 1
-            """, (station_id,))
+            """, (taf_station,))
             
             taf_row = cur.fetchone()
             if taf_row:
@@ -383,10 +458,19 @@ def get_station_detail(station_id):
         cur.close()
         conn.close()
         
+        # Tag TAF with source station if different from requested
+        if taf_data and taf_station != station_id:
+            taf_data['station_id'] = taf_station
+
+        # Force is_military=True for KQ stations
+        if station_info and (station_id.startswith('KQ') or kq_assoc):
+            station_info['is_military'] = True
+
         return jsonify({
             'station': station_info,
             'metars': metars,
             'taf': taf_data,
+            'kq_association': kq_assoc,
             'metar_count': len(metars),
             'query_time': datetime.utcnow().isoformat()
         })

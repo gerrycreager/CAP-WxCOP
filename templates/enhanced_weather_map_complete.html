@@ -1044,17 +1044,20 @@
             marker.bindTooltip(airport.station_id + ' — No METAR',
                 { permanent: false, direction: 'top', offset: [0, -8] });
             marker.on('click', function() {
-                var badge = airport.is_military
-                    ? ' <span style="background:rgba(200,30,30,0.9);color:white;' +
-                      'padding:1px 5px;border-radius:2px;font-size:10px;font-weight:700;">MIL</span>' : '';
-                L.popup().setLatLng([lat, lon]).setContent(
-                    '<div style="font-family:monospace;min-width:260px;">' +
-                    '<h3>' + airport.station_id + badge + '</h3>' +
-                    '<p style="font-weight:bold;">' + (airport.airport_name || airport.station_id) + '</p>' +
-                    '<hr style="margin:0.4rem 0;">' +
-                    '<p style="color:#888;">No METAR in past 2 hours</p>' +
-                    '<p>Longest runway: ' + rnwy + '</p></div>'
-                ).openOn(map);
+                // Military/KQ no-METAR markers: try API for TAF/association data
+                if (airport.is_military) {
+                    showStationPopup(airport);
+                } else {
+                    var badge = '';
+                    L.popup().setLatLng([lat, lon]).setContent(
+                        '<div style="font-family:monospace;min-width:260px;">' +
+                        '<h3>' + airport.station_id + badge + '</h3>' +
+                        '<p style="font-weight:bold;">' + (airport.airport_name || airport.station_id) + '</p>' +
+                        '<hr style="margin:0.4rem 0;">' +
+                        '<p style="color:#888;">No METAR in past 2 hours</p>' +
+                        '<p>Longest runway: ' + rnwy + '</p></div>'
+                    ).openOn(map);
+                }
             });
             marker._noMetarMilitary = !!airport.is_military;
             noMetarMarkers.push(marker);
@@ -1129,8 +1132,21 @@
                               return s.cover + (s.height_ft ? ' ' + s.height_ft + 'ft' : '');
                           }).join(', ')
                         : 'Clear';
+                    var kqAssoc = md.kq_association || null;
+                    var kqNote = '';
+                    if (kqAssoc) {
+                        kqNote = '<div style="background:#1a3a5c;color:#7ec8e3;padding:4px 8px;' +
+                            'border-radius:3px;font-size:10px;margin-bottom:4px;">' +
+                            '&#9733; KQ Association: ' + kqAssoc.kq_station + ' ↔ ' + kqAssoc.host_station +
+                            (kqAssoc.notes ? ' — ' + kqAssoc.notes : '') + '</div>';
+                    }
+                    var metar_note = md.metar_note || '';
+                    var metarNoteHtml = (metar_note && !md.metars.length)
+                        ? '<p style="color:#aaa;font-size:10px;">' + metar_note + '</p>' : '';
+                    var tafSource = (taf && taf.station_id && taf.station_id !== (md.station && md.station.station_id))
+                        ? ' <span style="color:#7ec8e3;font-size:10px;">(via ' + taf.station_id + ')</span>' : '';
                     var tafText  = (taf && taf.raw_text)
-                        ? '<hr><h4>TAF</h4><div style="background:#f5f5f5;padding:8px;border-radius:4px;font-size:12px;font-family:monospace;white-space:pre-wrap;line-height:1.6;max-height:200px;overflow-y:auto;">' + formatTAF(taf.raw_text) + '</div>'
+                        ? '<hr><h4>TAF' + tafSource + '</h4><div style="background:#f5f5f5;padding:8px;border-radius:4px;font-size:12px;font-family:monospace;white-space:pre-wrap;line-height:1.6;max-height:200px;overflow-y:auto;">' + formatTAF(taf.raw_text) + '</div>'
                         : '';
                     L.popup()
                         .setLatLng([metar.latitude, metar.longitude])
@@ -1153,7 +1169,7 @@
                                 var hh = String(dt.getUTCHours()).padStart(2,'0');
                                 var mm = String(dt.getUTCMinutes()).padStart(2,'0');
                                 return dd+' '+mo+' '+hh+mm+'Z';
-                            })(obs.observation_time) + '</p>' + tafText + '</div>'
+                            })(obs.observation_time) + '</p>' + metarNoteHtml + kqNote + tafText + '</div>'
                         ).openOn(map);
                 })
                 .catch(function(error) {
