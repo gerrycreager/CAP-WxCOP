@@ -14,12 +14,12 @@ Sources (tried in order):
     1. NOMADS: https://nomads.ncep.noaa.gov/pub/data/nccf/com/nam/prod/
     2. AWS S3:  https://noaa-nam-pds.s3.amazonaws.com/
 
-Output:
-    /LDM/models/nam/ak/    nam.tHHz.awak3d{FH}.tm00.grib2
-    /LDM/models/nam/hi/    nam.tHHz.afwahi{FH}.tm00.grib2
-    /LDM/models/nam/carib/ nam.tHHz.afwaca{FH}.tm00.grib2
+Output (date-subdirectory layout):
+    /LDM/models/nam/ak/YYYYMMDD/    nam.tHHz.awak3d{FH}.tm00.grib2
+    /LDM/models/nam/hi/YYYYMMDD/    nam.tHHz.afwahi{FH}.tm00.grib2
+    /LDM/models/nam/carib/YYYYMMDD/ nam.tHHz.afwaca{FH}.tm00.grib2
 
-Scour: files older than RETAIN_DAYS are removed on each run.
+Scour: date subdirs older than RETAIN_DAYS are removed on each run.
 
 Usage:
     fetch_nam_oconus.py --cycle HH        # fetch specific cycle (00/06/12/18)
@@ -38,7 +38,6 @@ import sys
 import argparse
 import logging
 import time
-import hashlib
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -55,7 +54,7 @@ SOURCES = [NOMADS_BASE, S3_BASE]
 
 OUTPUT_BASE = Path('/LDM/models/nam')
 
-RETAIN_DAYS = 3       # scour files older than this many days
+RETAIN_DAYS = 3       # scour date subdirs older than this many days
 TIMEOUT_SEC = 120     # per-file download timeout
 RETRY_COUNT = 3       # retries per source before trying next source
 RETRY_DELAY = 10      # seconds between retries
@@ -66,8 +65,6 @@ HEADERS = {
 }
 
 # Domain definitions
-# name       → (template, max_fh, output_subdir)
-# template   → Python format string; {cycle} = HH, {fh:02d} = forecast hour
 DOMAINS = {
     'ak': {
         'template':  'nam.t{cycle}z.awak3d{fh:02d}.tm00.grib2',
@@ -138,7 +135,7 @@ def download_file(url: str, dest: Path, dry_run: bool = False) -> bool:
     Returns True on success.
     """
     if dry_run:
-        log.info(f'DRY-RUN: would fetch {url} → {dest.name}')
+        log.info(f'DRY-RUN: would fetch {url} -> {dest.name}')
         return True
 
     tmp = dest.with_suffix('.tmp')
@@ -146,7 +143,7 @@ def download_file(url: str, dest: Path, dry_run: bool = False) -> bool:
         with requests.get(url, headers=HEADERS, timeout=TIMEOUT_SEC,
                           stream=True) as r:
             if r.status_code == 404:
-                return False   # file doesn't exist — not an error
+                return False   # file doesn't exist -- not an error
             r.raise_for_status()
             with open(tmp, 'wb') as f:
                 for chunk in r.iter_content(chunk_size=1 << 20):  # 1 MB
@@ -196,16 +193,19 @@ def fetch_with_failover(date: str, filename: str, dest: Path,
 # Scour
 # ---------------------------------------------------------------------------
 
-def scour_old_files(subdir: Path, retain_days: int = RETAIN_DAYS):
-    """Remove grib2 files older than retain_days."""
-    cutoff = time.time() - retain_days * 86400
+def scour_old_dirs(domain_dir: Path, retain_days: int = RETAIN_DAYS):
+    """Remove date subdirectories older than retain_days."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=retain_days)
+    cutoff_str = cutoff.strftime('%Y%m%d')
     removed = 0
-    for f in subdir.glob('*.grib2'):
-        if f.stat().st_mtime < cutoff:
-            f.unlink()
+    for d in sorted(domain_dir.glob('[0-9]' * 8)):
+        if d.is_dir() and d.name < cutoff_str:
+            import shutil
+            shutil.rmtree(d)
             removed += 1
+            log.info(f'Scoured old dir: {d}')
     if removed:
-        log.info(f'Scoured {removed} old files from {subdir}')
+        log.info(f'Scoured {removed} old date dirs from {domain_dir}')
 
 # ---------------------------------------------------------------------------
 # Main fetch logic
@@ -217,12 +217,13 @@ def fetch_domain(domain_key: str, cycle: str, dt: datetime,
     Fetch all forecast hours for one domain/cycle.
     Returns stats dict.
     """
-    cfg     = DOMAINS[domain_key]
-    subdir  = OUTPUT_BASE / cfg['subdir']
+    cfg    = DOMAINS[domain_key]
+    date   = date_str(dt)
+    # Date-based subdirectory: /LDM/models/nam/ak/20260611/
+    subdir = OUTPUT_BASE / cfg['subdir'] / date
     subdir.mkdir(parents=True, exist_ok=True)
-    date    = date_str(dt)
 
-    fhours  = range(0, cfg['max_fh'] + 1, cfg['step'])
+    fhours = range(0, cfg['max_fh'] + 1, cfg['step'])
     ok = 0; skip = 0; fail = 0
 
     log.info(f'--- {cfg["label"]} cycle {date}/{cycle}Z '
@@ -234,13 +235,14 @@ def fetch_domain(domain_key: str, cycle: str, dt: datetime,
         result   = fetch_with_failover(date, filename, dest, dry_run=dry_run)
         if result:
             if dest.exists() and dest.stat().st_mtime < time.time() - 60:
-                skip += 1   # already existed
+                skip += 1   # already existed before this run
             else:
                 ok += 1
         else:
             fail += 1
 
-    scour_old_files(subdir, RETAIN_DAYS)
+    # Scour old date subdirs for this domain
+    scour_old_dirs(OUTPUT_BASE / cfg['subdir'], RETAIN_DAYS)
     return {'ok': ok, 'skip': skip, 'fail': fail}
 
 # ---------------------------------------------------------------------------
@@ -281,7 +283,7 @@ def main():
 
     total = {'ok': 0, 'skip': 0, 'fail': 0}
     if len(domains) > 1 and not args.dry_run:
-        # Parallel fetch — each domain is independent
+        # Parallel fetch -- each domain is independent
         from concurrent.futures import ThreadPoolExecutor, as_completed
         futures = {}
         with ThreadPoolExecutor(max_workers=len(domains)) as ex:
