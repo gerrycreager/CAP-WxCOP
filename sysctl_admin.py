@@ -78,7 +78,7 @@ COMMANDS = {
         'cmd':     ['reboot'],
         'servers': ['r815', 'data1', 'data2'],
         'danger':  True,
-        'confirm': '⚠ REBOOT {server}? All services will be unavailable for ~2 minutes.',
+        'confirm': '!! REBOOT {server}? All services will be unavailable for ~2 minutes.',
     },
 }
 
@@ -103,6 +103,7 @@ def run_command(server_key, cmd_key):
         # Remote — ssh then sudo
         full_cmd = ['ssh', '-o', 'ConnectTimeout=10',
                     '-o', 'StrictHostKeyChecking=no',
+                    '-i', '/var/www/.ssh/id_ed25519',
                     f"root@{srv['host']}",
                     'sudo'] + cmd_def['cmd']
 
@@ -343,7 +344,7 @@ SYSCTL_TEMPLATE = """<!DOCTYPE html>
     function execCmd(server, command, confirmMsg, isDanger) {
         pending = {server, command};
         document.getElementById('modal-title').textContent =
-            isDanger ? '⚠ Dangerous Action — Confirm' : 'Confirm Action';
+            isDanger ? '!! Dangerous Action - Confirm' : 'Confirm Action';
         document.getElementById('modal-msg').textContent = confirmMsg;
         document.getElementById('modal-ok').className =
             'modal-confirm' + (isDanger ? '' : '');
@@ -351,13 +352,18 @@ SYSCTL_TEMPLATE = """<!DOCTYPE html>
     }
 
     function execAll(command) {
-        var cmd = {{ commands | tojson }};
+        var cmd = {
+            'ldm_restart': {'label': 'Restart LDM',   'servers': ['r815','data1','data2'], 'danger': false},
+            'ldm_stop':    {'label': 'Stop LDM',       'servers': ['r815','data1','data2'], 'danger': true},
+            'ldm_start':   {'label': 'Start LDM',      'servers': ['r815','data1','data2'], 'danger': false},
+            'apache_restart': {'label': 'Restart Apache', 'servers': ['r815'],              'danger': false},
+            'reboot':      {'label': 'Reboot Server',  'servers': ['r815','data1','data2'], 'danger': true}
+        };
         var servers = cmd[command] ? cmd[command].servers : [];
         var label = cmd[command] ? cmd[command].label : command;
-        var msg = 'Execute "' + label + '" on ALL servers: ' +
-                  servers.join(', ') + '?\n\nThis will run sequentially.';
+        var msg = 'Execute "' + label + '" on ALL servers: ' + servers.join(', ') + '?';
         pending = {server: '__all__', command, servers};
-        document.getElementById('modal-title').textContent = '⚠ All Servers — Confirm';
+        document.getElementById('modal-title').textContent = '!! All Servers - Confirm';
         document.getElementById('modal-msg').textContent = msg;
         document.getElementById('modal').classList.add('active');
     }
@@ -368,25 +374,24 @@ SYSCTL_TEMPLATE = """<!DOCTYPE html>
     }
 
     async function doConfirm() {
-        closeModal();
         if (!pending) return;
-
-        if (pending.server === '__all__') {
-            for (var srv of pending.servers) {
-                await sendCmd(srv, pending.command);
-                // Small delay between servers for reboot safety
-                if (pending.command === 'reboot') {
+        var p = pending;
+        pending = null;
+        closeModal();
+        log('doConfirm fired: server=' + (p.server||'?') + ' cmd=' + (p.command||'?'), 'console-info');
+        if (p.server === '__all__') {
+            for (var srv of p.servers) {
+                await sendCmd(srv, p.command);
+                if (p.command === 'reboot') {
                     await new Promise(r => setTimeout(r, 3000));
                 }
             }
         } else {
-            await sendCmd(pending.server, pending.command);
+            await sendCmd(p.server, p.command);
         }
-        pending = null;
     }
-
     async function sendCmd(server, command) {
-        log('Sending: ' + command + ' → ' + server + '...', 'console-info');
+        log('Sending: ' + command + ' -> ' + server + '...', 'console-info');
         // Disable all buttons during execution
         document.querySelectorAll('.cmd-btn').forEach(b => b.disabled = true);
 
@@ -398,20 +403,23 @@ SYSCTL_TEMPLATE = """<!DOCTYPE html>
             });
             var data = await resp.json();
             if (data.success) {
-                log('✓ ' + server + ' — ' + command + ': ' + data.output);
+                log('OK: ' + server + ' - ' + command + ': ' + data.output);
             } else {
-                log('✗ ' + server + ' — ' + command + ': ' + data.output, 'console-err');
+                log('FAIL: ' + server + ' - ' + command + ': ' + data.output, 'console-err');
             }
         } catch (e) {
-            log('✗ Network error: ' + e.message, 'console-err');
+            log('FAIL Network error: ' + e.message, 'console-err');
         } finally {
             document.querySelectorAll('.cmd-btn').forEach(b => b.disabled = false);
         }
     }
 
-    // Close modal on overlay click
+    // Close modal on overlay click (but not when clicking inside modal)
     document.getElementById('modal').addEventListener('click', function(e) {
         if (e.target === this) closeModal();
+    });
+    document.querySelector('.modal').addEventListener('click', function(e) {
+        e.stopPropagation();
     });
     </script>
 </body>
