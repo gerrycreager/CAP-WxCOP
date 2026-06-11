@@ -378,7 +378,6 @@ SYSCTL_TEMPLATE = """<!DOCTYPE html>
         var p = pending;
         pending = null;
         closeModal();
-        log('doConfirm fired: server=' + (p.server||'?') + ' cmd=' + (p.command||'?'), 'console-info');
         if (p.server === '__all__') {
             for (var srv of p.servers) {
                 await sendCmd(srv, p.command);
