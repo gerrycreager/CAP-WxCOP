@@ -60,6 +60,9 @@ try:
     from auth import auth as auth_blueprint
     app.register_blueprint(auth_blueprint)
     print("✓ Auth registered at /CAP_WxCOP/auth")
+    from sysctl_admin import sysctl_admin
+    app.register_blueprint(sysctl_admin, url_prefix='')
+    print("✓ Sysctl admin registered at /CAP_WxCOP/sysctl")
 except Exception as e:
     print(f"❌ CRITICAL: Could not load Auth module: {e}")
 
