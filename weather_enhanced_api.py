@@ -50,13 +50,20 @@ def get_recent_metar_enhanced():
         except (ValueError, TypeError):
             return jsonify({'error': 'Invalid bounds format. Expected: west,south,east,north'}), 400
         
-        # Validate bounds
-        if not (-180 <= west <= 180 and -180 <= east <= 180 and 
-                -90 <= south <= 90 and -90 <= north <= 90):
-            return jsonify({'error': 'Bounds out of valid range'}), 400
-            
-        if west >= east or south >= north:
-            return jsonify({'error': 'Invalid bounds: west >= east or south >= north'}), 400
+        # Clamp lat to valid range
+        south = max(-90.0, min(90.0, south))
+        north = max(-90.0, min(90.0, north))
+        if south >= north:
+            return jsonify({'error': 'Invalid bounds: south >= north'}), 400
+
+        # Normalize longitude to [-180, 180]
+        # Leaflet reports e.g. -209 when panned west past antimeridian
+        while west < -180.0: west += 360.0
+        while west >  180.0: west -= 360.0
+        while east < -180.0: east += 360.0
+        while east >  180.0: east -= 360.0
+        # After normalization, west > east means view crosses antimeridian
+        antimeridian = (west > east)
 
         conn = get_connection()
         cur = conn.cursor()
@@ -100,8 +107,10 @@ def get_recent_metar_enhanced():
                     END as airport_type
                 FROM observations.metar m
                 LEFT JOIN observations.airports a ON m.station_id = a.station_id
-                WHERE ST_Y(m.location::geometry) BETWEEN %s AND %s
-                  AND ST_X(m.location::geometry) BETWEEN %s AND %s
+                WHERE ST_Intersects(
+                        m.location::geometry,
+                        {geom}
+                      )
                   AND m.observation_time >= NOW() - INTERVAL '2 hours'
                   AND m.location IS NOT NULL
                 ORDER BY m.station_id, m.observation_time DESC
@@ -138,7 +147,14 @@ def get_recent_metar_enhanced():
             LIMIT %s
         """
         
-        cur.execute(query, (south, north, west, east, limit))
+        # Build geometry inline in SQL — cannot use %s for PostGIS functions
+        if antimeridian:
+            geom = (f'ST_Union('
+                    f'ST_MakeEnvelope(-180,{south},{east},{north},4326),'
+                    f'ST_MakeEnvelope({west},{south},180,{north},4326))')
+        else:
+            geom = f'ST_MakeEnvelope({west},{south},{east},{north},4326)'
+        cur.execute(query.format(geom=geom), (limit,))
         rows = cur.fetchall()
         
         metars = []
@@ -405,19 +421,23 @@ def get_glm_flashes():
         # Base query — bbox filter optional
         if all(v is not None for v in [min_lat, max_lat, min_lon, max_lon]):
             cur.execute("""
-                SELECT flash_time, lat, lon, energy, satellite
+                SELECT flash_time, lat, lon, flash_energy, satellite
                 FROM observations.glm_flashes
                 WHERE flash_time >= %s
                   AND lat  BETWEEN %s AND %s
                   AND lon  BETWEEN %s AND %s
+                  AND flash_quality_flag = 0
+                  AND flash_energy >= 1e-14
                 ORDER BY flash_time DESC
                 LIMIT 50000
             """, (cutoff, min_lat, max_lat, min_lon, max_lon))
         else:
             cur.execute("""
-                SELECT flash_time, lat, lon, energy, satellite
+                SELECT flash_time, lat, lon, flash_energy, satellite
                 FROM observations.glm_flashes
                 WHERE flash_time >= %s
+                  AND flash_quality_flag = 0
+                  AND flash_energy >= 1e-14
                 ORDER BY flash_time DESC
                 LIMIT 50000
             """, (cutoff,))
@@ -429,7 +449,7 @@ def get_glm_flashes():
         now = datetime.utcnow()
 
         features = []
-        for flash_time, lat, lon, energy, satellite in rows:
+        for flash_time, lat, lon, flash_energy, satellite in rows:
             # Age in minutes (flash_time may be tz-aware)
             ft = flash_time.replace(tzinfo=None) if flash_time.tzinfo else flash_time
             age_min = (now - ft).total_seconds() / 60.0
@@ -452,7 +472,7 @@ def get_glm_flashes():
                     'flash_time': ft.strftime('%Y-%m-%dT%H:%M:%SZ'),
                     'age_min':    round(age_min, 1),
                     'age_bucket': age_bucket,   # 0=red,1=yellow,2=green
-                    'energy':     float(energy) if energy else None,
+                    'energy':     float(flash_energy) if flash_energy else None,
                     'satellite':  satellite.strip() if satellite else None,
                 }
             })

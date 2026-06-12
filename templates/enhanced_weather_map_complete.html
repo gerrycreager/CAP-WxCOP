@@ -502,7 +502,7 @@
                     <input type="radio" name="radarProduct" id="radarN0B" value="N0B" checked
                            style="accent-color:#2c5f41;"> Reflectivity (N0B)
                 </label>
-                <label style="display:flex;align-items:center;gap:5px;cursor:pointer;">
+                <label id="radarN0HLabel" style="display:flex;align-items:center;gap:5px;cursor:pointer;">
                     <input type="radio" name="radarProduct" id="radarN0H" value="N0H"
                            style="accent-color:#2c5f41;"> Hydrometeor Class (N0H)
                 </label>
@@ -564,6 +564,12 @@
                     <input type="range" id="satOpacity" min="0" max="100" value="75"
                            style="flex:1;accent-color:#4a9c6f;cursor:pointer;">
                     <span id="satOpacityVal" style="font-size:10px;color:#888;min-width:28px;">75%</span>
+                </label>
+            </div>
+            <div style="margin-top:5px;">
+                <label style="font-size:10px;color:#ccc;display:flex;align-items:center;gap:6px;cursor:pointer;">
+                    <input type="checkbox" id="satAnimToggle" style="accent-color:#4a9c6f;">
+                    Animate (last ~60 min)
                 </label>
             </div>
             <div id="satStatus" style="font-size:10px;color:#888;margin-top:3px;"></div>
@@ -727,9 +733,9 @@
         }
 
         function initMap() {
-            map = L.map('map', { zoomControl: true });
+            map = L.map('map', { zoomControl: true, worldCopyJump: true });
             window._capMap = map;  // expose for GLM/MRMS local scope
-            map.fitBounds([[24.0, -125.0], [50.0, -66.0]], {maxZoom: 4});
+            map.setView([38.5, -96.5], 4);
 
 
             baseLayers = {
@@ -762,7 +768,14 @@
 
             // Both filterMarkers and updateLabels run on zoom/pan so markers
             // disappear/appear correctly at tier zoom thresholds.
-            map.on('zoomend moveend', function() { filterMarkers(); updateLabels(); });
+            var _loadTimer = null;
+            map.on('zoomend moveend', function() {
+                filterMarkers();
+                updateLabels();
+                // Reload weather data for new bounds after pan/zoom settles
+                clearTimeout(_loadTimer);
+                _loadTimer = setTimeout(loadWeatherData, 800);
+            });
 
             // Initialize airspace layer toggle handlers now that map exists.
             if (typeof initAirspaceLayers === 'function') initAirspaceLayers();
@@ -1038,17 +1051,20 @@
             marker.bindTooltip(airport.station_id + ' — No METAR',
                 { permanent: false, direction: 'top', offset: [0, -8] });
             marker.on('click', function() {
-                var badge = airport.is_military
-                    ? ' <span style="background:rgba(200,30,30,0.9);color:white;' +
-                      'padding:1px 5px;border-radius:2px;font-size:10px;font-weight:700;">MIL</span>' : '';
-                L.popup().setLatLng([lat, lon]).setContent(
-                    '<div style="font-family:monospace;min-width:260px;">' +
-                    '<h3>' + airport.station_id + badge + '</h3>' +
-                    '<p style="font-weight:bold;">' + (airport.airport_name || airport.station_id) + '</p>' +
-                    '<hr style="margin:0.4rem 0;">' +
-                    '<p style="color:#888;">No METAR in past 2 hours</p>' +
-                    '<p>Longest runway: ' + rnwy + '</p></div>'
-                ).openOn(map);
+                // Military/KQ no-METAR markers: try API for TAF/association data
+                if (airport.is_military) {
+                    showStationPopup(airport);
+                } else {
+                    var badge = '';
+                    L.popup().setLatLng([lat, lon]).setContent(
+                        '<div style="font-family:monospace;min-width:260px;">' +
+                        '<h3>' + airport.station_id + badge + '</h3>' +
+                        '<p style="font-weight:bold;">' + (airport.airport_name || airport.station_id) + '</p>' +
+                        '<hr style="margin:0.4rem 0;">' +
+                        '<p style="color:#888;">No METAR in past 2 hours</p>' +
+                        '<p>Longest runway: ' + rnwy + '</p></div>'
+                    ).openOn(map);
+                }
             });
             marker._noMetarMilitary = !!airport.is_military;
             noMetarMarkers.push(marker);
@@ -1123,8 +1139,21 @@
                               return s.cover + (s.height_ft ? ' ' + s.height_ft + 'ft' : '');
                           }).join(', ')
                         : 'Clear';
+                    var kqAssoc = md.kq_association || null;
+                    var kqNote = '';
+                    if (kqAssoc) {
+                        kqNote = '<div style="background:#1a3a5c;color:#7ec8e3;padding:4px 8px;' +
+                            'border-radius:3px;font-size:10px;margin-bottom:4px;">' +
+                            '&#9733; KQ Association: ' + kqAssoc.kq_station + ' ↔ ' + kqAssoc.host_station +
+                            (kqAssoc.notes ? ' — ' + kqAssoc.notes : '') + '</div>';
+                    }
+                    var metar_note = md.metar_note || '';
+                    var metarNoteHtml = (metar_note && !md.metars.length)
+                        ? '<p style="color:#aaa;font-size:10px;">' + metar_note + '</p>' : '';
+                    var tafSource = (taf && taf.station_id && taf.station_id !== (md.station && md.station.station_id))
+                        ? ' <span style="color:#7ec8e3;font-size:10px;">(via ' + taf.station_id + ')</span>' : '';
                     var tafText  = (taf && taf.raw_text)
-                        ? '<hr><h4>TAF</h4><div style="background:#f5f5f5;padding:8px;border-radius:4px;font-size:12px;font-family:monospace;white-space:pre-wrap;line-height:1.6;max-height:200px;overflow-y:auto;">' + formatTAF(taf.raw_text) + '</div>'
+                        ? '<hr><h4>TAF' + tafSource + '</h4><div style="background:#f5f5f5;padding:8px;border-radius:4px;font-size:12px;font-family:monospace;white-space:pre-wrap;line-height:1.6;max-height:200px;overflow-y:auto;">' + formatTAF(taf.raw_text) + '</div>'
                         : '';
                     L.popup()
                         .setLatLng([metar.latitude, metar.longitude])
@@ -1147,7 +1176,7 @@
                                 var hh = String(dt.getUTCHours()).padStart(2,'0');
                                 var mm = String(dt.getUTCMinutes()).padStart(2,'0');
                                 return dd+' '+mo+' '+hh+mm+'Z';
-                            })(obs.observation_time) + '</p>' + tafText + '</div>'
+                            })(obs.observation_time) + '</p>' + metarNoteHtml + kqNote + tafText + '</div>'
                         ).openOn(map);
                 })
                 .catch(function(error) {
@@ -1300,7 +1329,8 @@
         function loadNoMetarAirports() {
             // Use fixed CONUS bounds to match the METAR fetch — dynamic map bounds
             // at initial zoom 5 may clip airports near the edges of the viewport.
-            var bounds = '-125,24,-66,50';
+            var _b = map.getBounds();
+            var bounds = _b.getWest().toFixed(2)+','+_b.getSouth().toFixed(2)+','+_b.getEast().toFixed(2)+','+_b.getNorth().toFixed(2);
             fetch('/CAP_WxCOP/api/weather/no-metar-airports?bounds=' + bounds + '&limit=5000')
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
@@ -1320,7 +1350,9 @@
         }
 
         function loadWeatherData() {
-            fetch('/CAP_WxCOP/api/weather-enhanced/metar/recent?bounds=-125,24,-66,50&limit=2500')
+            var _mb = map.getBounds();
+            var _mbnds = _mb.getWest().toFixed(2)+','+_mb.getSouth().toFixed(2)+','+_mb.getEast().toFixed(2)+','+_mb.getNorth().toFixed(2);
+            fetch('/CAP_WxCOP/api/weather-enhanced/metar/recent?bounds='+_mbnds+'&limit=2500')
                 .then(function(response) { return response.json(); })
                 .then(function(data) {
                     document.getElementById('loading').style.display = 'none';
@@ -1862,7 +1894,7 @@
             var glmLayer=null, glmRefreshTimer=null;
 
             function glmColor(a){return a<5?'#ff2200':a<15?'#ffee00':'#00ff44';}
-            function glmSize(a){return a<5?22:a<15?17:13;}
+            function glmSize(a){return a<5?14:a<15?10:8;}
 
             function loadGLM(){
                 var m=getMap(); if(!m) return;
@@ -1898,6 +1930,7 @@
                         });
                         if(document.getElementById('glmToggle').checked) glmLayer.addTo(m);
                         if(statusEl) statusEl.textContent=count+' flashes · last '+minutes+' min · '+new Date().toUTCString().slice(17,25)+'Z';
+
                     })
                     .catch(function(e){if(statusEl)statusEl.textContent='GLM load failed';console.warn(e);});
             }
@@ -2313,6 +2346,15 @@
             var nx   = document.getElementById('nexradProducts');
             var tw   = document.getElementById('tdwrProducts');
             var ind  = document.getElementById('radarTypeIndicator');
+            var n0hL = document.getElementById('radarN0HLabel');
+            /* N0H tiles only exist for NIDS WSR-88D — hide otherwise */
+            if (n0hL) n0hL.style.display = (type === 'WSR-88D') ? 'flex' : 'none';
+            /* If switching away from WSR-88D with N0H selected, revert to N0B */
+            if (type !== 'WSR-88D') {
+                var n0h = document.getElementById('radarN0H');
+                var n0b = document.getElementById('radarN0B');
+                if (n0h && n0h.checked && n0b) { n0b.checked = true; }
+            }
             if (nx)  nx.style.display  = (type === 'WSR-88D') ? 'block' : 'none';
             if (tw)  tw.style.display  = (type === 'TDWR')    ? 'block' : 'none';
             if (ind) ind.textContent   = type === 'TDWR'
@@ -2424,6 +2466,11 @@
         }
 
         function hijackTimeline(frames) {
+            /* If satellite animation has the timeline, release it first */
+            if (typeof window.restoreSatTimeline === 'function' &&
+                document.body.classList.contains('sat-active')) {
+                window.restoreSatTimeline();
+            }
             window._nidsFrames = frames;
             if (!_origGoFrame && typeof window.mlGoFrame === 'function') {
                 _origGoFrame = window.mlGoFrame;
@@ -2673,6 +2720,10 @@
 
         /* ---- DOM wiring ---- */
         document.addEventListener('DOMContentLoaded', function() {
+            /* N0H only available at NIDS zoom (Z>=8) — hidden at MRMS startup */
+            var n0hL = document.getElementById('radarN0HLabel');
+            if (n0hL) n0hL.style.display = 'none';
+
             var poll = setInterval(function() {
                 if (!window._capMap) return;
                 clearInterval(poll);
@@ -2710,7 +2761,13 @@
 
             document.querySelectorAll('input[name="radarProduct"]').forEach(function(r) {
                 r.addEventListener('change', function() {
-                    if (isRadarEnabled()) { currentProd = null; updateRadarSource(); }
+                    if (isRadarEnabled()) {
+                        currentProd = null;
+                        updateRadarSource();
+                        if (typeof updateLegendForProduct === 'function') {
+                            updateLegendForProduct(this.value);
+                        }
+                    }
                 });
             });
             document.querySelectorAll('input[name="tdwrProduct"]').forEach(function(r) {
@@ -2725,49 +2782,124 @@
     </script>
 
 
-    <!-- ── GOES Satellite overlay via nowCOAST GeoServer WMS ──────────────── -->
+<!-- ── GOES Satellite overlay via nowCOAST GeoServer WMS ──────────────── -->
     <script>
     (function() {
         'use strict';
         /*
          * nowCOAST GeoServer satellite WMS — GOES-East + GOES-West composited
-         * per channel, updated every 5 minutes. Single layer covers CONUS,
-         * AK, HI, PR, GU. No East/West selection needed.
-         * Endpoint: https://nowcoast.noaa.gov/geoserver/satellite/wms
+         * per channel, updated every 5 minutes.
+         *
+         * Animation: fetch TIME dimension from GetCapabilities, build N frames
+         * of WMS layers with TIME= parameter, hijack the existing MRMS timeline
+         * bar (same pattern as NIDS). Radar is a layer above satellite.
+         *
+         * Layer z-order: satellite(395) < MRMS(410) < NIDS(420)
          */
-        var NOWCOAST_WMS = 'https://nowcoast.noaa.gov/geoserver/satellite/wms';
+
+        /* ── Constants ─────────────────────────────────────────────────────── */
+        var NOWCOAST_WMS   = 'https://nowcoast.noaa.gov/geoserver/satellite/wms';
+        var SAT_CAPS_URL   = NOWCOAST_WMS + '?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetCapabilities';
+        var SAT_FRAMES_MAX = 12;   /* up to 12 frames (~60 min at 5-min intervals) */
+        var SAT_ZINDEX     = 395;
+
         var SAT_LAYERS = {
-            'ir':  'global_longwave_imagery_mosaic',   /* GOES-E/W+GMGSI IR, ~2km */
-            'vis': 'global_visible_imagery_mosaic',    /* GOES-E/W+GMGSI Visible */
-            'wv':  'global_water_vapor_imagery_mosaic' /* GOES-E/W+GMGSI Water Vapor */
+            'ir':  'global_longwave_imagery_mosaic',
+            'vis': 'global_visible_imagery_mosaic',
+            'wv':  'global_water_vapor_imagery_mosaic'
         };
         var SAT_LABELS = {
-            'ir':  'GOES E+W IR',
-            'vis': 'GOES E+W Visible',
-            'wv':  'GOES E+W Water Vapor'
+            'ir':  'GOES IR',
+            'vis': 'GOES Visible',
+            'wv':  'GOES Water Vapor'
         };
-        var satLayer  = null;
 
-        function getMap() { return window._capMap; }
+        /* ── State ──────────────────────────────────────────────────────────── */
+        var satLayer       = null;    /* current single live layer (non-animate mode) */
+        var satFrameLayers = [];      /* preloaded WMS layers for animation */
+        var satFrameTimes  = [];      /* ISO8601 timestamp strings */
+        var satCurrent     = -1;
+        var satPlaying     = false;
+        var satPlayTimer   = null;
+        var satActive      = false;   /* true while timeline is hijacked */
+        var _origSatGoFrame = null;
 
-        function loadSat() {
-            var map = getMap(); if (!map) return;
-            var prod = document.querySelector('input[name="satProduct"]:checked');
-            var key  = prod ? prod.value : 'ir';
-            var statusEl = document.getElementById('satStatus');
-            if (statusEl) statusEl.textContent = 'Loading…';
-            if (satLayer) { map.removeLayer(satLayer); satLayer = null; }
-            satLayer = L.tileLayer.wms(NOWCOAST_WMS, {
-                layers:      SAT_LAYERS[key],
+        function getMap()  { return window._capMap; }
+        function getKey()  {
+            var p = document.querySelector('input[name="satProduct"]:checked');
+            return p ? p.value : 'ir';
+        }
+        function getOpacity() {
+            return (window._satOpacity !== undefined) ? window._satOpacity : 0.75;
+        }
+
+        /* ── GetCapabilities — parse TIME dimension ─────────────────────────── */
+        function fetchSatTimes(layerName, callback) {
+            var xhr = new XMLHttpRequest();
+            xhr.open('GET', SAT_CAPS_URL, true);
+            xhr.timeout = 15000;
+            xhr.onload = function() {
+                if (xhr.status !== 200) { callback(null); return; }
+                try {
+                    var parser = new DOMParser();
+                    var doc    = parser.parseFromString(xhr.responseText, 'text/xml');
+                    /* Find the Layer element with matching Name */
+                    var layers = doc.querySelectorAll('Layer > Name');
+                    var targetLayer = null;
+                    layers.forEach(function(n) {
+                        if (n.textContent.trim() === layerName) {
+                            targetLayer = n.parentElement;
+                        }
+                    });
+                    if (!targetLayer) { callback(null); return; }
+                    /* Get Dimension name="time" */
+                    var dims = targetLayer.querySelectorAll('Dimension');
+                    var timeDim = null;
+                    dims.forEach(function(d) {
+                        if ((d.getAttribute('name') || '').toLowerCase() === 'time') {
+                            timeDim = d;
+                        }
+                    });
+                    if (!timeDim) { callback(null); return; }
+                    /* Time dimension content is comma-separated ISO8601 timestamps */
+                    var raw = timeDim.textContent.trim();
+                    var times = raw.split(',')
+                        .map(function(t) { return t.trim(); })
+                        .filter(function(t) { return t.length > 0; });
+                    callback(times);
+                } catch(e) {
+                    callback(null);
+                }
+            };
+            xhr.onerror   = function() { callback(null); };
+            xhr.ontimeout = function() { callback(null); };
+            xhr.send();
+        }
+
+        /* ── Build a single WMS layer with TIME parameter ──────────────────── */
+        function makeSatLayer(layerName, timeStr, opacity) {
+            var params = {
+                layers:      layerName,
                 format:      'image/png',
                 transparent: true,
-                opacity:     (window._satOpacity !== undefined) ? window._satOpacity : 0.75,
+                opacity:     opacity,
                 version:     '1.3.0',
-                attribution: 'GOES-E/W © NOAA/NESDIS via <a href="https://nowcoast.noaa.gov" target="_blank">nowCOAST</a>',
-                zIndex:      395
-            });
+                zIndex:      SAT_ZINDEX
+            };
+            if (timeStr) params['TIME'] = timeStr;
+            return L.tileLayer.wms(NOWCOAST_WMS, params);
+        }
+
+        /* ── Single-frame (non-animated) load ──────────────────────────────── */
+        function loadSat() {
+            var map = getMap(); if (!map) return;
+            var key = getKey();
+            var statusEl = document.getElementById('satStatus');
+            if (statusEl) statusEl.textContent = 'Loading\u2026';
+            if (satLayer) { map.removeLayer(satLayer); satLayer = null; }
+            satLayer = makeSatLayer(SAT_LAYERS[key], null, getOpacity());
             satLayer.on('load', function() {
-                if (statusEl) statusEl.textContent = SAT_LABELS[key] + ' · updated ~5 min';
+                if (statusEl) statusEl.textContent = SAT_LABELS[key] + ' \u00b7 latest';
             });
             satLayer.on('tileerror', function() {
                 if (statusEl) statusEl.textContent = 'nowCOAST unavailable';
@@ -2782,37 +2914,282 @@
             if (statusEl) statusEl.textContent = '';
         }
 
+        /* ── Animation: go to frame ─────────────────────────────────────────── */
+        function satGoFrame(idx) {
+            var map = getMap(); if (!map || !satFrameLayers.length) return;
+            idx = Math.max(0, Math.min(idx, satFrameLayers.length - 1));
+
+            /* Hide current frame */
+            if (satCurrent >= 0 && satFrameLayers[satCurrent]) {
+                satFrameLayers[satCurrent].setOpacity(0);
+            }
+            /* Show new frame */
+            satFrameLayers[idx].setOpacity(getOpacity());
+            satCurrent = idx;
+            window.mlCurrent = idx;
+
+            /* Update timeline bar */
+            var fd = document.getElementById('mrmsFrameDisplay');
+            if (fd) fd.textContent = (idx + 1) + ' / ' + satFrameLayers.length;
+            var pct = satFrameLayers.length > 1 ? (idx / (satFrameLayers.length - 1)) * 100 : 100;
+            var prog = document.getElementById('mrmsProgress');
+            if (prog) prog.style.width = pct + '%';
+
+            /* Update status with frame timestamp */
+            var ts = satFrameTimes[idx] || '';
+            var statusEl = document.getElementById('satStatus');
+            if (statusEl && ts) {
+                var d = new Date(ts);
+                var hhmm = ('0'+d.getUTCHours()).slice(-2) + ':' + ('0'+d.getUTCMinutes()).slice(-2) + 'Z';
+                statusEl.textContent = SAT_LABELS[getKey()] + ' \u00b7 ' + hhmm;
+            }
+            var lbl = document.getElementById('mrmsLocalLabel');
+            if (lbl && ts) {
+                var d2 = new Date(ts);
+                var hhmmZ = ('0'+d2.getUTCHours()).slice(-2) + ':' + ('0'+d2.getUTCMinutes()).slice(-2) + 'Z';
+                lbl.textContent = SAT_LABELS[getKey()] + ' \u00b7 ' + hhmmZ;
+            }
+        }
+
+        function satAnimPause() {
+            satPlaying = false;
+            var btn = document.getElementById('mBtnPlay');
+            if (btn) btn.innerHTML = '&#9654;';
+            if (satPlayTimer) { clearInterval(satPlayTimer); satPlayTimer = null; }
+        }
+
+        function satAnimPlay() {
+            if (satPlaying) return;
+            satPlaying = true;
+            var btn = document.getElementById('mBtnPlay');
+            if (btn) btn.innerHTML = '&#9646;&#9646;';
+            var spd = parseInt(document.getElementById('mrmsPlaySpeed').value) || 500;
+            satPlayTimer = setInterval(function() {
+                satGoFrame((satCurrent + 1) % satFrameLayers.length);
+            }, spd);
+        }
+
+        /* ── Hijack timeline bar for satellite animation ─────────────────────── */
+        function hijackSatTimeline() {
+            satActive = true;
+
+            /* If NIDS has the timeline, restore it first */
+            if (typeof window.restoreTimeline === 'function' && window.nidsActive) {
+                window.restoreTimeline();
+            }
+            /* Pause MRMS */
+            if (typeof window.mlPause === 'function') window.mlPause();
+
+            /* Wire mlGoFrame → satGoFrame */
+            if (!_origSatGoFrame && typeof window.mlGoFrame === 'function') {
+                _origSatGoFrame = window.mlGoFrame;
+            }
+            window.mlGoFrame = satGoFrame;
+            window.mlFrames  = satFrameTimes.map(function(t,i) { return { timestamp: 'SAT_'+i }; });
+            window.mlCurrent = satCurrent;
+
+            /* Wire play button */
+            var playBtn = document.getElementById('mBtnPlay');
+            if (playBtn) {
+                playBtn._satHandler = function() {
+                    satPlaying ? satAnimPause() : satAnimPlay();
+                };
+                if (playBtn._mrmsHandler) playBtn.removeEventListener('click', playBtn._mrmsHandler);
+                if (playBtn._nidsHandler) playBtn.removeEventListener('click', playBtn._nidsHandler);
+                playBtn.addEventListener('click', playBtn._satHandler);
+            }
+
+            /* Wire prev/next/first/last */
+            var btnFirst = document.getElementById('mBtnFirst');
+            var btnPrev  = document.getElementById('mBtnPrev');
+            var btnNext  = document.getElementById('mBtnNext');
+            var btnLast  = document.getElementById('mBtnLast');
+            if (btnFirst) { btnFirst._sat = function(){satAnimPause();satGoFrame(0);}; btnFirst.addEventListener('click',btnFirst._sat); }
+            if (btnPrev)  { btnPrev._sat  = function(){satAnimPause();satGoFrame(Math.max(0,satCurrent-1));}; btnPrev.addEventListener('click',btnPrev._sat); }
+            if (btnNext)  { btnNext._sat  = function(){satAnimPause();satGoFrame(Math.min(satFrameLayers.length-1,satCurrent+1));}; btnNext.addEventListener('click',btnNext._sat); }
+            if (btnLast)  { btnLast._sat  = function(){satAnimPause();satGoFrame(satFrameLayers.length-1);}; btnLast.addEventListener('click',btnLast._sat); }
+
+            /* Wire timeline scrubber */
+            var tl = document.getElementById('mrmsTimeline');
+            if (tl) {
+                tl._satHandler = function(e) {
+                    if (!satFrameLayers.length) return;
+                    var rect = this.getBoundingClientRect();
+                    var pct  = Math.max(0, Math.min(1, (e.clientX-rect.left)/rect.width));
+                    satAnimPause();
+                    satGoFrame(Math.round(pct*(satFrameLayers.length-1)));
+                };
+                tl.addEventListener('click', tl._satHandler);
+            }
+
+            /* Hide MRMS colorbar */
+            var cb = document.getElementById('mrmsColorbar');
+            if (cb) cb.style.display = 'none';
+            document.body.classList.remove('mrms-colorbar-open','nids-active');
+            document.body.classList.add('sat-active');
+
+            /* Show latest frame and autoplay */
+            satGoFrame(satFrameLayers.length - 1);
+            satAnimPlay();
+        }
+
+        function restoreSatTimeline() {
+            if (!satActive) return;
+            satAnimPause();
+            satActive = false;
+
+            /* Remove all preloaded frame layers */
+            var map = getMap();
+            satFrameLayers.forEach(function(l) { if (map) map.removeLayer(l); });
+            satFrameLayers = [];
+            satFrameTimes  = [];
+            satCurrent     = -1;
+
+            /* Restore mlGoFrame */
+            if (_origSatGoFrame) { window.mlGoFrame = _origSatGoFrame; _origSatGoFrame = null; }
+
+            /* Unwire buttons */
+            var playBtn = document.getElementById('mBtnPlay');
+            if (playBtn && playBtn._satHandler) {
+                playBtn.removeEventListener('click', playBtn._satHandler);
+                playBtn._satHandler = null;
+                playBtn.innerHTML = '&#9654;';
+            }
+            ['mBtnFirst','mBtnPrev','mBtnNext','mBtnLast'].forEach(function(id) {
+                var b = document.getElementById(id);
+                if (b && b._sat) { b.removeEventListener('click',b._sat); b._sat=null; }
+            });
+            var tl = document.getElementById('mrmsTimeline');
+            if (tl && tl._satHandler) {
+                tl.removeEventListener('click', tl._satHandler);
+                tl._satHandler = null;
+            }
+
+            document.body.classList.remove('sat-active');
+
+            /* Reload single live frame */
+            var tog = document.getElementById('satToggle');
+            if (tog && tog.checked) loadSat();
+        }
+
+        /* ── Load satellite animation ───────────────────────────────────────── */
+        function loadSatAnimation() {
+            var map = getMap(); if (!map) return;
+            var key       = getKey();
+            var layerName = SAT_LAYERS[key];
+            var statusEl  = document.getElementById('satStatus');
+            if (statusEl) statusEl.textContent = 'Fetching frames\u2026';
+
+            /* Remove existing single layer */
+            if (satLayer) { map.removeLayer(satLayer); satLayer = null; }
+
+            fetchSatTimes(layerName, function(times) {
+                if (!times || times.length === 0) {
+                    if (statusEl) statusEl.textContent = 'Animation unavailable \u2014 loading latest';
+                    loadSat();
+                    return;
+                }
+
+                /* Take last SAT_FRAMES_MAX frames */
+                var frames = times.slice(-SAT_FRAMES_MAX);
+
+                /* Remove any existing frame layers */
+                satFrameLayers.forEach(function(l) { map.removeLayer(l); });
+                satFrameLayers = [];
+                satFrameTimes  = frames;
+
+                /* Preload all frames at opacity 0 */
+                frames.forEach(function(ts) {
+                    var l = makeSatLayer(layerName, ts, 0);
+                    l.addTo(map);
+                    satFrameLayers.push(l);
+                });
+
+                if (statusEl) statusEl.textContent = SAT_LABELS[key] + ' \u00b7 ' + frames.length + ' frames';
+                hijackSatTimeline();
+            });
+        }
+
+        /* ── UI wiring ──────────────────────────────────────────────────────── */
         document.addEventListener('DOMContentLoaded', function() {
+
+            /* Satellite toggle */
             var tog = document.getElementById('satToggle');
             if (tog) {
                 tog.addEventListener('change', function() {
                     var sub = document.getElementById('satSubOptions');
                     if (sub) sub.style.display = this.checked ? 'block' : 'none';
-                    if (this.checked) { loadSat(); }
-                    else { removeSat(); }
+                    if (this.checked) {
+                        /* Check if animation checkbox is on */
+                        var animCb = document.getElementById('satAnimToggle');
+                        if (animCb && animCb.checked) {
+                            loadSatAnimation();
+                        } else {
+                            loadSat();
+                        }
+                    } else {
+                        if (satActive) restoreSatTimeline();
+                        else removeSat();
+                    }
                 });
             }
+
+            /* Product selector */
             document.querySelectorAll('input[name="satProduct"]').forEach(function(r) {
                 r.addEventListener('change', function() {
-                    if (document.getElementById('satToggle') &&
-                        document.getElementById('satToggle').checked) loadSat();
+                    var tog = document.getElementById('satToggle');
+                    if (tog && tog.checked) {
+                        var animCb = document.getElementById('satAnimToggle');
+                        if (animCb && animCb.checked) {
+                            restoreSatTimeline();
+                            loadSatAnimation();
+                        } else {
+                            loadSat();
+                        }
+                    }
                 });
             });
+
+            /* Animation toggle */
+            var animCb = document.getElementById('satAnimToggle');
+            if (animCb) {
+                animCb.addEventListener('change', function() {
+                    var tog = document.getElementById('satToggle');
+                    if (tog && tog.checked) {
+                        if (this.checked) {
+                            removeSat();
+                            loadSatAnimation();
+                        } else {
+                            restoreSatTimeline();
+                            loadSat();
+                        }
+                    }
+                });
+            }
+
+            /* Opacity slider */
             var satOpSlider = document.getElementById('satOpacity');
             var satOpVal    = document.getElementById('satOpacityVal');
             if (satOpSlider) {
-                /* Initialize from slider default value */
                 window._satOpacity = parseInt(satOpSlider.value) / 100;
                 satOpSlider.addEventListener('input', function() {
                     var pct = parseInt(this.value);
                     if (satOpVal) satOpVal.textContent = pct + '%';
-                    if (satLayer) satLayer.setOpacity(pct / 100);
                     window._satOpacity = pct / 100;
+                    /* Apply to whichever layer is active */
+                    if (satActive && satCurrent >= 0 && satFrameLayers[satCurrent]) {
+                        satFrameLayers[satCurrent].setOpacity(pct / 100);
+                    } else if (satLayer) {
+                        satLayer.setOpacity(pct / 100);
+                    }
                 });
             }
         });
+
+        /* Expose restore for NIDS to call when it hijacks */
+        window.restoreSatTimeline = restoreSatTimeline;
+
     })();
     </script>
 </body>
 </html>
-
