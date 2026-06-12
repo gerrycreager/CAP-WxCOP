@@ -733,7 +733,7 @@
         }
 
         function initMap() {
-            map = L.map('map', { zoomControl: true });
+            map = L.map('map', { zoomControl: true, worldCopyJump: true });
             window._capMap = map;  // expose for GLM/MRMS local scope
             map.setView([38.5, -96.5], 4);
 
@@ -768,7 +768,14 @@
 
             // Both filterMarkers and updateLabels run on zoom/pan so markers
             // disappear/appear correctly at tier zoom thresholds.
-            map.on('zoomend moveend', function() { filterMarkers(); updateLabels(); });
+            var _loadTimer = null;
+            map.on('zoomend moveend', function() {
+                filterMarkers();
+                updateLabels();
+                // Reload weather data for new bounds after pan/zoom settles
+                clearTimeout(_loadTimer);
+                _loadTimer = setTimeout(loadWeatherData, 800);
+            });
 
             // Initialize airspace layer toggle handlers now that map exists.
             if (typeof initAirspaceLayers === 'function') initAirspaceLayers();
