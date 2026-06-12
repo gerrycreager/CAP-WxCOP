@@ -260,7 +260,31 @@ def parse_taf_file(filepath, timeout_seconds=60):
 # Database insert
 # ---------------------------------------------------------------------------
 
+def _raw_text_matches_station(taf):
+    """Validate that raw_text belongs to the station being inserted.
+    Catches off-by-one bleed where bulletin content shifts between records."""
+    sid = taf['station_id']
+    raw = taf['raw_text'].strip()
+    # Standard: TAF XXXX / TAF AMD XXXX / TAF COR XXXX
+    if raw.startswith('TAF '):
+        parts = raw.split()
+        # parts[1] is either AMD/COR (then parts[2] is ICAO) or ICAO directly
+        if len(parts) >= 3 and parts[1] in ('AMD', 'COR', 'CCA', 'RRA'):
+            return parts[2].upper() == sid
+        elif len(parts) >= 2:
+            return parts[1].upper() == sid
+        return False
+    # Bare ICAO format: XXXX DDHHMMz ...
+    if raw[:4].upper() == sid:
+        return True
+    return False
+
 def insert_taf(conn, taf):
+    # Reject if raw_text doesn't belong to this station
+    if not _raw_text_matches_station(taf):
+        logger.debug(f"Skipping corrupt TAF: station_id={taf['station_id']} "
+                     f"but raw_text starts with {taf['raw_text'][:20]!r}")
+        return False
     try:
         cur = conn.cursor()
         cur.execute("""
@@ -271,7 +295,13 @@ def insert_taf(conn, taf):
                 (SELECT location FROM observations.airports WHERE station_id = %s)
             )
             ON CONFLICT (station_id, issue_time)
-            DO NOTHING
+            DO UPDATE SET
+                raw_text   = EXCLUDED.raw_text,
+                valid_from = EXCLUDED.valid_from,
+                valid_to   = EXCLUDED.valid_to,
+                location   = EXCLUDED.location
+            WHERE observations.taf.raw_text NOT LIKE '%%' || EXCLUDED.station_id || ' %%'
+              AND observations.taf.raw_text NOT LIKE EXCLUDED.station_id || ' %%'
         """, (
             taf['station_id'], taf['issue_time'],
             taf['valid_from'], taf['valid_to'],
