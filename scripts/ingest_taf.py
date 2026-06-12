@@ -1,7 +1,24 @@
 #!/var/www/cap_winds_app/venv/bin/python3
 """
-TAF Ingest Script - Fixed for Actual File Formats
-Handles both KWBC (with TAF prefix) and KLSX (without prefix) formats
+ingest_taf.py — CAP WxCOP TAF Ingest
+=====================================
+Parses TAF bulletin files from /LDM/text/taf/ and ingests into
+observations.taf on data2.
+
+Handles:
+  - TAF ICAO DDHHMMz DDHH/DDHH ...    (standard with TAF prefix)
+  - TAF AMD ICAO DDHHMMz DDHH/DDHH ... (amendment)
+  - TAF COR ICAO DDHHMMz DDHH/DDHH ... (correction)
+  - ICAO DDHHMMz DDHH/DDHH ...         (no TAF prefix, regional format)
+  - = end-of-TAF terminator
+  - Multiple bulletins concatenated in one file (KWBC format)
+  - Military TAFs with QNH/non-standard groups
+
+Key fix vs previous version:
+  - Pattern handles TAF AMD / TAF COR prefixes
+  - = terminator forces record boundary (prevents cross-bulletin bleed)
+  - WMO header lines explicitly skipped (not treated as continuation)
+  - Byte-count lines explicitly skipped
 """
 
 import os
@@ -13,7 +30,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 import logging
 
-# Setup logging
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
 logging.basicConfig(
     level=logging.INFO,
     format='[%(asctime)s] %(levelname)s: %(message)s',
@@ -24,377 +43,380 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Database connection
+# ---------------------------------------------------------------------------
+# Database
+# ---------------------------------------------------------------------------
 DB_CONFIG = {
     'dbname': 'avwx_data',
-    'user': 'avwx_user',
-    'host': '192.168.0.60'
+    'user':   'avwx_user',
+    'host':   '192.168.0.60'
 }
 
+# ---------------------------------------------------------------------------
+# Timeout
+# ---------------------------------------------------------------------------
 class TimeoutError(Exception):
-    """Raised when file parsing times out"""
     pass
 
 def timeout_handler(signum, frame):
-    """Handler for timeout signal"""
     raise TimeoutError("File parsing timed out")
 
+# ---------------------------------------------------------------------------
+# Time parsing
+# ---------------------------------------------------------------------------
+
 def parse_taf_time(time_str, reference_date=None):
-    """Parse TAF timestamp - Format: DDHHMM"""
+    """Parse DDHHMM timestamp → UTC datetime."""
     if reference_date is None:
         reference_date = datetime.utcnow()
-    
     try:
-        day = int(time_str[:2])
-        hour = int(time_str[2:4])
+        day    = int(time_str[0:2])
+        hour   = int(time_str[2:4])
         minute = int(time_str[4:6])
-        
-        dt = datetime(
-            reference_date.year,
-            reference_date.month,
-            day,
-            hour,
-            minute
-        )
-        
-        # Handle month rollover
+        dt = datetime(reference_date.year, reference_date.month, day, hour, minute)
+        # Handle month rollover — if date is >15 days in the future, step back a month
         if dt > reference_date + timedelta(days=15):
             if reference_date.month == 1:
                 dt = dt.replace(year=reference_date.year - 1, month=12)
             else:
                 dt = dt.replace(month=reference_date.month - 1)
-        
         return dt
-        
     except Exception as e:
         logger.debug(f"Error parsing time '{time_str}': {e}")
         return None
 
 def parse_taf_valid_period(period_str, issue_time):
-    """Parse TAF valid period - Format: DDHH/DDHH"""
+    """Parse DDHH/DDHH valid period → (valid_from, valid_to)."""
     try:
         from_str, to_str = period_str.split('/')
-        
-        from_day = int(from_str[:2])
-        from_hour = int(from_str[2:4])
-        
-        to_day = int(to_str[:2])
-        to_hour = int(to_str[2:4])
-        
-        # Handle hour 24
+        from_day  = int(from_str[0:2]); from_hour = int(from_str[2:4])
+        to_day    = int(to_str[0:2]);   to_hour   = int(to_str[2:4])
         if to_hour == 24:
-            to_hour = 0
-            to_day += 1
-        
-        valid_from = datetime(
-            issue_time.year,
-            issue_time.month,
-            from_day,
-            from_hour,
-            0
-        )
-        
-        valid_to = datetime(
-            issue_time.year,
-            issue_time.month,
-            to_day,
-            to_hour,
-            0
-        )
-        
-        # Handle rollover
+            to_hour = 0; to_day += 1
+        valid_from = datetime(issue_time.year, issue_time.month, from_day, from_hour, 0)
+        valid_to   = datetime(issue_time.year, issue_time.month, to_day,   to_hour,   0)
         if valid_to < valid_from:
-            # Try adding a day first
-            valid_to = valid_to + timedelta(days=1)
-            
-            # If still less, add a month
+            valid_to += timedelta(days=1)
             if valid_to < valid_from:
                 if valid_to.month == 12:
                     valid_to = valid_to.replace(year=valid_to.year + 1, month=1)
                 else:
                     valid_to = valid_to.replace(month=valid_to.month + 1)
-        
         return valid_from, valid_to
-        
     except Exception as e:
         logger.debug(f"Error parsing valid period '{period_str}': {e}")
         return None, None
 
-def parse_taf_file_v3(filepath, timeout_seconds=60):
+# ---------------------------------------------------------------------------
+# TAF header patterns
+# ---------------------------------------------------------------------------
+# Match any of:
+#   TAF ICAO DDHHMMz DDHH/DDHH ...
+#   TAF AMD ICAO DDHHMMz DDHH/DDHH ...
+#   TAF COR ICAO DDHHMMz DDHH/DDHH ...
+#   ICAO DDHHMMz DDHH/DDHH ...
+#
+# Group 1 = ICAO (4 uppercase letters)
+
+_TAF_HEADER = re.compile(
+    r'^(?:TAF\s+(?:AMD\s+|COR\s+)?)?'   # optional TAF / TAF AMD / TAF COR prefix
+    r'([A-Z]{4})\s+'                      # ICAO — group 1
+    r'(\d{6}Z)\s+'                        # DDHHMMz — group 2
+    r'(\d{4}/\d{4})',                     # DDHH/DDHH valid period — group 3
+    re.IGNORECASE
+)
+
+# WMO bulletin header: FTxx## CCCC DDHHMM [qualifier]
+_WMO_HEADER = re.compile(r'^[A-Z]{2}[A-Z0-9]{2}\d{2}\s+[A-Z]{4}\s+\d{6}')
+
+# Byte-count line: one or more digits possibly followed by spaces (standalone)
+_BYTE_COUNT = re.compile(r'^\d+\s*$')
+
+# Continuation line: starts with whitespace AND has non-whitespace content
+_CONTINUATION = re.compile(r'^\s+\S')
+
+def _is_skip_line(line):
+    """Return True for lines that are bulletin overhead, not TAF content."""
+    stripped = line.strip()
+    if not stripped:
+        return True   # blank
+    if _BYTE_COUNT.match(stripped):
+        return True   # byte count
+    if _WMO_HEADER.match(stripped):
+        return True   # WMO header
+    # Standalone keywords that are not TAF content
+    if stripped in ('TAF', 'TAF AMD', 'TAF COR', 'TAF CCA', 'TAF RRA'):
+        return True
+    return False
+
+# ---------------------------------------------------------------------------
+# File parser
+# ---------------------------------------------------------------------------
+
+def parse_taf_file(filepath, timeout_seconds=60):
     """
-    Parse TAF file handling both formats:
-    1. KWBC format: TAF STATION DDHHMMz DDHH/DDHH ...
-    2. KLSX format: STATION DDHHMMz DDHH/DDHH ... (after TAF AMD header)
+    Parse all TAFs from a single bulletin file.
+
+    Key design decisions:
+    - TAF header regex handles TAF/TAF AMD/TAF COR/bare ICAO forms
+    - '=' end-of-TAF terminator forces record save immediately
+    - WMO headers and byte-count lines are explicitly skipped
+    - Blank lines are skipped (not treated as record boundaries)
+    - Only the ICAO from the TAF header line is used as station_id
     """
     tafs = []
-    
-    # Set up timeout
     signal.signal(signal.SIGALRM, timeout_handler)
     signal.alarm(timeout_seconds)
-    
+
     try:
-        filename = filepath.name
-        
         with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
             content = f.read()
-        
-        # Skip very large files (military TAFs can be longer, so allow up to 1MB)
-        if len(content) > 1000000:
-            logger.warning(f"Skipping very large file (>1MB): {filename}")
+
+        if len(content) > 1_000_000:
+            logger.warning(f"Skipping very large file (>1MB): {filepath.name}")
             signal.alarm(0)
             return []
-        
-        lines = content.split('\n')
-        current_taf = []
-        
-        # Two patterns for worldwide TAF formats:
-        # Pattern 1: TAF STATION DDHHMMz DDHH/DDHH ... (KWBC/international format)
-        # Pattern 2: STATION DDHHMMz DDHH/DDHH ... (KLSX/regional format)
-        # Matches ALL ICAO codes (A-Z): K=US, C=Canada, L=Europe, U=Russia, etc.
-        
-        pattern1 = re.compile(r'^TAF\s+([A-Z]{4})\s+(\d{6}Z)\s+(\d{4}/\d{4})\s+(.*)$')
-        pattern2 = re.compile(r'^([A-Z]{4})\s+(\d{6}Z)\s+(\d{4}/\d{4})\s+(.*)$')
-        continuation = re.compile(r'^\s+(.+)$')
-        
-        for line in lines:
-            line = line.rstrip()
-            
-            # Try pattern 1 first (with TAF prefix)
-            match = pattern1.match(line)
-            if match:
-                # Save previous TAF — re-match current_taf[0] to get correct station_id
-                if current_taf:
-                    taf_text = '\n'.join(current_taf)
-                    first_line_match = pattern1.match(current_taf[0]) or pattern2.match(current_taf[0])
-                    if first_line_match:
-                        taf_obj = parse_taf_from_match(first_line_match)
-                        if taf_obj:
-                            taf_obj['raw_text'] = taf_text
-                            tafs.append(taf_obj)
-                
-                # Start new TAF
-                current_taf = [line]
+
+        current_lines = []   # lines accumulating for current TAF
+        current_match = None # regex match for the current TAF header
+
+        def _save_current():
+            """Save current_lines as a TAF record if valid."""
+            if not current_lines or current_match is None:
+                return
+            try:
+                station_id    = current_match.group(1).upper()
+                issue_time    = parse_taf_time(current_match.group(2)[:-1])  # strip Z
+                valid_from, valid_to = parse_taf_valid_period(
+                    current_match.group(3), issue_time)
+                if issue_time and valid_from and valid_to:
+                    tafs.append({
+                        'station_id': station_id,
+                        'issue_time': issue_time,
+                        'valid_from': valid_from,
+                        'valid_to':   valid_to,
+                        'raw_text':   '\n'.join(current_lines),
+                    })
+            except Exception as e:
+                logger.debug(f"Error saving TAF: {e}")
+
+        for raw_line in content.splitlines():
+            line = raw_line.rstrip()
+
+            # Skip bulletin overhead
+            if _is_skip_line(line):
                 continue
-            
-            # Try pattern 2 (without TAF prefix)
-            match = pattern2.match(line)
-            if match:
-                # Save previous TAF
-                if current_taf:
-                    taf_text = '\n'.join(current_taf)
-                    # Need to extract match from first line
-                    first_line_match = pattern2.match(current_taf[0]) or pattern1.match(current_taf[0])
-                    if first_line_match:
-                        taf_obj = parse_taf_from_match(first_line_match)
-                        if taf_obj:
-                            taf_obj['raw_text'] = taf_text
-                            tafs.append(taf_obj)
-                
-                # Start new TAF
-                current_taf = [line]
+
+            # Check for TAF header
+            m = _TAF_HEADER.match(line)
+            if m:
+                # Save whatever was accumulating
+                _save_current()
+                current_lines = [line]
+                current_match = m
+                # If line ends with = it's a single-line TAF
+                if line.rstrip().endswith('='):
+                    _save_current()
+                    current_lines = []
+                    current_match = None
                 continue
-            
-            # Continuation line
-            if current_taf and continuation.match(line):
-                current_taf.append(line)
-        
-        # Don't forget last TAF
-        if current_taf:
-            taf_text = '\n'.join(current_taf)
-            first_line_match = pattern2.match(current_taf[0]) or pattern1.match(current_taf[0])
-            if first_line_match:
-                taf_obj = parse_taf_from_match(first_line_match)
-                if taf_obj:
-                    taf_obj['raw_text'] = taf_text
-                    tafs.append(taf_obj)
-        
+
+            # End-of-TAF terminator on a continuation line
+            if current_lines and _CONTINUATION.match(line):
+                current_lines.append(line)
+                if line.rstrip().endswith('='):
+                    _save_current()
+                    current_lines = []
+                    current_match = None
+                continue
+
+            # Line doesn't match header or continuation — could be a bare
+            # end-of-bulletin line or unknown format; if we have an open TAF
+            # and it ends with = already we'd have closed it. Otherwise discard.
+            # This prevents non-TAF bulletin text from polluting raw_text.
+
+        # Save final TAF
+        _save_current()
+
         if tafs:
             stations = sorted(set(t['station_id'] for t in tafs))
-            logger.info(f"Parsed {len(tafs)} TAFs from {filename} - Stations: {', '.join(stations[:10])}")
-        
+            logger.info(f"Parsed {len(tafs)} TAFs from {filepath.name} — "
+                        f"{', '.join(stations[:10])}"
+                        f"{'...' if len(stations) > 10 else ''}")
+
         signal.alarm(0)
         return tafs
-        
+
     except TimeoutError:
-        logger.error(f"TIMEOUT parsing {filepath} after {timeout_seconds} seconds - SKIPPING")
+        logger.error(f"TIMEOUT parsing {filepath} after {timeout_seconds}s — skipping")
         signal.alarm(0)
         return []
     except Exception as e:
-        logger.error(f"Error parsing file {filepath}: {e}")
+        logger.error(f"Error parsing {filepath}: {e}")
         signal.alarm(0)
         return []
 
-def parse_taf_from_match(match):
-    """Parse TAF from regex match object"""
-    try:
-        station_id = match.group(1)
-        issue_time_str = match.group(2)[:-1]  # Remove 'Z'
-        valid_period = match.group(3)
-        
-        # Parse times
-        issue_time = parse_taf_time(issue_time_str)
-        if issue_time is None:
-            return None
-        
-        valid_from, valid_to = parse_taf_valid_period(valid_period, issue_time)
-        
-        return {
-            'station_id': station_id,
-            'issue_time': issue_time,
-            'valid_from': valid_from,
-            'valid_to': valid_to
-        }
-        
-    except Exception as e:
-        logger.debug(f"Error parsing TAF from match: {e}")
-        return None
+# ---------------------------------------------------------------------------
+# Database insert
+# ---------------------------------------------------------------------------
+
+def _raw_text_matches_station(taf):
+    """Validate that raw_text belongs to the station being inserted.
+    Catches off-by-one bleed where bulletin content shifts between records."""
+    sid = taf['station_id']
+    raw = taf['raw_text'].strip()
+    # Standard: TAF XXXX / TAF AMD XXXX / TAF COR XXXX
+    if raw.startswith('TAF '):
+        parts = raw.split()
+        # parts[1] is either AMD/COR (then parts[2] is ICAO) or ICAO directly
+        if len(parts) >= 3 and parts[1] in ('AMD', 'COR', 'CCA', 'RRA'):
+            return parts[2].upper() == sid
+        elif len(parts) >= 2:
+            return parts[1].upper() == sid
+        return False
+    # Bare ICAO format: XXXX DDHHMMz ...
+    if raw[:4].upper() == sid:
+        return True
+    return False
 
 def insert_taf(conn, taf):
-    """Insert TAF into database"""
+    # Reject if raw_text doesn't belong to this station
+    if not _raw_text_matches_station(taf):
+        logger.debug(f"Skipping corrupt TAF: station_id={taf['station_id']} "
+                     f"but raw_text starts with {taf['raw_text'][:20]!r}")
+        return False
     try:
         cur = conn.cursor()
-        
-        # Insert or update
         cur.execute("""
-            INSERT INTO observations.taf 
+            INSERT INTO observations.taf
                 (station_id, issue_time, valid_from, valid_to, raw_text, location)
-            VALUES (%s, %s, %s, %s, %s, (SELECT location FROM observations.airports WHERE station_id = %s))
-            ON CONFLICT (station_id, issue_time) 
+            VALUES (
+                %s, %s, %s, %s, %s,
+                (SELECT location FROM observations.airports WHERE station_id = %s)
+            )
+            ON CONFLICT (station_id, issue_time)
             DO UPDATE SET
+                raw_text   = EXCLUDED.raw_text,
                 valid_from = EXCLUDED.valid_from,
-                valid_to = EXCLUDED.valid_to,
-                raw_text = EXCLUDED.raw_text,
-                location = EXCLUDED.location
+                valid_to   = EXCLUDED.valid_to,
+                location   = EXCLUDED.location
+            WHERE observations.taf.raw_text NOT LIKE '%%' || EXCLUDED.station_id || ' %%'
+              AND observations.taf.raw_text NOT LIKE EXCLUDED.station_id || ' %%'
         """, (
-            taf['station_id'],
-            taf['issue_time'],
-            taf['valid_from'],
-            taf['valid_to'],
-            taf['raw_text'],
-            taf['station_id']
+            taf['station_id'], taf['issue_time'],
+            taf['valid_from'], taf['valid_to'],
+            taf['raw_text'],   taf['station_id']
         ))
-        
         cur.close()
         return True
-        
     except Exception as e:
         logger.error(f"Error inserting TAF for {taf['station_id']}: {e}")
+        conn.rollback()
         return False
 
+# ---------------------------------------------------------------------------
+# Directory ingest
+# ---------------------------------------------------------------------------
+
+# Station prefixes to ingest — K=CONUS, P=Pacific, T=Caribbean, C=Canada
+# Expand as needed for OCONUS ops (e.g. 'M' for Mexico/Caribbean, 'N' for Pacific)
+INGEST_PREFIXES = frozenset('KPTC')
+
 def ingest_taf_directory(directory, conn):
-    """Ingest all TAF files from a directory"""
-    taf_count = 0
-    file_count = 0
-    skipped_count = 0
-    error_count = 0
-    
+    taf_count = 0; file_count = 0; skipped_count = 0; error_count = 0
+
     for filepath in sorted(Path(directory).glob('*.txt')):
-        # Only process files from K (CONUS), P (Pacific), T (Caribbean) stations
-        # Excludes KWBC bulk international bulletins and foreign station files
-        if filepath.name[0] not in ('K', 'P', 'T'):
+        # Filter by originating center prefix in filename
+        # KWBC, KSHV, KLZK → K prefix passes
+        # NWCC, BGGH, LLBD → non-K/P/T/C prefix skipped
+        # Note: KWBC carries worldwide TAFs — station_id filter below handles that
+        if filepath.name[0] not in INGEST_PREFIXES:
             skipped_count += 1
             continue
+
         file_count += 1
-        
-        # Log progress every 100 files
         if file_count % 100 == 0:
-            logger.info(f"Progress: {file_count} files, {taf_count} TAFs ingested, {skipped_count} skipped, {error_count} errors")
-        
-        tafs = parse_taf_file_v3(filepath, timeout_seconds=60)
-        
+            logger.info(f"Progress: {file_count} files, {taf_count} TAFs, "
+                        f"{skipped_count} skipped, {error_count} errors")
+
+        tafs = parse_taf_file(filepath, timeout_seconds=60)
         if not tafs:
             skipped_count += 1
             continue
-        
+
         for taf in tafs:
-            if taf["station_id"][0] not in ("K", "T", "P"):
+            # Only store TAFs for K/P/T stations (CONUS + Pacific + Caribbean)
+            # KWBC bulletins contain worldwide TAFs — filter here not at file level
+            if taf['station_id'][0] not in INGEST_PREFIXES:
                 continue
             if insert_taf(conn, taf):
                 taf_count += 1
             else:
                 error_count += 1
-    
-    logger.info(f"Directory {directory}: {file_count} files, {taf_count} TAFs ingested, {skipped_count} skipped, {error_count} errors")
+
+    logger.info(f"Directory {directory}: {file_count} files processed, "
+                f"{taf_count} TAFs ingested, {skipped_count} skipped, "
+                f"{error_count} errors")
     return taf_count
 
+# ---------------------------------------------------------------------------
+# Top-level entry points
+# ---------------------------------------------------------------------------
+
 def ingest_recent_tafs(hours=24):
-    """Ingest TAFs from last N hours"""
     base_dir = Path('/LDM/text/taf')
-    
-    # Get date directories to process
     now = datetime.utcnow()
     dates_to_process = []
-    
     for i in range(int(hours / 24) + 2):
-        date = now - timedelta(days=i)
-        date_dir = base_dir / date.strftime('%Y/%m/%d')
-        if date_dir.exists():
-            dates_to_process.append(date_dir)
-    
+        d = base_dir / (now - timedelta(days=i)).strftime('%Y/%m/%d')
+        if d.exists():
+            dates_to_process.append(d)
+
     logger.info(f"Processing {len(dates_to_process)} date directories")
-    
-    # Connect to database
     conn = psycopg2.connect(**DB_CONFIG)
     conn.autocommit = True
-    
-    total_tafs = 0
-    
-    for date_dir in dates_to_process:
-        logger.info(f"Processing directory: {date_dir}")
-        count = ingest_taf_directory(date_dir, conn)
-        total_tafs += count
-    
+    total = 0
+    for d in dates_to_process:
+        logger.info(f"Processing: {d}")
+        total += ingest_taf_directory(d, conn)
     conn.close()
-    
-    logger.info(f"Total ingested: {total_tafs} TAFs")
-    return total_tafs
+    logger.info(f"Total ingested: {total} TAFs")
+    return total
 
 def cleanup_old_tafs(days=7):
-    """Remove TAFs older than N days"""
     try:
         conn = psycopg2.connect(**DB_CONFIG)
         cur = conn.cursor()
-        
         cutoff = datetime.now() - timedelta(days=days)
-        
-        cur.execute("""
-            DELETE FROM observations.taf
-            WHERE issue_time < %s
-        """, (cutoff,))
-        
+        cur.execute("DELETE FROM observations.taf WHERE issue_time < %s", (cutoff,))
         deleted = cur.rowcount
-        
-        conn.commit()
-        cur.close()
-        conn.close()
-        
-        logger.info(f"Deleted {deleted} old TAFs (older than {days} days)")
+        conn.commit(); cur.close(); conn.close()
+        logger.info(f"Deleted {deleted} old TAFs (>{days} days)")
         return deleted
-        
     except Exception as e:
         logger.error(f"Error cleaning up old TAFs: {e}")
         return 0
 
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
 if __name__ == '__main__':
     import argparse
-    parser = argparse.ArgumentParser(description='TAF Ingest')
-    parser.add_argument('--recent', type=int, default=24,
-                        help='Ingest TAFs from last N minutes (default: 24 hours = 1440 min). '
-                             'Note: treated as hours if > 60, minutes otherwise for legacy compat.')
-    args = parser.parse_args()
+    ap = argparse.ArgumentParser(description='TAF Ingest')
+    ap.add_argument('--recent', type=int, default=90,
+                    help='Lookback in minutes (default 90)')
+    args = ap.parse_args()
 
-    # --recent N: if N > 60 treat as minutes (legacy cron passes 90 meaning 90 min)
-    # otherwise treat as hours
-    hours = args.recent / 60 if args.recent <= 1440 else 24
+    hours = args.recent / 60.0
 
-    logger.info("=" * 70)
-    logger.info("TAF Ingest Starting")
-    logger.info("=" * 70)
+    logger.info('=' * 70)
+    logger.info('TAF Ingest Starting')
+    logger.info('=' * 70)
 
     count = ingest_recent_tafs(hours=hours)
     cleanup_old_tafs(days=7)
 
-    logger.info("=" * 70)
-    logger.info(f"TAF Ingest Complete - Processed {count} TAFs")
-    logger.info("=" * 70)
-
+    logger.info('=' * 70)
+    logger.info(f'TAF Ingest Complete — {count} TAFs processed')
+    logger.info('=' * 70)
