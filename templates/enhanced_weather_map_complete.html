@@ -7,7 +7,6 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="WxCOP">
     <link rel="apple-touch-icon" href="/CAP_WxCOP/static/icons/icon-192x192.png">
-    <script>if('serviceWorker' in navigator){navigator.serviceWorker.register('/CAP_WxCOP/static/sw.js',{scope:'/CAP_WxCOP/'});}</script>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -867,8 +866,31 @@
             }
 
             if (!found) {
-                msg.style.color = '#c00';
-                msg.textContent = raw + ' not found in loaded data';
+                // Not in current view — look up via API and pan there
+                msg.style.color = '#888';
+                msg.textContent = 'Searching for ' + raw + '...';
+                fetch('/CAP_WxCOP/api/weather/station/' + raw)
+                    .then(r => r.ok ? r.json() : null)
+                    .then(data => {
+                        var lat = null, lon = null;
+                        if (data && data.station && data.station.latitude) {
+                            lat = data.station.latitude;
+                            lon = data.station.longitude;
+                        }
+                        if (lat !== null) {
+                            map.setView([lat, lon], Math.max(map.getZoom(), 8));
+                            msg.style.color = '#2c5f41';
+                            msg.textContent = raw + ' — panning to location';
+                            setTimeout(loadWeatherData, 800);
+                        } else {
+                            msg.style.color = '#c00';
+                            msg.textContent = raw + ' not found';
+                        }
+                    })
+                    .catch(() => {
+                        msg.style.color = '#c00';
+                        msg.textContent = raw + ' not found';
+                    });
                 return;
             }
 
