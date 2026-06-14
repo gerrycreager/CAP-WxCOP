@@ -621,11 +621,15 @@ def get_active_wwa():
             storm_motion = None
             if raw_seg and 'STORM_MOTION:' in raw_seg:
                 import re
-                m = re.search(r'STORM_MOTION:\s*(\d+)DEG\s+(\d+)KT', raw_seg)
+                m = re.search(
+                    r'STORM_MOTION:\s*(\d+)DEG\s+(\d+)KT(?:\s+LOC\s+([\d.-]+),([\d.-]+))?',
+                    raw_seg)
                 if m:
                     storm_motion = {
-                        'deg': int(m.group(1)),
-                        'kts': int(m.group(2))
+                        'deg':     int(m.group(1)),
+                        'kts':     int(m.group(2)),
+                        'loc_lat': float(m.group(3)) if m.group(3) else None,
+                        'loc_lon': float(m.group(4)) if m.group(4) else None,
                     }
 
             features.append({
