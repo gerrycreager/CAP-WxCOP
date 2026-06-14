@@ -224,6 +224,25 @@
         body.radar-open #glmLegend { bottom: 330px; }
         body.radar-open.tstm-legend-open #glmLegend { bottom: 390px; }
         #glmLegend .gl-row { display: flex; align-items: center; gap: 6px; margin: 2px 0; color: #111; }
+        #wwaLegend {
+            display: none; position: fixed;
+            top: 200px; left: 10px;
+            background: rgba(20,30,20,0.92);
+            border: 1px solid #4a9c6f;
+            border-radius: 4px; padding: 6px 10px;
+            z-index: 1050; font-size: 11px;
+            color: #eee; min-width: 200px;
+            max-width: 260px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+        }
+        #wwaLegend.visible { display: block; }
+        #wwaLegend .wl-title { font-weight: 700; font-size: 10px; color: #8cf;
+                               text-transform: uppercase; letter-spacing: 0.05em;
+                               margin-bottom: 5px; border-bottom: 1px solid #4a9c6f;
+                               padding-bottom: 3px; }
+        #wwaLegend .wl-row { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
+        #wwaLegend .wl-swatch { width: 18px; height: 10px; border-radius: 2px;
+                                flex-shrink: 0; border: 1px solid rgba(255,255,255,0.3); }
         #glmLegend .gl-title { font-weight: 700; font-size: 10px; color: #111;
                                text-transform: uppercase; letter-spacing: 0.05em;
                                margin-bottom: 4px; border-bottom: 1px solid #ccc; padding-bottom: 3px; }
@@ -455,6 +474,7 @@
         <label class="checkbox-label"><input type="checkbox" id="airmetToggle"> AIRMETs/SIGMETs</label>
         <label class="checkbox-label"><input type="checkbox" id="fzlvlToggle"> FZLVL Contours</label>
         <label class="checkbox-label"><input type="checkbox" id="glmToggle"> GLM Lightning</label>
+        <label class="checkbox-label"><input type="checkbox" id="wwaToggle"> NWS Watches/Warnings</label>
 
         <div class="divider"></div>
         <h3>Airspace</h3>
@@ -528,10 +548,7 @@
             <div id="radarTypeIndicator" style="font-size:10px;color:#666;margin-top:3px;"></div>
         </div>
         <div id="radarStatus" style="font-size:10px;color:#888;text-align:center;min-height:14px;margin-bottom:2px;"></div>
-        <label class="checkbox-label">
-            <input type="checkbox" id="tstmToggle"> TRW Probability (LAMP)
-        </label>
-        <div style="margin-top:4px;margin-bottom:2px;">
+        <div style="margin-top:4px;margin-bottom:4px;">
             <label style="font-size:11px;color:#ccc;display:flex;align-items:center;gap:6px;">
                 Radar opacity
                 <input type="range" id="radarOpacity" min="0" max="100" value="75"
@@ -539,6 +556,9 @@
                 <span id="radarOpacityVal" style="font-size:10px;color:#888;min-width:28px;">75%</span>
             </label>
         </div>
+        <label class="checkbox-label">
+            <input type="checkbox" id="tstmToggle"> TRW Probability (LAMP)
+        </label>
         <div class="divider"></div>
         <h3>Satellite</h3>
         <label class="checkbox-label">
@@ -1966,9 +1986,100 @@
                 if(document.getElementById('glmToggle').checked) loadGLM();
             });
 
+            // ── NWS WWA Watches/Warnings ──────────────────────────────────
+            var wwaLayer = null;
+            var wwaTimer = null;
+
+            function loadWWA() {
+                var m = getMap();
+                if (!m) return;
+                fetch('/CAP_WxCOP/api/weather-enhanced/wwa/active')
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        if (wwaLayer) { m.removeLayer(wwaLayer); wwaLayer = null; }
+                        if (!data.features || data.features.length === 0) return;
+                        wwaLayer = L.layerGroup();
+                        data.features.forEach(function(f) {
+                            if (!f.geometry) return;
+                            var color = f.properties.color || '#AAAAAA';
+                            var label = f.properties.label || '';
+                            var wfo   = f.properties.wfo   || '';
+                            var end   = f.properties.end_time
+                                        ? new Date(f.properties.end_time).toUTCString().slice(17,22) + 'Z'
+                                        : '';
+                            var sm    = f.properties.storm_motion
+                                        ? f.properties.storm_motion.deg + '&deg; @ ' +
+                                          f.properties.storm_motion.kts + ' kt'
+                                        : null;
+                            var poly = L.geoJSON(f.geometry, {
+                                style: {
+                                    color:       color,
+                                    weight:      2.5,
+                                    opacity:     0.9,
+                                    fillColor:   color,
+                                    fillOpacity: 0.15
+                                }
+                            }).bindPopup(
+                                '<b>' + label + '</b><br>' +
+                                'WFO: ' + wfo + '<br>' +
+                                (end ? 'Expires: ' + end + '<br>' : '') +
+                                (sm  ? 'Motion: ' + sm + '<br>' : '') +
+                                (f.properties.headline
+                                    ? '<i style="font-size:0.85em">' +
+                                      f.properties.headline.substring(0,120) + '</i>'
+                                    : '')
+                            );
+                            poly.addTo(wwaLayer);
+                        });
+                        if (document.getElementById('wwaToggle').checked) {
+                            wwaLayer.addTo(m);
+                        }
+                        // Update legend — show only active phenomena
+                        var seen = {};
+                        var legendHtml = '';
+                        data.features.forEach(function(f) {
+                            var key = f.properties.phenomena + '.' + f.properties.significance;
+                            if (!seen[key]) {
+                                seen[key] = true;
+                                legendHtml += '<div class="wl-row">' +
+                                    '<div class="wl-swatch" style="background:' +
+                                    f.properties.color + ';border-color:' +
+                                    f.properties.color + ';"></div>' +
+                                    '<span>' + f.properties.label + '</span></div>';
+                            }
+                        });
+                        var legendEl = document.getElementById('wwaLegend');
+                        document.getElementById('wwaLegendItems').innerHTML = legendHtml;
+                        if (legendHtml && document.getElementById('wwaToggle').checked) {
+                            legendEl.classList.add('visible');
+                        } else {
+                            legendEl.classList.remove('visible');
+                        }
+                    })
+                    .catch(function(e) { console.error('WWA load error:', e); });
+            }
+
+            document.getElementById('wwaToggle').addEventListener('change', function() {
+                var m = getMap();
+                if (this.checked) {
+                    loadWWA();
+                    wwaTimer = setInterval(loadWWA, 120000); // refresh every 2 min
+                } else {
+                    if (wwaLayer && m) { m.removeLayer(wwaLayer); wwaLayer = null; }
+                    if (wwaTimer) { clearInterval(wwaTimer); wwaTimer = null; }
+                    document.getElementById('wwaLegend').classList.remove('visible');
+                }
+            });
+
         }); // DOMContentLoaded
     })();
     </script>
+
+    <!-- WWA Legend (upper-left, dynamic — shows only active phenomena) -->
+    <div id="wwaLegend">
+        <div class="wl-title">&#9888; Active NWS Alerts</div>
+        <div id="wwaLegendItems"></div>
+    </div>
 
     <!-- MRMS colorbar -->
     <div id="mrmsColorbar">

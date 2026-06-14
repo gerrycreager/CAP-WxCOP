@@ -487,3 +487,172 @@ def get_glm_flashes():
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+# ── WWA (Watch/Warning/Advisory) active polygons ──────────────────────────────
+# NWS standard colors by phenomena.significance
+WWA_COLORS = {
+    ('TO', 'W'): '#FF0000',  # Tornado Warning — Red
+    ('SV', 'W'): '#FFA500',  # Severe Thunderstorm Warning — Orange
+    ('FF', 'W'): '#8B0000',  # Flash Flood Warning — Dark Red
+    ('FL', 'W'): '#00FF00',  # Flood Warning — Lime
+    ('EW', 'W'): '#FF8C00',  # Extreme Wind Warning — Dark Orange
+    ('HW', 'W'): '#DAA520',  # High Wind Warning — Goldenrod
+    ('BZ', 'W'): '#FF4500',  # Blizzard Warning — Orange Red
+    ('WS', 'W'): '#FF69B4',  # Winter Storm Warning — Hot Pink
+    ('IS', 'W'): '#8B008B',  # Ice Storm Warning — Dark Magenta
+    ('DS', 'W'): '#FFE4C4',  # Dust Storm Warning — Bisque
+    ('WC', 'W'): '#B0C4DE',  # Wind Chill Warning — Light Steel Blue
+    ('EC', 'W'): '#B0C4DE',  # Extreme Cold Warning — Light Steel Blue
+    ('HT', 'W'): '#C71585',  # Excessive Heat Warning — Medium Violet Red
+    ('TO', 'A'): '#FFFF00',  # Tornado Watch — Yellow
+    ('SV', 'A'): '#DB7093',  # Severe Thunderstorm Watch — Pale Violet Red
+    ('FF', 'A'): '#32CD32',  # Flash Flood Watch — Lime Green
+    ('FL', 'A'): '#2E8B57',  # Flood Watch — Sea Green
+    ('HW', 'A'): '#B8860B',  # High Wind Watch — Dark Goldenrod
+    ('WS', 'A'): '#4682B4',  # Winter Storm Watch — Steel Blue
+    ('HT', 'A'): '#FF7F50',  # Excessive Heat Watch — Coral
+    ('EC', 'A'): '#5F9EA0',  # Extreme Cold Watch — Cadet Blue
+}
+
+WWA_LABELS = {
+    ('TO', 'W'): 'Tornado Warning',
+    ('SV', 'W'): 'Severe Thunderstorm Warning',
+    ('FF', 'W'): 'Flash Flood Warning',
+    ('FL', 'W'): 'Flood Warning',
+    ('EW', 'W'): 'Extreme Wind Warning',
+    ('HW', 'W'): 'High Wind Warning',
+    ('BZ', 'W'): 'Blizzard Warning',
+    ('WS', 'W'): 'Winter Storm Warning',
+    ('IS', 'W'): 'Ice Storm Warning',
+    ('DS', 'W'): 'Dust Storm Warning',
+    ('WC', 'W'): 'Wind Chill Warning',
+    ('EC', 'W'): 'Extreme Cold Warning',
+    ('HT', 'W'): 'Excessive Heat Warning',
+    ('TO', 'A'): 'Tornado Watch',
+    ('SV', 'A'): 'Severe Thunderstorm Watch',
+    ('FF', 'A'): 'Flash Flood Watch',
+    ('FL', 'A'): 'Flood Watch',
+    ('HW', 'A'): 'High Wind Watch',
+    ('WS', 'A'): 'Winter Storm Watch',
+    ('HT', 'A'): 'Excessive Heat Watch',
+    ('EC', 'A'): 'Extreme Cold Watch',
+}
+
+
+@weather_enhanced_api.route('/wwa/active', methods=['GET'])
+def get_active_wwa():
+    """
+    Return active WWA polygons as GeoJSON FeatureCollection.
+    Only returns records with non-null geometry (storm-based warnings).
+    County-based watches (no polygon) are excluded — use UGC lookup separately.
+    Query params:
+      bounds: west,south,east,north (optional — if omitted returns all active)
+    """
+    try:
+        bounds_param = request.args.get('bounds', '')
+        conn = get_connection()
+        cur  = conn.cursor()
+
+        if bounds_param:
+            try:
+                west, south, east, north = map(float, bounds_param.split(','))
+                south = max(-90.0, min(90.0, south))
+                north = max(-90.0, min(90.0, north))
+                while west < -180.0: west += 360.0
+                while east < -180.0: east += 360.0
+                while east >  180.0: east -= 360.0
+                if west > east:
+                    geom = (f'ST_Union('
+                            f'ST_MakeEnvelope(-180,{south},{east},{north},4326),'
+                            f'ST_MakeEnvelope({west},{south},180,{north},4326))')
+                else:
+                    geom = f'ST_MakeEnvelope({west},{south},{east},{north},4326)'
+                where_extra = f'AND ST_Intersects(w.geom, {geom})'
+            except (ValueError, TypeError):
+                where_extra = ''
+        else:
+            where_extra = ''
+
+        cur.execute(f"""
+            SELECT
+                w.id,
+                w.wfo,
+                w.phenomena,
+                w.significance,
+                w.event_number,
+                w.begin_time,
+                w.end_time,
+                w.headline,
+                w.ugc_zones,
+                ST_AsGeoJSON(w.geom) AS geom_json,
+                w.raw_segment
+            FROM observations.wwa w
+            WHERE w.is_active = TRUE
+              AND w.geom IS NOT NULL
+              AND (w.end_time IS NULL OR w.end_time > NOW())
+              {where_extra}
+            ORDER BY
+                -- Warnings before watches, more severe first
+                CASE w.significance WHEN 'W' THEN 0 WHEN 'A' THEN 1 ELSE 2 END,
+                CASE w.phenomena
+                    WHEN 'TO' THEN 0 WHEN 'SV' THEN 1 WHEN 'EW' THEN 2
+                    WHEN 'FF' THEN 3 WHEN 'FL' THEN 4 ELSE 5
+                END
+        """)
+
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        now = datetime.utcnow()
+        features = []
+        for row in rows:
+            (wid, wfo, ph, sig, etn, begin_time, end_time,
+             headline, ugc_zones, geom_json, raw_seg) = row
+
+            if not geom_json:
+                continue
+
+            key   = (ph.strip(), sig.strip())
+            color = WWA_COLORS.get(key, '#AAAAAA')
+            label = WWA_LABELS.get(key, f'{ph.strip()}.{sig.strip()}')
+
+            # Extract storm motion from raw_segment if present
+            storm_motion = None
+            if raw_seg and 'STORM_MOTION:' in raw_seg:
+                import re
+                m = re.search(r'STORM_MOTION:\s*(\d+)DEG\s+(\d+)KT', raw_seg)
+                if m:
+                    storm_motion = {
+                        'deg': int(m.group(1)),
+                        'kts': int(m.group(2))
+                    }
+
+            features.append({
+                'type': 'Feature',
+                'geometry': json.loads(geom_json),
+                'properties': {
+                    'id':           wid,
+                    'wfo':          wfo.strip(),
+                    'phenomena':    ph.strip(),
+                    'significance': sig.strip(),
+                    'etn':          etn,
+                    'label':        label,
+                    'color':        color,
+                    'begin_time':   begin_time.strftime('%Y-%m-%dT%H:%M:%SZ') if begin_time else None,
+                    'end_time':     end_time.strftime('%Y-%m-%dT%H:%M:%SZ') if end_time else None,
+                    'headline':     headline,
+                    'ugc_zones':    ugc_zones,
+                    'storm_motion': storm_motion,
+                }
+            })
+
+        return jsonify({
+            'type':         'FeatureCollection',
+            'features':     features,
+            'count':        len(features),
+            'generated_at': now.strftime('%Y-%m-%dT%H:%M:%SZ'),
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
