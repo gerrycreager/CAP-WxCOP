@@ -280,6 +280,9 @@ def _raw_text_matches_station(taf):
     return False
 
 def insert_taf(conn, taf):
+    # Reject non-K/P/T/C stations — belt-and-suspenders check
+    if taf['station_id'][0] not in frozenset('KPTC'):
+        return False
     # Reject if raw_text doesn't belong to this station
     if not _raw_text_matches_station(taf):
         logger.debug(f"Skipping corrupt TAF: station_id={taf['station_id']} "
