@@ -372,8 +372,34 @@ function showDetail(site) {
     wwaEl.innerHTML = '<div style="font-size:0.72rem;color:#8af;margin-bottom:4px;text-transform:uppercase;">Active NWS Alerts</div>' +
       wwas.map(function(w) {
         var sc = w.significance === 'W' ? 'RED' : 'YELLOW';
-        var sl = w.significance === 'W' ? 'WARNING' : w.significance === 'A' ? 'WATCH' : 'ADVISORY';
-        return '<div class="wwa-item wwa-' + sc + '">' + w.phenom + ' ' + sl + '</div>';
+        var WWA_LABELS = {
+            'TO.W': 'TORNADO WARNING',
+            'SV.W': 'SEVERE THUNDERSTORM WARNING',
+            'FF.W': 'FLASH FLOOD WARNING',
+            'FL.W': 'FLOOD WARNING',
+            'EW.W': 'EXTREME WIND WARNING',
+            'HW.W': 'HIGH WIND WARNING',
+            'BZ.W': 'BLIZZARD WARNING',
+            'WS.W': 'WINTER STORM WARNING',
+            'IS.W': 'ICE STORM WARNING',
+            'DS.W': 'DUST STORM WARNING',
+            'WC.W': 'WIND CHILL WARNING',
+            'EC.W': 'EXTREME COLD WARNING',
+            'HT.W': 'EXCESSIVE HEAT WARNING',
+            'TO.A': 'TORNADO WATCH',
+            'SV.A': 'SEVERE THUNDERSTORM WATCH',
+            'FF.A': 'FLASH FLOOD WATCH',
+            'FL.A': 'FLOOD WATCH',
+            'HW.A': 'HIGH WIND WATCH',
+            'WS.A': 'WINTER STORM WATCH',
+            'HT.A': 'EXCESSIVE HEAT WATCH',
+            'EC.A': 'EXTREME COLD WATCH',
+        };
+        var key = w.phenom + '.' + w.significance;
+        var label = WWA_LABELS[key] || (w.phenom + ' ' +
+            (w.significance === 'W' ? 'WARNING' :
+             w.significance === 'A' ? 'WATCH' : 'ADVISORY'));
+        return '<div class="wwa-item wwa-' + sc + '">' + label + '</div>';
       }).join('');
   } else {
     wwaEl.innerHTML = '<div style="font-size:0.72rem;color:#4a8;margin-top:8px;">\u2713 No active NWS alerts</div>';
@@ -588,11 +614,127 @@ document.getElementById('mrmsToggle').addEventListener('change', function() {
   }
 });
 
+
+// ===========================================================================
+// WWA Polygon Overlay + Storm Motion Vectors
+// ===========================================================================
+var wwaLayer = null;
+
+// Project a point (lat, lon) by distNM nautical miles in direction bearingDeg
+function projectPoint(lat, lon, bearingDeg, distNM) {
+    var R = 3440.065; // Earth radius in NM
+    var d = distNM / R;
+    var brng = bearingDeg * Math.PI / 180;
+    var lat1 = lat * Math.PI / 180;
+    var lon1 = lon * Math.PI / 180;
+    var lat2 = Math.asin(
+        Math.sin(lat1) * Math.cos(d) +
+        Math.cos(lat1) * Math.sin(d) * Math.cos(brng)
+    );
+    var lon2 = lon1 + Math.atan2(
+        Math.sin(brng) * Math.sin(d) * Math.cos(lat1),
+        Math.cos(d) - Math.sin(lat1) * Math.sin(lat2)
+    );
+    return [lat2 * 180 / Math.PI, lon2 * 180 / Math.PI];
+}
+
+// Draw arrowhead at end of motion vector
+function addArrowhead(layerGroup, fromPt, toPt, color) {
+    var lat1 = fromPt[0], lon1 = fromPt[1];
+    var lat2 = toPt[0],   lon2 = toPt[1];
+    // Bearing from→to in degrees
+    var dLon = (lon2 - lon1) * Math.PI / 180;
+    var y = Math.sin(dLon) * Math.cos(lat2 * Math.PI / 180);
+    var x = Math.cos(lat1 * Math.PI / 180) * Math.sin(lat2 * Math.PI / 180) -
+            Math.sin(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.cos(dLon);
+    var brng = Math.atan2(y, x) * 180 / Math.PI;
+    // Arrow wings at ±25° from reverse bearing, 8NM back
+    var wingLen = 8;
+    var w1 = projectPoint(lat2, lon2, (brng + 180 + 25) % 360, wingLen);
+    var w2 = projectPoint(lat2, lon2, (brng + 180 - 25 + 360) % 360, wingLen);
+    L.polygon([toPt, w1, w2], {
+        color: color, fillColor: color, fillOpacity: 0.8,
+        weight: 1, opacity: 0.9
+    }).addTo(layerGroup);
+}
+
+function loadWWA() {
+    fetch('/CAP_WxCOP/api/weather-enhanced/wwa/active')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (wwaLayer) { map.removeLayer(wwaLayer); wwaLayer = null; }
+            if (!data.features || data.features.length === 0) return;
+            wwaLayer = L.layerGroup();
+
+            data.features.forEach(function(f) {
+                if (!f.geometry) return;
+                var props = f.properties;
+                var color = props.color || '#AAAAAA';
+                var label = props.label || (props.phenomena + '.' + props.significance);
+                var end   = props.end_time
+                            ? new Date(props.end_time).toUTCString().slice(17,22) + 'Z'
+                            : '';
+                var sm    = props.storm_motion;
+
+                // Polygon
+                L.geoJSON(f.geometry, {
+                    style: {
+                        color: color, weight: 2.5, opacity: 0.9,
+                        fillColor: color, fillOpacity: 0.12
+                    }
+                }).bindPopup(
+                    '<b>' + label + '</b><br>' +
+                    'WFO: ' + props.wfo + '<br>' +
+                    (end ? 'Expires: ' + end + '<br>' : '') +
+                    (sm  ? 'Motion: ' + sm.deg + '&deg; @ ' + sm.kts + ' kt<br>' : '') +
+                    (props.headline
+                        ? '<i style="font-size:0.85em">' +
+                          props.headline.substring(0,120) + '</i>'
+                        : '')
+                ).addTo(wwaLayer);
+
+                // Storm motion vector — from loc point, project 30 min forward
+                if (sm && sm.loc_lat != null && sm.loc_lon != null) {
+                    var fromPt = [sm.loc_lat, sm.loc_lon];
+                    // NWS deg is direction FROM — storm moves TO deg+180
+                    var toDir  = (sm.deg + 180) % 360;
+                    var distNM = sm.kts * 0.5; // 30-min projection
+                    var toPt   = projectPoint(sm.loc_lat, sm.loc_lon, toDir, distNM);
+
+                    // Shaft
+                    L.polyline([fromPt, toPt], {
+                        color: color, weight: 3, opacity: 0.85,
+                        dashArray: null
+                    }).bindPopup(
+                        '<b>Storm Motion</b><br>' +
+                        sm.deg + '&deg; @ ' + sm.kts + ' kt<br>' +
+                        '(30-min projection)'
+                    ).addTo(wwaLayer);
+
+                    // Current location dot
+                    L.circleMarker(fromPt, {
+                        radius: 5, color: color, fillColor: color,
+                        fillOpacity: 0.9, weight: 2
+                    }).addTo(wwaLayer);
+
+                    // Arrowhead at projected point
+                    addArrowhead(wwaLayer, fromPt, toPt, color);
+                }
+            });
+
+            wwaLayer.addTo(map);
+        })
+        .catch(function(e) { console.error('WWA load error:', e); });
+}
+
 // ===========================================================================
 // Bootstrap
 // ===========================================================================
 loadData();
 setInterval(loadData, 60000);  // data refresh every 60 seconds
+setInterval(loadWWA, 120000);  // WWA refresh every 2 minutes
+loadWWA();
+
 </script>
 </body>
 </html>
