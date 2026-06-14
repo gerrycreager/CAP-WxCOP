@@ -1,5 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
+<!-- PWA -->
+    <link rel="manifest" href="/CAP_WxCOP/static/manifest.json">
+    <meta name="theme-color" content="#1a3a2a">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="WxCOP">
+    <link rel="apple-touch-icon" href="/CAP_WxCOP/static/icons/icon-192x192.png">
+    <script>if('serviceWorker' in navigator){navigator.serviceWorker.register('/CAP_WxCOP/static/sw.js',{scope:'/CAP_WxCOP/'});}</script>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -125,14 +133,13 @@
     <div class="date" id="clock-date"></div>
   </div>
 </header>
-  <div style="background:#e65100;color:#fff;text-align:center;padding:4px;font-size:0.75rem;font-weight:700;letter-spacing:0.1em;">DEVELOPMENT ENVIRONMENT — Not for operational use</div>
 
 <main>
 
   <div class="section-heading">Flight Operations</div>
   <div class="card-grid">
 
-    <a class="app-card priority" href="/CAP_WxCOP_DEV/weather-impacts">
+    <a class="app-card priority" href="/CAP_WxCOP/weather-impacts">
       <div class="card-header">
         <div class="card-icon">🚦</div>
         <div class="card-badges">
@@ -148,7 +155,7 @@
       </div>
     </a>
 
-    <a class="app-card" href="/CAP_WxCOP_DEV/enhanced-weather-map">
+    <a class="app-card" href="/CAP_WxCOP/enhanced-weather-map">
       <div class="card-header">
         <div class="card-icon">🌦️</div>
         <div class="card-badges">
@@ -163,7 +170,8 @@
       </div>
     </a>
 
-    <a class="app-card" href="/CAP_WxCOP_DEV/wind-map">
+    <!-- Wind Constraints Map card — commented out 2026-05-13, superseded by Flight Ops Impacts
+    <a class="app-card" href="/CAP_WxCOP/wind-map">
       <div class="card-header">
         <div class="card-icon">💨</div>
         <div class="card-badges">
@@ -177,8 +185,9 @@
         <span class="card-arrow">→</span>
       </div>
     </a>
+    -->
 
-    <a class="app-card" href="/CAP_WxCOP_DEV/weather/station">
+    <a class="app-card" href="/CAP_WxCOP/weather/station">
       <div class="card-header">
         <div class="card-icon">🔍</div>
         <div class="card-badges">
@@ -193,7 +202,7 @@
       </div>
     </a>
 
-    <a class="app-card" href="/CAP_WxCOP_DEV/incident-archive">
+    <a class="app-card" href="/CAP_WxCOP/incident-archive">
       <div class="card-header">
         <div class="card-icon">📂</div>
         <div class="card-badges">
@@ -208,7 +217,8 @@
       </div>
     </a>
 
-    <a class="app-card" href="/CAP_WxCOP_DEV/legacy-wind-generator">
+    <!-- Wind Constraints Generator card — commented out 2026-05-13, superseded by Flight Ops Impacts
+    <a class="app-card" href="/CAP_WxCOP/legacy-wind-generator">
       <div class="card-header">
         <div class="card-icon">🗺️</div>
         <div class="card-badges">
@@ -222,13 +232,14 @@
         <span class="card-arrow">→</span>
       </div>
     </a>
+    -->
 
   </div>
 
   <div class="section-heading">Ground &amp; Personnel Operations</div>
   <div class="card-grid">
 
-    <a class="app-card priority" href="/CAP_WxCOP_DEV/wbgt">
+    <a class="app-card priority" href="/CAP_WxCOP/wbgt">
       <div class="card-header">
         <div class="card-icon">🌡️</div>
         <div class="card-badges">
@@ -240,6 +251,77 @@
       <div class="card-desc">Wet Bulb Globe Temperature calculator per DAFI 48-151. Solar elevation computed from lat/lon, date, and UTC time. Load live conditions from cadet sites. Displays DAFI flag color and CAPR 60-2 activity guidance.</div>
       <div class="card-meta">
         <span>DAFI 48-151 · CAPR 60-2 · Cadet sites</span>
+        <span class="card-arrow">→</span>
+      </div>
+    </a>
+
+  </div>
+
+  <div class="section-heading">Heat Risk &amp; Health</div>
+  <div class="card-grid">
+
+    <a class="app-card external" href="https://www.wpc.ncep.noaa.gov/heatrisk/" target="_blank" rel="noopener">
+      <div class="card-header">
+        <div class="card-icon">🌡️</div>
+        <div class="card-badges">
+          <span class="badge badge-live">LIVE</span>
+          <span class="badge badge-ext">EXT</span>
+        </div>
+      </div>
+      <div class="card-title">NWS HeatRisk</div>
+      <div class="card-desc">NWS Weather Prediction Center 7-day HeatRisk forecast. Color-coded daily heat risk index combining temperature, humidity, and overnight cooling. Identifies areas of elevated risk for heat-related illness — useful for encampment and ground SAR planning.</div>
+      <div class="card-meta">
+        <span>WPC · 7-day · Heat illness risk</span>
+        <span class="card-arrow">↗</span>
+      </div>
+    </a>
+
+  </div>
+
+  <div class="section-heading">Cadet Operations</div>
+  <div class="card-grid">
+
+    <a class="app-card priority" href="/CAP_WxCOP/cadet-wx">
+      <div class="card-header">
+        <div class="card-icon">🎓</div>
+        <div class="card-badges">
+          <span class="badge badge-live">LIVE</span>
+        </div>
+      </div>
+      <div class="card-title">Cadet Weather COP</div>
+      <div class="card-desc">Current weather conditions at CAP cadet encampment sites. METAR observations, WBGT flag status, and flight operations status for each site. Optimized for encampment weather officers.</div>
+      <div class="card-meta">
+        <span>METAR · WBGT · DAFI 48-151 · Cadet sites</span>
+        <span class="card-arrow">→</span>
+      </div>
+    </a>
+
+    <a class="app-card" href="/CAP_WxCOP/cadet-wx-plan">
+      <div class="card-header">
+        <div class="card-icon">📋</div>
+        <div class="card-badges">
+          <span class="badge badge-live">LIVE</span>
+        </div>
+      </div>
+      <div class="card-title">Cadet Weather Planning</div>
+      <div class="card-desc">Forecast weather conditions and activity planning guidance for cadet encampment sites. GFS/HRRR forecast with WBGT projections and CAPR 60-2 flag color timeline.</div>
+      <div class="card-meta">
+        <span>GFS · HRRR · WBGT forecast · CAPR 60-2</span>
+        <span class="card-arrow">→</span>
+      </div>
+    </a>
+
+    <a class="app-card" href="/CAP_WxCOP/cadet-sites/manage">
+      <div class="card-header">
+        <div class="card-icon">⚙️</div>
+        <div class="card-badges">
+          <span class="badge badge-live">LIVE</span>
+        </div>
+      </div>
+      <div class="card-title">Cadet Site Management</div>
+      <div class="card-desc">Add, edit, and manage cadet encampment site locations. Configure site name, coordinates, and associated METAR station for weather data retrieval.</div>
+      <div class="card-meta">
+        <span>Admin · Encampment sites</span>
         <span class="card-arrow">→</span>
       </div>
     </a>
@@ -265,7 +347,7 @@
       </div>
     </a>
 
-    <a class="app-card met" href="/CAP_WxCOP_DEV/mrms" style="border-left-color:#e65100;">
+    <a class="app-card met" href="/CAP_WxCOP/mrms" style="border-left-color:#e65100;">
       <div class="card-header">
         <div class="card-icon">📡</div>
         <div class="card-badges">
@@ -277,6 +359,22 @@
       <div class="card-desc">Multi-Radar Multi-Sensor composite reflectivity tiles. Expert/meteorologist tool — radar and GLM are integrated into the operational weather map for general use. CONUS, Alaska, Hawaii, Caribbean, and Guam.</div>
       <div class="card-meta">
         <span>CONUS · AK · HI · PR · GU · 2-min</span>
+        <span class="card-arrow">→</span>
+      </div>
+    </a>
+
+    <a class="app-card met" href="/CAP_WxCOP/radar-status" style="border-left-color:#e65100;">
+      <div class="card-header">
+        <div class="card-icon">🔴</div>
+        <div class="card-badges">
+          <span class="badge badge-live">LIVE</span>
+          <span class="badge badge-met">MET</span>
+        </div>
+      </div>
+      <div class="card-title">Radar Status Monitor</div>
+      <div class="card-desc">NEXRAD WSR-88D network operational status. Level-3 data latency per site with color-coded tiers: green &lt;10 min, blue 10–15 min, yellow 15–60 min, red &gt;60 min or FTM outage. Map and sortable table. Updates every 5 min.</div>
+      <div class="card-meta">
+        <span>155 sites · NEXRAD L3 · FTM · 5-min</span>
         <span class="card-arrow">→</span>
       </div>
     </a>
@@ -295,65 +393,11 @@
 
   </div>
 
-
-  <div class="section-heading">Cadet Weather Operations (DEV — Pending HQ Review)</div>
-  <div class="card-grid">
-
-    <a class="app-card" href="/CAP_WxCOP_DEV/cadet-wx">
-      <div class="card-header">
-        <div class="card-icon">🎓</div>
-        <div class="card-badges">
-          <span class="badge badge-new">NEW</span>
-          <span class="badge badge-live">DEV</span>
-        </div>
-      </div>
-      <div class="card-title">Cadet Weather COP</div>
-      <div class="card-desc">Weather Common Operating Picture tailored for cadet encampment operations. METAR, TAF, GLM lightning, WBGT, and wind conditions for cadet training sites.</div>
-      <div class="card-meta">
-        <span>Cadet ops · Encampment · WBGT · GLM</span>
-        <span class="card-arrow">→</span>
-      </div>
-    </a>
-
-    <a class="app-card" href="/CAP_WxCOP_DEV/cadet-wx-plan">
-      <div class="card-header">
-        <div class="card-icon">📋</div>
-        <div class="card-badges">
-          <span class="badge badge-new">NEW</span>
-          <span class="badge badge-live">DEV</span>
-        </div>
-      </div>
-      <div class="card-title">Cadet Weather Planning</div>
-      <div class="card-desc">25-hour forecast weather planning tool for cadet encampment sites. Go/Caution/No-Go assessment per CAPR 60-2, WBGT flag categories, and wind constraints.</div>
-      <div class="card-meta">
-        <span>Cadet ops · 25-hr forecast · CAPR 60-2</span>
-        <span class="card-arrow">→</span>
-      </div>
-    </a>
-
-    <a class="app-card" href="/CAP_WxCOP_DEV/cadet-sites/manage">
-      <div class="card-header">
-        <div class="card-icon">📍</div>
-        <div class="card-badges">
-          <span class="badge badge-new">NEW</span>
-          <span class="badge badge-live">DEV</span>
-        </div>
-      </div>
-      <div class="card-title">Cadet Site Management</div>
-      <div class="card-desc">Add, edit, and manage cadet encampment site locations. Used to populate the Cadet Weather COP and Planning tools.</div>
-      <div class="card-meta">
-        <span>Cadet sites · Encampment locations</span>
-        <span class="card-arrow">→</span>
-      </div>
-    </a>
-
-  </div>
-
   <div class="section-heading">Administration</div>
   <div class="card-grid">
 
 
-    <a class="app-card" href="/CAP_WxCOP_DEV/admin/kq-stations">
+    <a class="app-card" href="/CAP_WxCOP/admin/kq-stations">
       <div class="card-header">
         <div class="card-icon">📻</div>
         <div class="card-badges">
@@ -368,7 +412,7 @@
       </div>
     </a>
 
-    <a class="app-card" href="/CAP_WxCOP_DEV/manual-taf">
+    <a class="app-card" href="/CAP_WxCOP/manual-taf">
       <div class="card-header">
         <div class="card-icon">&#9998;</div>
         <div class="card-badges">
@@ -383,7 +427,7 @@
       </div>
     </a>
 
-    <a class="app-card" href="/CAP_WxCOP_DEV/admin/wing-icl">
+    <a class="app-card" href="/CAP_WxCOP/admin/wing-icl">
       <div class="card-header">
         <div class="card-icon">⚙️</div>
         <div class="card-badges">
@@ -415,7 +459,7 @@
 </main>
 
 <footer>
-  <span>CAP WxCOP · DEVELOPMENT · r815 / data1 / data2</span>
+  <span>CAP WxCOP · Civil Air Patrol National Headquarters · r815 / data1 / data2</span>
   <span>All data from US Government sources · Not for operational use without verification</span>
 </footer>
 
