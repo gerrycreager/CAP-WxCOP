@@ -47,7 +47,9 @@ DB_PASS = 'avwx_pass'
 # Phenomena to ingest (phenomena, significance)
 WANTED = {
     ('TO', 'W'),  # Tornado Warning
+    ('TO', 'A'),  # Tornado Watch
     ('SV', 'W'),  # Severe Thunderstorm Warning
+    ('SV', 'A'),  # Severe Thunderstorm Watch
     ('FF', 'W'),  # Flash Flood Warning
     ('FF', 'A'),  # Flash Flood Watch
     ('FL', 'W'),  # Flood Warning
@@ -275,7 +277,13 @@ def db_update_end(cur, wfo, ph, sig, etn, yr, end_time, raw_seg):
 def db_insert(cur, wfo, ph, sig, etn, yr, action, wmo_hdr, prod_id,
               issue_time, begin_time, end_time, headline, raw_seg,
               geom_wkt, ugc_zones, storm_motion):
-    """Insert new event. Returns True on success."""
+    """Insert new event, or merge ugc_zones into an existing row sharing the
+    same VTEC key (wfo/phenomena/significance/event_number/vtec_action/
+    vtec_year/issue_time). Multi-segment products (e.g. a single SPC watch
+    spanning several states) repeat the identical VTEC string once per
+    state/zone segment -- without the merge, every segment after the first
+    would silently overwrite nothing and its UGC zones would be lost.
+    Returns True on success."""
     # Append storm motion metadata to raw_segment
     if storm_motion:
         deg, kts, slat, slon = storm_motion
@@ -295,7 +303,16 @@ def db_insert(cur, wfo, ph, sig, etn, yr, action, wmo_hdr, prod_id,
                         ST_GeomFromText(%s,4326),%s,TRUE)
                 ON CONFLICT (wfo,phenomena,significance,event_number,
                              vtec_action,vtec_year,issue_time)
-                DO NOTHING
+                DO UPDATE SET
+                    ugc_zones = ARRAY(
+                        SELECT DISTINCT unnest(
+                            observations.wwa.ugc_zones || EXCLUDED.ugc_zones
+                        )
+                    ),
+                    geom = COALESCE(observations.wwa.geom, EXCLUDED.geom),
+                    raw_segment = observations.wwa.raw_segment
+                        || E'\\n---SEGMENT---\\n' || EXCLUDED.raw_segment,
+                    ingested_at = NOW()
             """, (wfo, ph, sig, etn, yr, action, wmo_hdr, prod_id,
                   issue_time, begin_time, end_time, headline, raw_seg,
                   geom_wkt, ugc_zones))
@@ -309,7 +326,15 @@ def db_insert(cur, wfo, ph, sig, etn, yr, action, wmo_hdr, prod_id,
                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE)
                 ON CONFLICT (wfo,phenomena,significance,event_number,
                              vtec_action,vtec_year,issue_time)
-                DO NOTHING
+                DO UPDATE SET
+                    ugc_zones = ARRAY(
+                        SELECT DISTINCT unnest(
+                            observations.wwa.ugc_zones || EXCLUDED.ugc_zones
+                        )
+                    ),
+                    raw_segment = observations.wwa.raw_segment
+                        || E'\\n---SEGMENT---\\n' || EXCLUDED.raw_segment,
+                    ingested_at = NOW()
             """, (wfo, ph, sig, etn, yr, action, wmo_hdr, prod_id,
                   issue_time, begin_time, end_time, headline, raw_seg,
                   ugc_zones))
@@ -345,25 +370,66 @@ def process(text, dry_run=False, debug=False):
     prod_id    = f'{wmo_m.group(1)}.{wmo_m.group(2)}.{wmo_m.group(3)}'
     vtec_year  = issue_time.year
 
-    vtecs = RE_VTEC.findall(text)
-    if not vtecs:
+# ── Core processor ─────────────────────────────────────────────────────────────
+def process(text, dry_run=False, debug=False):
+    """Parse one NWS product; return number of DB ops performed.
+
+    Products may contain multiple segments, each with its own VTEC string
+    and its own local UGC zone block (e.g. a single SPC watch spanning
+    several states — one VTEC+UGC block per state). Each segment is sliced
+    out by VTEC match position and parsed independently so UGC zones,
+    polygon, and headline are never accidentally taken from the wrong
+    segment or only the first one in the product.
+    """
+    text = deduplicate(text)
+
+    wmo_m = RE_WMO.search(text)
+    if not wmo_m:
+        log.warning('No WMO header — skipping')
+        return 0
+
+    wmo_hdr    = f'{wmo_m.group(1)} {wmo_m.group(2)} {wmo_m.group(3)}'
+    now        = datetime.now(timezone.utc)
+    issue_time = parse_wmo_time(wmo_m.group(3), now)
+    prod_id    = f'{wmo_m.group(1)}.{wmo_m.group(2)}.{wmo_m.group(3)}'
+    vtec_year  = issue_time.year
+
+    vtec_matches = list(RE_VTEC.finditer(text))
+    if not vtec_matches:
         if debug:
             log.debug('No VTEC strings in product')
         return 0
 
-    # Parse shared elements once
-    geom_wkt     = parse_polygon(text)
-    storm_motion = parse_storm_motion(text)
-    ugc_zones    = parse_ugc_zones(text)
-    headline     = extract_headline(text)
-    raw_seg      = text[:4000]
+    # Slice the product into one segment per VTEC match, anchored on each
+    # segment's UGC zone block rather than the VTEC line itself. Real NWS
+    # product structure per segment is:
+    #     <UGC zone list>
+    #     /O.NEW.WFO.PH.SIG.ETN.begin-end/
+    #     <headline / hazard text>
+    #     LAT...LON ... (storm-based warnings only)
+    #     TIME...MOT...LOC ...
+    # i.e. UGC precedes its VTEC, while polygon/motion/hazard text follow
+    # it. A segment must therefore start at its own UGC block (found by
+    # scanning backward from the VTEC match to the nearest preceding
+    # UGC-format line) and run through just before the *next* segment's
+    # UGC block begins (or end of text for the last segment) — this keeps
+    # each segment's local UGC, polygon, and motion data together without
+    # bleeding into neighboring segments.
+    ugc_line_starts = [m.start() for m in re.finditer(r'^[A-Z]{2}[CZ]\d{3}', text, re.MULTILINE)]
+
+    def _segment_start(vtec_pos):
+        candidates = [p for p in ugc_line_starts if p < vtec_pos]
+        return candidates[-1] if candidates else 0
+
+    raw_starts = [_segment_start(m.start()) for m in vtec_matches]
+    segments = []
+    for i, m in enumerate(vtec_matches):
+        seg_start = raw_starts[i]
+        seg_end   = raw_starts[i + 1] if i + 1 < len(raw_starts) else len(text)
+        segments.append((m, text[seg_start:seg_end]))
 
     if debug:
-        deg_str = (f"{storm_motion[0]}DEG/{storm_motion[1]}KT"
-                   if storm_motion else 'none')
-        log.debug('WMO=%s  VTECs=%d  polygon=%s  motion=%s  ugcs=%d',
-                  wmo_hdr, len(vtecs),
-                  'YES' if geom_wkt else 'NO', deg_str, len(ugc_zones))
+        log.debug('WMO=%s  segments=%d', wmo_hdr, len(segments))
 
     ops  = 0
     conn = None
@@ -373,8 +439,8 @@ def process(text, dry_run=False, debug=False):
             conn = db_connect()
             cur  = conn.cursor()
 
-        for v in vtecs:
-            vtec_class, action, wfo, ph, sig, etn_s, begin_s, end_s = v
+        for m, seg_text in segments:
+            vtec_class, action, wfo, ph, sig, etn_s, begin_s, end_s = m.groups()
             etn = int(etn_s)
 
             if vtec_class != 'O':
@@ -384,8 +450,25 @@ def process(text, dry_run=False, debug=False):
                     log.debug('Skip %s.%s (%s)', ph, sig, action)
                 continue
 
+            # Parse this segment's local elements. UGC immediately follows
+            # the VTEC line in NWS products, so per-segment slicing gives
+            # the correct local zone list rather than the first one in
+            # the whole product.
+            geom_wkt     = parse_polygon(seg_text)
+            storm_motion = parse_storm_motion(seg_text)
+            ugc_zones    = parse_ugc_zones(seg_text)
+            headline     = extract_headline(seg_text)
+            raw_seg      = seg_text[:4000]
+
             begin_time = parse_vtec_time(begin_s, vtec_year)
             end_time   = parse_vtec_time(end_s,   vtec_year)
+
+            if debug:
+                deg_str = (f"{storm_motion[0]}DEG/{storm_motion[1]}KT"
+                           if storm_motion else 'none')
+                log.debug('  seg %s.%s ETN=%04d  polygon=%s  motion=%s  ugcs=%d',
+                          ph, sig, etn, 'YES' if geom_wkt else 'NO',
+                          deg_str, len(ugc_zones))
 
             if dry_run:
                 sm = (f"{storm_motion[0]}DEG/{storm_motion[1]}KT"
@@ -418,15 +501,16 @@ def process(text, dry_run=False, debug=False):
                     continue
                 # No existing record — fall through to insert
 
-            # Insert
+            # Insert (or merge ugc_zones into matching existing row — see
+            # db_insert's ON CONFLICT DO UPDATE)
             ok = db_insert(cur, wfo, ph, sig, etn, vtec_year, action,
                            wmo_hdr, prod_id, issue_time, begin_time,
                            end_time, headline, raw_seg, geom_wkt,
                            ugc_zones, storm_motion)
             if ok:
-                log.info('Inserted: %s %s.%s ETN=%04d action=%s polygon=%s',
+                log.info('Inserted: %s %s.%s ETN=%04d action=%s polygon=%s ugcs=%d',
                          wfo, ph, sig, etn, action,
-                         'YES' if geom_wkt else 'NO')
+                         'YES' if geom_wkt else 'NO', len(ugc_zones))
                 ops += 1
 
         if not dry_run and conn:
