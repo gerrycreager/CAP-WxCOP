@@ -251,7 +251,7 @@ RMK NXT FCST BY 172100Z="></textarea>
 
     <div class="nav-links">
         <a href="/CAP_WxCOP/admin/kq-stations">Manage KQ Stations</a>
-        <a href="/CAP_WxCOP/admin/manual-taf/recent">Recent Manual TAFs</a>
+        <a href="/CAP_WxCOP/manual-taf/recent">Recent Manual TAFs</a>
         <a href="/CAP_WxCOP/incident-archive">Incident Archive</a>
     </div>
 
@@ -275,7 +275,7 @@ RMK NXT FCST BY 172100Z="></textarea>
         showStatus('info', 'Parsing and saving TAF...');
         
         try {
-            const response = await fetch('/CAP_WxCOP/admin/manual-taf/submit', {
+            const response = await fetch('/CAP_WxCOP/manual-taf/submit', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded',

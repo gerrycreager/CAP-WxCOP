@@ -395,7 +395,8 @@ def get_station_detail(station_id):
                     'raw_text': taf_row[0],
                     'valid_from': taf_row[1].strftime('%Y-%m-%dT%H:%M:%SZ') if taf_row[1] else None,
                     'valid_to': taf_row[2].strftime('%Y-%m-%dT%H:%M:%SZ') if taf_row[2] else None,
-                    'issue_time': taf_row[3].strftime('%Y-%m-%dT%H:%M:%SZ') if taf_row[3] else None
+                    'issue_time': taf_row[3].strftime('%Y-%m-%dT%H:%M:%SZ') if taf_row[3] else None,
+                    'station_id': taf_station
                 }
         except Exception:
             taf_data = None
@@ -459,7 +460,7 @@ def get_station_detail(station_id):
         conn.close()
         
         # Tag TAF with source station if different from requested
-        if taf_data and taf_station != station_id:
+        if taf_data and 'station_id' not in taf_data:
             taf_data['station_id'] = taf_station
 
         # Force is_military=True for KQ stations
