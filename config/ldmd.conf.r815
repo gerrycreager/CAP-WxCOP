@@ -39,8 +39,8 @@ REQUEST	IDS|DDPLUS	".*"	idd.aos.wisc.edu
 
 # Request GOES-East and GOES-West satellite data
 ###REQUEST		SATELLITE	".*"	idd.aos.wisc.edu
-REQUEST		SATELLITE	"^/data/cspp-geo/.*/OR_GLM"	idd.aos.wisc.edu
-REQUEST		DIFAX		".*"	idd.aos.wisc.edu
+REQUEST		SATELLITE	"^/data/cspp-geo/.*/OR_(ABI-L1b-Rad[CF]-M6C(08|13)_G(1[89])_|GLM)"	idd.aos.wisc.edu
+###REQUEST		DIFAX		".*"	idd.aos.wisc.edu
 
 # Request NEXRAD Level II data
 #REQUEST	NEXRAD2	".*"	idd.aos.wisc.edu
