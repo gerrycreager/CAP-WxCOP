@@ -25,6 +25,7 @@ EXEC	"pqact -f IDS|DDPLUS /home/ldm/etc/pqact_text.conf"
 #EXEC	"pqact -f NGRID /home/ldm/etc/pqact_ngrid.conf"
 #EXEC	"pqact -f CONDUIT /home/ldm/etc/pqact_conduit.conf"
 EXEC	"pqact -f IDS|DDPLUS /home/ldm/etc/pqact_fire.conf"
+EXEC	"pqact -f HDS /home/ldm/etc/pqact_hds_tpw.conf"
 #EXEC	"pqact -f EXP /home/ldm/etc/pqact_mrms.conf"
 #EXEC	"pqact -f DIFAX /home/ldm/etc/pqact_satellite.conf"
 
@@ -80,6 +81,11 @@ REQUEST		NGRID	"HRRR"	idd.aos.wisc.edu
 # Request LAMP data
 REQUEST		NGRID	".*"	idd.aos.wisc.edu
 REQUEST		HDS	".*"	idd.aos.wisc.edu
+REQUEST		HDS	"^IXTO(89|99) KNES"	idd.aos.wisc.edu
+## Broader IXT catalog (aerosol, cloud layer/top-height/optical-depth, land/sea
+## surface temp, derived motion winds, ...) -- see pqact_hds_tpw.conf for the
+## per-product breakdown. Uncomment to widen the capture again.
+#REQUEST	HDS	"^IXT[A-Z][0-9][0-9] KNES"	idd.aos.wisc.edu
 
 # Request GFS model data
 #REQUEST	CONDUIT	".*gfs.*pgrb2\.0p25.*"	idd.aos.wisc.edu
