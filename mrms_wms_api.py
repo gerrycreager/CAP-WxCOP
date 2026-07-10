@@ -37,6 +37,7 @@ PRODUCT_CONFIG = {
     'composite':          {'mapfile': 'mrms_composite.map',          'layer': 'composite'},
     'azshear_low':        {'mapfile': 'mrms_azshear_low.map',        'layer': 'azshear_low'},
     'mesh':               {'mapfile': 'mrms_mesh.map',               'layer': 'mesh'},
+    'lightning':          {'mapfile': 'mrms_lightning.map',          'layer': 'lightning'},
     # OCONUS composite sectors
     'composite_alaska':   {'mapfile': 'mrms_composite_alaska.map',   'layer': 'composite_alaska'},
     'composite_hawaii':   {'mapfile': 'mrms_composite_hawaii.map',   'layer': 'composite_hawaii'},

@@ -33,6 +33,8 @@ MAPSERV_BIN = '/usr/bin/mapserv'
 
 # Product → mapfile template and WMS layer name
 PRODUCT_CONFIG = {
+    'wv_conus':      {'mapfile': 'satellite_wv_conus.map',      'layer': 'wv_conus'},
+    'ir_conus':      {'mapfile': 'satellite_ir_conus.map',      'layer': 'ir_conus'},
     'wv_conus_east': {'mapfile': 'satellite_wv_conus_east.map', 'layer': 'wv_conus_east'},
     'wv_conus_west': {'mapfile': 'satellite_wv_conus_west.map', 'layer': 'wv_conus_west'},
     'ir_conus_east': {'mapfile': 'satellite_ir_conus_east.map', 'layer': 'ir_conus_east'},

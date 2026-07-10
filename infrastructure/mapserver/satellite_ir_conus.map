@@ -1,0 +1,135 @@
+MAP
+  NAME "Satellite_ir_conus"
+  STATUS ON
+  SIZE 1200 700
+  EXTENT -130.0 20.0 -60.0 55.0
+  UNITS DD
+  IMAGECOLOR 0 0 0
+
+  PROJECTION
+    "init=epsg:4326"
+  END
+
+  WEB
+    METADATA
+      "wms_title"           "GOES ABI Clean IR (C13) — CONUS mosaic, East+West"
+      "wms_onlineresource"  "http://209.248.90.253/wms/ir_conus"
+      "wms_srs"             "EPSG:4326 EPSG:3857 EPSG:900913"
+      "wms_enable_request"  "*"
+      "wms_encoding"        "UTF-8"
+      "wms_allow_getmap_without_styles" "true"
+    END
+  END
+
+  OUTPUTFORMAT
+    NAME "png"
+    DRIVER "AGG/PNG"
+    MIMETYPE "image/png"
+    IMAGEMODE RGBA
+    EXTENSION "png"
+    TRANSPARENT ON
+  END
+
+  LAYER
+    NAME "ir_conus"
+    TYPE RASTER
+    STATUS ON
+    DATA "/var/www/mapserver/cache/ir_conus_current.tif"
+
+    PROJECTION
+      "init=epsg:4326"
+    END
+
+    PROCESSING "NODATA=nan"
+
+    CLASS
+      NAME ">=300K"
+      EXPRESSION ([pixel] >= 300)
+      STYLE
+        COLOR 20 20 20
+      END
+    END
+    CLASS
+      NAME "290-300K"
+      EXPRESSION ([pixel] >= 290 AND [pixel] < 300)
+      STYLE
+        COLOR 45 45 45
+      END
+    END
+    CLASS
+      NAME "280-290K"
+      EXPRESSION ([pixel] >= 280 AND [pixel] < 290)
+      STYLE
+        COLOR 70 70 70
+      END
+    END
+    CLASS
+      NAME "270-280K"
+      EXPRESSION ([pixel] >= 270 AND [pixel] < 280)
+      STYLE
+        COLOR 100 100 100
+      END
+    END
+    CLASS
+      NAME "260-270K"
+      EXPRESSION ([pixel] >= 260 AND [pixel] < 270)
+      STYLE
+        COLOR 130 130 130
+      END
+    END
+    CLASS
+      NAME "250-260K"
+      EXPRESSION ([pixel] >= 250 AND [pixel] < 260)
+      STYLE
+        COLOR 165 165 165
+      END
+    END
+    CLASS
+      NAME "240-250K"
+      EXPRESSION ([pixel] >= 240 AND [pixel] < 250)
+      STYLE
+        COLOR 200 200 200
+      END
+    END
+    CLASS
+      NAME "230-240K"
+      EXPRESSION ([pixel] >= 230 AND [pixel] < 240)
+      STYLE
+        COLOR 235 235 235
+      END
+    END
+    CLASS
+      NAME "220-230K"
+      EXPRESSION ([pixel] >= 220 AND [pixel] < 230)
+      STYLE
+        COLOR 255 255 0
+      END
+    END
+    CLASS
+      NAME "210-220K"
+      EXPRESSION ([pixel] >= 210 AND [pixel] < 220)
+      STYLE
+        COLOR 255 150 0
+      END
+    END
+    CLASS
+      NAME "200-210K"
+      EXPRESSION ([pixel] >= 200 AND [pixel] < 210)
+      STYLE
+        COLOR 255 0 0
+      END
+    END
+    CLASS
+      NAME "<200K"
+      EXPRESSION ([pixel] < 200)
+      STYLE
+        COLOR 255 255 255
+      END
+    END
+
+    METADATA
+      "wms_title" "GOES ABI Clean IR (C13) — CONUS mosaic, East+West"
+      "wms_srs"   "EPSG:4326 EPSG:3857"
+    END
+  END
+END

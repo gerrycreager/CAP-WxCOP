@@ -58,6 +58,17 @@ PRODUCTS = {
     'ir_full_west':  {'subdir': 'goes18/full/C13', 'glob': 'OR_ABI-L1b-RadF-M6C13_G18_*.nc'},
 }
 
+# East and West each have gaps the other satellite covers (most visibly:
+# GOES-East's CONUS sector doesn't reach the far southwest/Baja area).
+# East wins where both have data (better viewing geometry for the eastern
+# 2/3 of CONUS); West fills whatever East's sector doesn't reach.
+MOSAIC_PRODUCTS = {
+    'wv_conus': {'east': 'wv_conus_east', 'west': 'wv_conus_west'},
+    'ir_conus': {'east': 'ir_conus_east', 'west': 'ir_conus_west'},
+}
+MOSAIC_EXTENT = (-130.0, 20.0, -60.0, 55.0)  # left, bottom, right, top
+MOSAIC_RES    = 0.025  # degrees/pixel
+
 # ── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
     filename=LOG_FILE,
@@ -299,6 +310,122 @@ def parse_timestamp_output(fname: str, product: str) -> datetime.datetime | None
         return None
 
 
+# ── East+West CONUS mosaic ────────────────────────────────────────────────────
+# Operates on our own already-converted, already-validated GeoTIFFs -- not raw
+# untrusted L1b HDF5 -- so no subprocess isolation needed here, just a
+# per-frame try/except so one bad merge doesn't take down the rest.
+
+def mosaic_grid():
+    import rasterio.transform
+    left, bottom, right, top = MOSAIC_EXTENT
+    width  = int(round((right - left) / MOSAIC_RES))
+    height = int(round((top - bottom) / MOSAIC_RES))
+    transform = rasterio.transform.from_bounds(left, bottom, right, top, width, height)
+    return transform, width, height
+
+
+def regrid(src_path: Path, dst_transform, dst_width: int, dst_height: int):
+    """Resample an existing EPSG:4326 GeoTIFF onto the shared mosaic grid."""
+    import rasterio
+    from rasterio.warp import reproject, Resampling
+    with rasterio.open(src_path) as src:
+        dst = np.full((dst_height, dst_width), np.nan, dtype=np.float32)
+        reproject(
+            source=rasterio.band(src, 1), destination=dst,
+            src_transform=src.transform, src_crs=src.crs,
+            dst_transform=dst_transform, dst_crs='EPSG:4326',
+            src_nodata=np.nan, dst_nodata=np.nan,
+            resampling=Resampling.bilinear,
+        )
+    return dst
+
+
+def five_min_bucket(ts: datetime.datetime) -> datetime.datetime:
+    return ts.replace(second=0, microsecond=0, minute=ts.minute - (ts.minute % 5))
+
+
+def mosaic_conus_product(mosaic_name: str, east_product: str, west_product: str, cutoff: datetime.datetime):
+    import rasterio
+
+    east_dir = CACHE_DIR / east_product
+    west_dir = CACHE_DIR / west_product
+    out_dir  = CACHE_DIR / mosaic_name
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    transform, width, height = mosaic_grid()
+
+    east_files, west_files = {}, {}
+    for f in east_dir.glob(f'{east_product}_*.tif'):
+        ts = parse_timestamp_output(f.name, east_product)
+        if ts and ts >= cutoff:
+            east_files[five_min_bucket(ts)] = f
+    for f in west_dir.glob(f'{west_product}_*.tif'):
+        ts = parse_timestamp_output(f.name, west_product)
+        if ts and ts >= cutoff:
+            west_files[five_min_bucket(ts)] = f
+
+    added = 0
+    for bucket in sorted(set(east_files) | set(west_files)):
+        ts_str = bucket.strftime('%Y%m%d-%H%M%S')
+        dest = out_dir / f'{mosaic_name}_{ts_str}.tif'
+        if dest.exists():
+            continue
+
+        e, w = east_files.get(bucket), west_files.get(bucket)
+        try:
+            merged = np.full((height, width), np.nan, dtype=np.float32)
+            if w is not None:
+                merged = regrid(w, transform, width, height)
+            if e is not None:
+                east_grid = regrid(e, transform, width, height)
+                merged = np.where(~np.isnan(east_grid), east_grid, merged)
+
+            tmp = dest.with_suffix('.tif.tmp')
+            with rasterio.open(
+                tmp, 'w', driver='GTiff',
+                height=height, width=width, count=1, dtype='float32',
+                crs='EPSG:4326', transform=transform, nodata=np.nan,
+                compress='deflate',
+            ) as out:
+                out.write(merged, 1)
+            os.replace(tmp, dest)
+            added += 1
+        except Exception as e2:
+            log.error(f'{mosaic_name}: mosaic failed for {ts_str}: {e2}')
+
+    if added:
+        log.info(f'{mosaic_name}: added {added} new mosaic frames')
+
+    cached = sorted(out_dir.glob(f'{mosaic_name}_*.tif'))
+    if not cached:
+        return
+
+    latest = cached[-1]
+    current_link = CACHE_DIR / f'{mosaic_name}_current.tif'
+    tmp_link = current_link.with_suffix('.tmp_link')
+    try:
+        tmp_link.symlink_to(latest)
+        tmp_link.replace(current_link)
+    except Exception as e2:
+        log.error(f'{mosaic_name}: symlink update failed: {e2}')
+        tmp_link.unlink(missing_ok=True)
+
+    pruned = 0
+    for f in out_dir.glob(f'{mosaic_name}_*.tif'):
+        ts = parse_timestamp_output(f.name, mosaic_name)
+        if ts and ts < cutoff:
+            try:
+                f.unlink()
+                pruned += 1
+            except Exception as e2:
+                log.warning(f'prune failed {f.name}: {e2}')
+    if pruned:
+        log.info(f'{mosaic_name}: pruned {pruned} expired frames')
+
+    remaining = len(list(out_dir.glob(f'{mosaic_name}_*.tif')))
+    log.info(f'{mosaic_name}: cache has {remaining} frames, latest={latest.name}')
+
+
 def main():
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     cutoff = datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - datetime.timedelta(hours=RETAIN_HOURS)
@@ -313,6 +440,14 @@ def main():
         # product (heavy backlog) risks TimeoutStartSec killing the whole
         # run before it ever reaches a final save, losing everything learned
         save_bad_files(bad_files, cutoff)
+
+    # East+West CONUS mosaics -- run after base products so fresh source
+    # GeoTIFFs are available to merge
+    for mosaic_name, cfg in MOSAIC_PRODUCTS.items():
+        try:
+            mosaic_conus_product(mosaic_name, cfg['east'], cfg['west'], cutoff)
+        except Exception as e:
+            log.error(f'{mosaic_name}: unhandled exception: {e}', exc_info=True)
 
 
 if __name__ == '__main__':

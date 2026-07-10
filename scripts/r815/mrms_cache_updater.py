@@ -62,6 +62,13 @@ PRODUCTS = {
         'min_size': None,
         'conus'   : 'extent',
     },
+    'lightning': {
+        'subdir'  : 'Lightning',
+        'glob'    : 'MRMS_LightningProbabilityNext60minGrid_scale_1_*.grib2.gz',
+        'ts_re'   : r'(\d{8}-\d{6})\.grib2\.gz$',
+        'min_size': None,
+        'conus'   : 'extent',
+    },
     # ── OCONUS composite sectors ─────────────────────────────────────────────
     # Filed by data2 pqact_mrms_oconus.conf into sector subdirectories
     # No size/extent filter needed — each sector directory is sector-specific

@@ -192,6 +192,13 @@
         </div>
 
         <div class="divider"></div>
+        <div class="ctrl-section">Lightning (GLM strikes)</div>
+        <label class="checkbox-label"><input type="checkbox" id="glmToggle"> Show recent strikes</label>
+        <div class="legend-item"><div class="leg-sym" style="width:9px;height:9px;background:#ff2020;"></div>&lt;5 min</div>
+        <div class="legend-item"><div class="leg-sym" style="width:9px;height:9px;background:#ffd000;"></div>5-15 min</div>
+        <div class="legend-item"><div class="leg-sym" style="width:9px;height:9px;background:#30d030;"></div>15+ min</div>
+
+        <div class="divider"></div>
         <div class="ctrl-section">Airports</div>
         <label class="checkbox-label"><input type="checkbox" id="symbolToggle" checked> Show symbols</label>
         <label class="checkbox-label"><input type="checkbox" id="labelToggle"  checked> Show labels</label>
@@ -385,11 +392,15 @@
     var currentProduct = 'n0q';
     var pollTimer = null, dragging = false;
     var lastPollTime = null;
+    var glmLayer = null, glmTimer = null;
 
     // ── Radar config ──────────────────────────────────────────────────────────
     var IEM_BASE = 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/';
     var MRMS_FRAMES_API = '/CAP_WxCOP/api/mrms/frames';
     var MRMS_WMS_API    = '/CAP_WxCOP/api/mrms/wms';
+    var GLM_FLASHES_API = '/CAP_WxCOP/api/weather-enhanced/glm/flashes';
+    var GLM_MINUTES = 15;      // lookback window
+    var GLM_POLL_MS = 30000;   // refresh cadence
     var SATELLITE_FRAMES_API = '/CAP_WxCOP/api/satellite/frames';
     var SATELLITE_WMS_API    = '/CAP_WxCOP/api/satellite/wms';
 
@@ -440,23 +451,25 @@
         return currentProduct;
     }
 
-    // Satellite: unlike MRMS composite, CONUS itself needs a satellite choice
-    // (GOES-East/West both cover full CONUS) -- every sector resolves to a
-    // concrete product, none pass through unchanged. Guam has no satellite
+    // Satellite: CONUS uses a gap-free East+West mosaic built server-side
+    // (GOES-East's CONUS sector alone misses the far southwest/Baja area).
+    // OCONUS sectors don't have a mosaic yet -- pick whichever satellite's
+    // Full Disk view actually reaches that area. Guam has no satellite
     // coverage yet (pending AF Weather guidance on GOES-18 limb geometry).
     var SATELLITE_SECTOR_MAP = {
-        '':   { sector: 'conus', sat: 'east' },  // CONUS default: GOES-East
-        'ak': { sector: 'full',  sat: 'west' },  // Alaska: GOES-West Full Disk
-        'hi': { sector: 'full',  sat: 'west' },  // Hawaii: GOES-West Full Disk
-        'pr': { sector: 'full',  sat: 'east' },  // PR/USVI: GOES-East Full Disk
-        'gu': null,                              // not yet available
+        '':   { mosaic: true },                  // CONUS default: East+West mosaic
+        'ak': { sector: 'full', sat: 'west' },    // Alaska: GOES-West Full Disk
+        'hi': { sector: 'full', sat: 'west' },    // Hawaii: GOES-West Full Disk
+        'pr': { sector: 'full', sat: 'east' },    // PR/USVI: GOES-East Full Disk
+        'gu': null,                               // not yet available
     };
 
-    // Resolve effective satellite product key, e.g. 'wv' -> 'wv_conus_east'
+    // Resolve effective satellite product key, e.g. 'wv' -> 'wv_conus' or 'wv_full_east'
     function getEffectiveSatelliteProduct() {
         var sec = getSector();
         var m = SATELLITE_SECTOR_MAP.hasOwnProperty(sec) ? SATELLITE_SECTOR_MAP[sec] : SATELLITE_SECTOR_MAP[''];
         if (!m) return null;  // e.g. Guam
+        if (m.mosaic) return currentProduct + '_conus';
         return currentProduct + '_' + m.sector + '_' + m.sat;
     }
 
@@ -769,6 +782,7 @@
                 getEffectiveProduct()!==_lastEffectiveProduct) loopRebuild();
             if (currentSource==='satellite' &&
                 getEffectiveSatelliteProduct()!==_lastEffectiveProduct) loopRebuild();
+            fetchGlmFlashes();
         });
 
         // Auto-refresh every 2 min for MRMS, 5 min for IEM
@@ -866,6 +880,8 @@
             if (loopLayer) loopLayer.setOpacity(op);
         });
 
+        document.getElementById('glmToggle').addEventListener('change', function(){ setGlmVisible(this.checked); });
+
         document.getElementById('symbolToggle').addEventListener('change', updateAirports);
         document.getElementById('labelToggle').addEventListener('change', function() {
             labelsLayer.clearLayers();
@@ -926,6 +942,47 @@
         document.getElementById('aptSearchMsg').textContent = '';
     }
 
+    // ── GLM recent-strike overlay ────────────────────────────────────────────
+    var GLM_AGE_COLOR = ['#ff2020', '#ffd000', '#30d030'];  // 0=red <5m, 1=yellow 5-15m, 2=green 15+m
+
+    function fetchGlmFlashes() {
+        if (!document.getElementById('glmToggle').checked) return;
+        var b = map.getBounds();
+        var url = GLM_FLASHES_API + '?minutes=' + GLM_MINUTES +
+            '&min_lat=' + b.getSouth() + '&max_lat=' + b.getNorth() +
+            '&min_lon=' + b.getWest()  + '&max_lon=' + b.getEast();
+        fetch(url)
+            .then(function(r){ return r.json(); })
+            .then(function(data){
+                if (!glmLayer || !document.getElementById('glmToggle').checked) return;
+                glmLayer.clearLayers();
+                (data.features || []).forEach(function(f){
+                    var lon = f.geometry.coordinates[0], lat = f.geometry.coordinates[1];
+                    var bucket = f.properties.age_bucket;
+                    L.circleMarker([lat, lon], {
+                        renderer: glmLayer.options.renderer,
+                        radius: 3, weight: 0,
+                        fillColor: GLM_AGE_COLOR[bucket] || GLM_AGE_COLOR[2],
+                        fillOpacity: 0.85
+                    }).addTo(glmLayer);
+                });
+            })
+            .catch(function(e){ console.warn('GLM fetch failed:', e); });
+    }
+
+    function setGlmVisible(on) {
+        if (on) {
+            if (!glmLayer) glmLayer = L.layerGroup([], { renderer: L.canvas() });
+            glmLayer.addTo(map);
+            fetchGlmFlashes();
+            if (glmTimer) clearInterval(glmTimer);
+            glmTimer = setInterval(fetchGlmFlashes, GLM_POLL_MS);
+        } else {
+            if (glmTimer) { clearInterval(glmTimer); glmTimer = null; }
+            if (glmLayer) { glmLayer.clearLayers(); map.removeLayer(glmLayer); }
+        }
+    }
+
     // ── Airport loading + rendering ────────────────────────────────────────
     function loadAirports() {
         fetch('/CAP_WxCOP/api/wind-forecast/conus')
@@ -954,6 +1011,9 @@
             var lat = apt.lat || apt.latitude;
             var lon = apt.lon || apt.longitude;
             if (!lat || !lon || !bounds.contains([lat, lon])) return;
+            // Skip airfields with a known runway under 5000ft; keep ones
+            // with missing runway data rather than guess
+            if (apt.longest_runway_ft != null && apt.longest_runway_ft < 5000) return;
 
             var tier = Math.min(apt.label_priority || (apt.is_military ? 1 : 3), 3);
             if (zoom < TIER_SYM_ZOOM[tier]) return;
