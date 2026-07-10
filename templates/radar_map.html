@@ -177,6 +177,11 @@
             <div class="radar-btn" data-product="azshear_low" data-source="mrms" title="AzShear 0-2km AGL">AZS</div>
             <div class="radar-btn" data-product="mesh"        data-source="mrms" title="MESH Instantaneous Hail">MESH</div>
         </div>
+        <div style="font-size:10px;color:#888;margin-top:6px;margin-bottom:3px;">GOES Satellite — loop</div>
+        <div class="radar-btns">
+            <div class="radar-btn" data-product="wv" data-source="satellite" title="GOES Water Vapor (Band 8)">WV</div>
+            <div class="radar-btn" data-product="ir" data-source="satellite" title="GOES Clean IR (Band 13)">IR</div>
+        </div>
 
         <div class="divider"></div>
         <div class="ctrl-section">Opacity</div>
@@ -301,6 +306,28 @@
                 [ 0.010,[255,200,0,160]],[ 0.020,[255,100,0,220]],
                 [ 0.030,[255,0,0,230]],  [ 0.050,[255,255,255,240]]
             ]
+        },
+        wv: {
+            title: 'Water Vapor Brightness Temp (K) — cold/moist → dry',
+            vmin: 190, vmax: 260,
+            labels: ['<190','200','220','240','260K'],
+            stops: [
+                [190,[255,255,255,255]],[200,[220,220,255,255]],
+                [210,[170,190,255,255]],[220,[90,140,255,255]],
+                [230,[40,190,190,255]], [240,[60,160,60,255]],
+                [250,[200,190,40,255]], [260,[170,100,30,255]]
+            ]
+        },
+        ir: {
+            title: 'Clean IR Brightness Temp (K) — warm → cold tops',
+            vmin: 200, vmax: 300,
+            labels: ['<200','220','250','280','300K'],
+            stops: [
+                [200,[255,0,0,255]],   [210,[255,150,0,255]],
+                [220,[255,255,0,255]], [230,[235,235,235,255]],
+                [250,[165,165,165,255]],[270,[100,100,100,255]],
+                [290,[45,45,45,255]],  [300,[20,20,20,255]]
+            ]
         }
     };
 
@@ -363,6 +390,8 @@
     var IEM_BASE = 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/';
     var MRMS_FRAMES_API = '/CAP_WxCOP/api/mrms/frames';
     var MRMS_WMS_API    = '/CAP_WxCOP/api/mrms/wms';
+    var SATELLITE_FRAMES_API = '/CAP_WxCOP/api/satellite/frames';
+    var SATELLITE_WMS_API    = '/CAP_WxCOP/api/satellite/wms';
 
     var IEM_LAYERS = { 'n0q':'nexrad-n0q-900913', 'n0r':'nexrad-n0r-900913',
                        'n0s':'nexrad-n0s-900913', 'n0u':'nexrad-n0u-900913' };
@@ -409,6 +438,26 @@
             return SECTOR_TO_COMPOSITE[sec];
         }
         return currentProduct;
+    }
+
+    // Satellite: unlike MRMS composite, CONUS itself needs a satellite choice
+    // (GOES-East/West both cover full CONUS) -- every sector resolves to a
+    // concrete product, none pass through unchanged. Guam has no satellite
+    // coverage yet (pending AF Weather guidance on GOES-18 limb geometry).
+    var SATELLITE_SECTOR_MAP = {
+        '':   { sector: 'conus', sat: 'east' },  // CONUS default: GOES-East
+        'ak': { sector: 'full',  sat: 'west' },  // Alaska: GOES-West Full Disk
+        'hi': { sector: 'full',  sat: 'west' },  // Hawaii: GOES-West Full Disk
+        'pr': { sector: 'full',  sat: 'east' },  // PR/USVI: GOES-East Full Disk
+        'gu': null,                              // not yet available
+    };
+
+    // Resolve effective satellite product key, e.g. 'wv' -> 'wv_conus_east'
+    function getEffectiveSatelliteProduct() {
+        var sec = getSector();
+        var m = SATELLITE_SECTOR_MAP.hasOwnProperty(sec) ? SATELLITE_SECTOR_MAP[sec] : SATELLITE_SECTOR_MAP[''];
+        if (!m) return null;  // e.g. Guam
+        return currentProduct + '_' + m.sector + '_' + m.sat;
     }
 
     // Is currentProduct an MRMS product (routed to MapServer)?
@@ -527,11 +576,43 @@
         });
     }
 
+    // ── Satellite WMS proxy frames ────────────────────────────────────────────
+    function satelliteFetchFrames(callback) {
+        var hrs = parseInt(document.getElementById('iem-duration').value)||1;
+        var eff = getEffectiveSatelliteProduct();
+        if (!eff) { callback([]); return; }
+        fetch(SATELLITE_FRAMES_API+'?product='+eff+'&hours='+hrs)
+            .then(function(r){ return r.json(); })
+            .then(function(data){
+                var frames = (data.frames||[]).map(function(f){
+                    return { key:'satellite:'+f.ts, layer:null,
+                             label:f.label, source:'satellite', ts:f.ts };
+                });
+                callback(frames);
+            })
+            .catch(function(e){
+                console.warn('Satellite frames fetch failed:', e);
+                callback([]);
+            });
+    }
+
+    function satelliteMakeTileLayer(ts) {
+        var eff = getEffectiveSatelliteProduct();
+        var url = SATELLITE_WMS_API+'?product='+eff+'&ts='+(ts||'');
+        return L.tileLayer.wms(url, {
+            layers: eff,
+            format:'image/png', transparent:true,
+            opacity:0, zIndex:400, version:'1.1.1',
+            srs: 'EPSG:4326',
+            attribution:'GOES ABI &copy; NOAA/NESDIS'
+        });
+    }
+
     // ── Unified loop player ───────────────────────────────────────────────────
     function loopEnsureLayer(frame) {
         if (!loopLayers[frame.key]) {
-            loopLayers[frame.key] = frame.source==='iem'
-                ? iemMakeTileLayer(frame.layer)
+            loopLayers[frame.key] = frame.source==='iem' ? iemMakeTileLayer(frame.layer)
+                : frame.source==='satellite' ? satelliteMakeTileLayer(frame.ts)
                 : mrmsMakeTileLayer(frame.ts);
         }
         return loopLayers[frame.key];
@@ -588,6 +669,22 @@
             var sl=document.getElementById('iem-slider');
             if(sl) sl.max=loopFrames.length-1;
             loopGoTo(loopFrames.length-1);
+        } else if (currentSource==='satellite') {
+            // Satellite — fetch frame list from API
+            // Track effective product so autoRefresh can detect sector changes
+            _lastEffectiveProduct = getEffectiveSatelliteProduct();
+            satelliteFetchFrames(function(frames){
+                var timeEl=document.getElementById('iem-time');
+                if (!frames.length) {
+                    if(timeEl) timeEl.textContent = _lastEffectiveProduct
+                        ? 'No satellite frames available' : 'Not available for this area';
+                    return;
+                }
+                loopFrames=frames;
+                var sl=document.getElementById('iem-slider');
+                if(sl) sl.max=loopFrames.length-1;
+                loopGoTo(loopFrames.length-1);
+            });
         } else {
             // MRMS — fetch frame list from API
             // Track effective product so autoRefresh can detect sector changes
@@ -670,6 +767,8 @@
             if (currentSource==='iem' && getSector()!==loopSector) loopRebuild();
             if (currentSource==='mrms' && currentProduct==='composite' &&
                 getEffectiveProduct()!==_lastEffectiveProduct) loopRebuild();
+            if (currentSource==='satellite' &&
+                getEffectiveSatelliteProduct()!==_lastEffectiveProduct) loopRebuild();
         });
 
         // Auto-refresh every 2 min for MRMS, 5 min for IEM
@@ -682,6 +781,20 @@
                 }
                 var hrs = parseInt(document.getElementById('iem-duration').value)||1;
                 mrmsFetchFrames(function(frames) {
+                    if (!frames.length) return;
+                    loopFrames = frames;
+                    var sl=document.getElementById('iem-slider');
+                    if(sl) sl.max=loopFrames.length-1;
+                    if (!loopPlaying) loopGoTo(loopFrames.length-1);
+                    lastPollTime = new Date();
+                    updatePlayerUI();
+                });
+            } else if (currentSource === 'satellite') {
+                // Rebuild if sector changed (e.g. user panned to Alaska)
+                if (getEffectiveSatelliteProduct() !== _lastEffectiveProduct) {
+                    loopRebuild(); return;
+                }
+                satelliteFetchFrames(function(frames) {
                     if (!frames.length) return;
                     loopFrames = frames;
                     var sl=document.getElementById('iem-slider');
@@ -726,10 +839,12 @@
                 document.querySelectorAll('.radar-btn').forEach(function(b){ b.classList.remove('active'); });
                 this.classList.add('active');
                 currentProduct = this.dataset.product;
-                currentSource  = this.dataset.source;   // 'iem' or 'mrms'
+                currentSource  = this.dataset.source;   // 'iem', 'mrms', or 'satellite'
                 // Colorbar
                 if (currentProduct==='azshear_low')  drawColorbar('azshear');
                 else if (currentProduct==='mesh')     drawColorbar('mesh');
+                else if (currentProduct==='wv')       drawColorbar('wv');
+                else if (currentProduct==='ir')       drawColorbar('ir');
                 else                                  drawColorbar('composite');
                 loopRebuild();
             });

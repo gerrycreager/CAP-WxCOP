@@ -24,6 +24,7 @@ Author: CAP WxCOP
 import os
 import re
 import sys
+import json
 import glob
 import shutil
 import logging
@@ -37,6 +38,7 @@ import numpy as np
 LDM_BASE      = Path('/LDM/satellite')
 CACHE_DIR     = Path('/var/www/mapserver/cache')
 LOG_FILE      = '/var/log/satellite_cache_updater.log'
+BAD_FILE_CACHE = CACHE_DIR / '.satellite_bad_files.json'
 RETAIN_HOURS  = 24
 CHILD_TIMEOUT = 150  # seconds -- Full Disk C13 (5424x5424) reprojection can be slow
 
@@ -64,6 +66,33 @@ logging.basicConfig(
     datefmt='%Y-%m-%dT%H:%M:%SZ',
 )
 log = logging.getLogger('satellite_cache')
+
+
+def load_bad_files() -> dict:
+    """
+    Known-corrupted source files, keyed by path, value = ISO timestamp when
+    recorded. Without this, every run re-spawns a subprocess to re-fail on
+    the same already-known-bad files for as long as they sit in the 24h
+    retention window -- observed in production to meaningfully delay fresh
+    data on products with a heavy corrupted backlog.
+    """
+    try:
+        with open(BAD_FILE_CACHE) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def save_bad_files(bad: dict, cutoff: datetime.datetime):
+    # Prune entries old enough to have aged out of the retention window anyway
+    pruned = {
+        path: ts for path, ts in bad.items()
+        if datetime.datetime.fromisoformat(ts) >= cutoff
+    }
+    tmp = BAD_FILE_CACHE.with_suffix('.tmp')
+    with open(tmp, 'w') as f:
+        json.dump(pruned, f)
+    tmp.replace(BAD_FILE_CACHE)
 
 
 def parse_timestamp(fname: str) -> datetime.datetime | None:
@@ -195,7 +224,7 @@ def convert_one(src: Path, dest: Path) -> tuple[bool, str]:
 
 # ── Per-product update ────────────────────────────────────────────────────────
 
-def update_product(product: str, cfg: dict, cutoff: datetime.datetime):
+def update_product(product: str, cfg: dict, cutoff: datetime.datetime, bad_files: dict):
     prod_dir = CACHE_DIR / product
     prod_dir.mkdir(parents=True, exist_ok=True)
 
@@ -204,20 +233,30 @@ def update_product(product: str, cfg: dict, cutoff: datetime.datetime):
         log.warning(f'{product}: no source files found since {cutoff:%Y%m%d-%H%M%S}')
         return
 
-    added = 0
+    added, skipped_bad = 0, 0
     for ts, src in sources:
         ts_str = ts.strftime('%Y%m%d-%H%M%S')
         dest = prod_dir / f'{product}_{ts_str}.tif'
         if dest.exists():
             continue
+        src_key = str(src)
+        if src_key in bad_files:
+            skipped_bad += 1
+            continue
         ok, err = convert_one(src, dest)
         if not ok:
             log.error(f'{product}: {src.name}: {err}')
+            # Timeouts can be transient (load, slow reprojection) -- only
+            # blacklist genuine crashes/read errors, worth retrying a timeout
+            if 'timed out' not in err:
+                bad_files[src_key] = datetime.datetime.now(datetime.UTC).replace(tzinfo=None).isoformat()
             continue
         added += 1
 
     if added:
         log.info(f'{product}: added {added} new frames')
+    if skipped_bad:
+        log.info(f'{product}: skipped {skipped_bad} known-bad source files')
 
     cached = sorted(prod_dir.glob(f'{product}_*.tif'))
     if not cached:
@@ -263,12 +302,17 @@ def parse_timestamp_output(fname: str, product: str) -> datetime.datetime | None
 def main():
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     cutoff = datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - datetime.timedelta(hours=RETAIN_HOURS)
+    bad_files = load_bad_files()
 
     for product, cfg in PRODUCTS.items():
         try:
-            update_product(product, cfg, cutoff)
+            update_product(product, cfg, cutoff, bad_files)
         except Exception as e:
             log.error(f'{product}: unhandled exception: {e}', exc_info=True)
+        # Save after every product, not just at the end -- a long-running
+        # product (heavy backlog) risks TimeoutStartSec killing the whole
+        # run before it ever reaches a final save, losing everything learned
+        save_bad_files(bad_files, cutoff)
 
 
 if __name__ == '__main__':
