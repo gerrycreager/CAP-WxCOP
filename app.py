@@ -173,6 +173,14 @@ try:
 except Exception as e:
     print(f'⚠ Could not load MRMS WMS API: {e}')
 
+# Satellite WMS proxy — GOES ABI water vapor / IR MapServer rendering
+try:
+    from satellite_wms_api import satellite_wms_bp
+    app.register_blueprint(satellite_wms_bp)
+    print('✓ Satellite WMS API registered at /CAP_WxCOP/api/satellite')
+except Exception as e:
+    print(f'⚠ Could not load Satellite WMS API: {e}')
+
 try:
     from weather_impacts_api import weather_impacts_api
     app.register_blueprint(weather_impacts_api, url_prefix='/api/weather-impacts')

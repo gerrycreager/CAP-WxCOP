@@ -1,0 +1,114 @@
+MAP
+  NAME "Satellite_wv_conus_east"
+  STATUS ON
+  SIZE 1200 700
+  EXTENT -151.87 14.56 -52.94 56.75
+  UNITS DD
+  IMAGECOLOR 0 0 0
+
+  PROJECTION
+    "init=epsg:4326"
+  END
+
+  WEB
+    METADATA
+      "wms_title"           "GOES ABI Water Vapor (C08) — CONUS (GOES-19/East)"
+      "wms_onlineresource"  "http://209.248.90.253/wms/wv_conus_east"
+      "wms_srs"             "EPSG:4326 EPSG:3857 EPSG:900913"
+      "wms_enable_request"  "*"
+      "wms_encoding"        "UTF-8"
+      "wms_allow_getmap_without_styles" "true"
+    END
+  END
+
+  OUTPUTFORMAT
+    NAME "png"
+    DRIVER "AGG/PNG"
+    MIMETYPE "image/png"
+    IMAGEMODE RGBA
+    EXTENSION "png"
+    TRANSPARENT ON
+  END
+
+  LAYER
+    NAME "wv_conus_east"
+    TYPE RASTER
+    STATUS ON
+    DATA "/var/www/mapserver/cache/wv_conus_east_current.tif"
+
+    PROJECTION
+      "init=epsg:4326"
+    END
+
+    PROCESSING "NODATA=nan"
+
+    CLASS
+      NAME "<190K"
+      EXPRESSION ([pixel] < 190)
+      STYLE
+        COLOR 255 255 255
+      END
+    END
+    CLASS
+      NAME "190-200K"
+      EXPRESSION ([pixel] >= 190 AND [pixel] < 200)
+      STYLE
+        COLOR 220 220 255
+      END
+    END
+    CLASS
+      NAME "200-210K"
+      EXPRESSION ([pixel] >= 200 AND [pixel] < 210)
+      STYLE
+        COLOR 170 190 255
+      END
+    END
+    CLASS
+      NAME "210-220K"
+      EXPRESSION ([pixel] >= 210 AND [pixel] < 220)
+      STYLE
+        COLOR 90 140 255
+      END
+    END
+    CLASS
+      NAME "220-230K"
+      EXPRESSION ([pixel] >= 220 AND [pixel] < 230)
+      STYLE
+        COLOR 40 190 190
+      END
+    END
+    CLASS
+      NAME "230-240K"
+      EXPRESSION ([pixel] >= 230 AND [pixel] < 240)
+      STYLE
+        COLOR 60 160 60
+      END
+    END
+    CLASS
+      NAME "240-250K"
+      EXPRESSION ([pixel] >= 240 AND [pixel] < 250)
+      STYLE
+        COLOR 200 190 40
+      END
+    END
+    CLASS
+      NAME "250-260K"
+      EXPRESSION ([pixel] >= 250 AND [pixel] < 260)
+      STYLE
+        COLOR 170 100 30
+      END
+    END
+    CLASS
+      NAME ">=260K"
+      EXPRESSION ([pixel] >= 260)
+      STYLE
+        COLOR 90 50 20
+      END
+    END
+
+    METADATA
+      "wms_title" "GOES ABI Water Vapor (C08) — CONUS (GOES-19/East)"
+      "wms_srs"   "EPSG:4326 EPSG:3857"
+    END
+  END
+END

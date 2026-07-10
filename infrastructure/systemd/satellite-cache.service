@@ -1,0 +1,13 @@
+[Unit]
+Description=Satellite cache updater — radiance to brightness temp for MapServer
+After=network.target
+
+[Service]
+Type=oneshot
+User=www-data
+Group=www-data
+ExecStart=/var/www/cap_winds_app/venv/bin/python3 /usr/local/bin/satellite_cache_updater.py
+StandardOutput=journal
+StandardError=journal
+# Generous -- Full Disk reprojection is slow, backfills can take a while
+TimeoutStartSec=600
