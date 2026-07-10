@@ -31,7 +31,7 @@ log = logging.getLogger(__name__)
 
 # ── paths ─────────────────────────────────────────────────────────────────────
 TILE_ROOT   = Path('/LDM/radar/mrms_tiles')
-MAX_FRAMES  = 60
+MAX_FRAMES  = 360
 ZOOM_MIN    = 3
 ZOOM_MAX    = 10
 
@@ -481,7 +481,7 @@ def update_index(product, sector, timestamp, valid_dt, zoom_min, zoom_max):
 
     with open(index_path, 'w') as f:
         json.dump(idx, f, indent=2)
-    # Update latest symlink for weather map overlay
+    # Update 'latest' symlink for weather map overlay
     if product == 'composite':
         latest_link = TILE_ROOT / product / sector / 'latest'
         if latest_link.is_symlink() or latest_link.exists():
@@ -536,7 +536,7 @@ def render(product_key, sector, grib_path):
 
     # Per-sector zoom cap: CONUS has a huge grid, cap at z8 to keep render time <30s.
     # OCONUS sectors are smaller — z9 is fine. All sectors floor at ZOOM_MIN.
-    ZOOM_MAX_SECTOR = 8 if sector == 'CONUS' else ZOOM_MAX
+    ZOOM_MAX_SECTOR = 10 if sector == 'CONUS' else ZOOM_MAX
 
     # Pre-compute 1-D lat/lon arrays once (used for tile range and bbox checks)
     if lats.ndim == 2:
