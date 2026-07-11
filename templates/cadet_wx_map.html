@@ -176,7 +176,7 @@
       <br>
       <label style="font-size:0.8rem;cursor:pointer;margin-top:6px;display:block;">
         <input type="checkbox" id="mrmsToggle" style="margin-right:4px;">
-        Show MRMS Composite &#8635;
+        Show Radar Composite &#8635;
       </label>
       <div id="mrmsStatus" style="font-size:0.72rem;color:#8bc4a8;margin-top:2px;display:none;">Loading&hellip;</div>
       <select id="glmMinutes" style="width:100%;font-size:0.78rem;margin-top:4px;
@@ -597,7 +597,7 @@ function loadMRMS() {
     })
     .catch(function() {
       var el = document.getElementById('mrmsStatus');
-      if (el) el.textContent = 'MRMS unavailable';
+      if (el) el.textContent = 'Radar unavailable';
     });
 }
 

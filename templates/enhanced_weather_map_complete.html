@@ -1881,7 +1881,7 @@
                     if(cb) { cb.style.display='none'; document.body.classList.remove('mrms-colorbar-open'); }
                     mlStop();
                     if(mlPollTimer){clearInterval(mlPollTimer);mlPollTimer=null;}
-                    document.getElementById('mrmsTimeDisplay').textContent='MRMS — select duration and enable';
+                    document.getElementById('mrmsTimeDisplay').textContent='Radar — select duration and enable';
                     document.getElementById('mrmsFrameDisplay').textContent='— / —';
                 }
             });
@@ -2084,7 +2084,7 @@
     <!-- MRMS colorbar -->
     <div id="mrmsColorbar">
         <div class="cb-panel">
-            <div class="cb-title">Base Reflectivity (dBZ) — MRMS Composite</div>
+            <div class="cb-title">Base Reflectivity (dBZ) — Radar Composite</div>
             <canvas id="mrmsCbCanvas" width="160" height="12"></canvas>
             <div class="cb-labels" id="mrmsCbLabels"></div>
         </div>
@@ -2109,7 +2109,7 @@
                  left:0%;transition:left 0.1s;pointer-events:none;"></div>
         </div>
         <div id="mrmsFrameDisplay" style="font-family:monospace;font-size:12px;color:#ccc;min-width:55px;">— / —</div>
-        <div id="mrmsTimeDisplay"  style="font-family:monospace;font-size:13px;color:#8bc4a8;flex:1;">Enable MRMS Composite above</div>
+        <div id="mrmsTimeDisplay"  style="font-family:monospace;font-size:13px;color:#8bc4a8;flex:1;">Enable Radar Composite above</div>
         <select id="mrmsLocalDuration" title="Loop duration"
                 style="background:#1a1a2e;border:1px solid #444;color:#ccc;
                        font-size:11px;padding:2px 4px;border-radius:3px;cursor:pointer;">

@@ -171,9 +171,9 @@
             <div class="radar-btn"        data-product="n0s" data-source="iem" title="Storm-Relative Velocity (N0S)">N0S</div>
             <div class="radar-btn"        data-product="n0u" data-source="iem" title="Base Velocity (N0U)">N0U</div>
         </div>
-        <div style="font-size:10px;color:#888;margin-top:6px;margin-bottom:3px;">Local MRMS — loop</div>
+        <div style="font-size:10px;color:#888;margin-top:6px;margin-bottom:3px;">Local Radar — loop</div>
         <div class="radar-btns">
-            <div class="radar-btn" data-product="composite"   data-source="mrms" title="MRMS Composite Reflectivity">CMP</div>
+            <div class="radar-btn" data-product="composite"   data-source="mrms" title="Radar Composite Reflectivity">CMP</div>
             <div class="radar-btn" data-product="azshear_low" data-source="mrms" title="AzShear 0-2km AGL">AZS</div>
             <div class="radar-btn" data-product="mesh"        data-source="mrms" title="MESH Instantaneous Hail">MESH</div>
         </div>
@@ -245,7 +245,7 @@
                 style="flex:1;margin:0 6px;accent-color:#4a9c6f;cursor:pointer;">
             <span id="iem-frame" style="font-family:monospace;font-size:13px;color:#ccc;min-width:55px;">— / —</span>
             <span id="iem-time"  style="font-family:monospace;font-size:13px;color:#8bc4a8;flex:1;">Loading…</span>
-            <select id="iem-duration" title="Playback duration (MRMS/satellite retain 36h for incident documentation; NEXRAD/IEM loop is limited to its own external cache window)"
+            <select id="iem-duration" title="Playback duration (Radar/satellite retain 36h for incident documentation; NEXRAD/IEM loop is limited to its own external cache window)"
                 style="background:#2a2a3e;color:#ccc;border:1px solid #555;border-radius:4px;padding:3px 5px;font-size:11px;">
                 <option value="1" selected>1 hr</option>
                 <option value="2">2 hr</option>
@@ -712,7 +712,7 @@
             mrmsFetchFrames(function(frames){
                 if (!frames.length) {
                     var timeEl=document.getElementById('iem-time');
-                    if(timeEl) timeEl.textContent='No MRMS frames available';
+                    if(timeEl) timeEl.textContent='No Radar frames available';
                     return;
                 }
                 loopFrames=frames;

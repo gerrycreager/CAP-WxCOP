@@ -265,7 +265,7 @@
         <!-- Weather overlays -->
         <div class="sb-section">
             <div class="sb-label">Weather Overlays</div>
-            <label class="toggle-row"><input type="checkbox" id="mrmsToggle"> MRMS Composite ⟳</label>
+            <label class="toggle-row"><input type="checkbox" id="mrmsToggle"> Radar Composite ⟳</label>
             <div id="mrmsStatus" style="font-size:10px;color:#888;min-height:12px;"></div>
             <label class="toggle-row" style="margin-top:4px;"><input type="checkbox" id="glmToggle"> GLM Lightning</label>
             <div id="glmStatus" style="font-size:10px;color:#888;min-height:12px;"></div>
@@ -458,7 +458,7 @@ var pollTimer      = null;
                 })
                 .catch(function(){
                   var el=document.getElementById('mrmsStatus');
-                  if(el) el.textContent='MRMS unavailable';
+                  if(el) el.textContent='Radar unavailable';
                 });
           }
 
