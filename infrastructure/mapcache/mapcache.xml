@@ -1,0 +1,368 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mapcache>
+  <metadata>
+    <title>CAP WxCOP MapCache</title>
+  </metadata>
+
+  <cache name="disk" type="disk">
+    <base>/var/cache/mapcache</base>
+    <symlink_blank/>
+  </cache>
+
+  <!-- ═══ MRMS sources (proxied through mrms_wms_api.py / MapServer) ═══ -->
+
+  <source name="composite" type="wms">
+    <http><url>http://127.0.0.1/CAP_WxCOP/api/mrms/wms?product=composite&amp;</url></http>
+    <getmap><params>
+      <FORMAT>image/png</FORMAT>
+      <LAYERS>composite</LAYERS>
+      <TRANSPARENT>true</TRANSPARENT>
+    </params></getmap>
+  </source>
+
+  <source name="azshear_low" type="wms">
+    <http><url>http://127.0.0.1/CAP_WxCOP/api/mrms/wms?product=azshear_low&amp;</url></http>
+    <getmap><params>
+      <FORMAT>image/png</FORMAT>
+      <LAYERS>azshear_low</LAYERS>
+      <TRANSPARENT>true</TRANSPARENT>
+    </params></getmap>
+  </source>
+
+  <source name="mesh" type="wms">
+    <http><url>http://127.0.0.1/CAP_WxCOP/api/mrms/wms?product=mesh&amp;</url></http>
+    <getmap><params>
+      <FORMAT>image/png</FORMAT>
+      <LAYERS>mesh</LAYERS>
+      <TRANSPARENT>true</TRANSPARENT>
+    </params></getmap>
+  </source>
+
+  <source name="composite_alaska" type="wms">
+    <http><url>http://127.0.0.1/CAP_WxCOP/api/mrms/wms?product=composite_alaska&amp;</url></http>
+    <getmap><params>
+      <FORMAT>image/png</FORMAT>
+      <LAYERS>composite_alaska</LAYERS>
+      <TRANSPARENT>true</TRANSPARENT>
+    </params></getmap>
+  </source>
+
+  <source name="composite_hawaii" type="wms">
+    <http><url>http://127.0.0.1/CAP_WxCOP/api/mrms/wms?product=composite_hawaii&amp;</url></http>
+    <getmap><params>
+      <FORMAT>image/png</FORMAT>
+      <LAYERS>composite_hawaii</LAYERS>
+      <TRANSPARENT>true</TRANSPARENT>
+    </params></getmap>
+  </source>
+
+  <source name="composite_carib" type="wms">
+    <http><url>http://127.0.0.1/CAP_WxCOP/api/mrms/wms?product=composite_carib&amp;</url></http>
+    <getmap><params>
+      <FORMAT>image/png</FORMAT>
+      <LAYERS>composite_carib</LAYERS>
+      <TRANSPARENT>true</TRANSPARENT>
+    </params></getmap>
+  </source>
+
+  <source name="composite_guam" type="wms">
+    <http><url>http://127.0.0.1/CAP_WxCOP/api/mrms/wms?product=composite_guam&amp;</url></http>
+    <getmap><params>
+      <FORMAT>image/png</FORMAT>
+      <LAYERS>composite_guam</LAYERS>
+      <TRANSPARENT>true</TRANSPARENT>
+    </params></getmap>
+  </source>
+
+  <!-- ═══ Satellite sources (proxied through satellite_wms_api.py / MapServer) ═══ -->
+
+  <source name="wv_conus" type="wms">
+    <http><url>http://127.0.0.1/CAP_WxCOP/api/satellite/wms?product=wv_conus&amp;</url></http>
+    <getmap><params>
+      <FORMAT>image/png</FORMAT>
+      <LAYERS>wv_conus</LAYERS>
+      <TRANSPARENT>true</TRANSPARENT>
+    </params></getmap>
+  </source>
+
+  <source name="ir_conus" type="wms">
+    <http><url>http://127.0.0.1/CAP_WxCOP/api/satellite/wms?product=ir_conus&amp;</url></http>
+    <getmap><params>
+      <FORMAT>image/png</FORMAT>
+      <LAYERS>ir_conus</LAYERS>
+      <TRANSPARENT>true</TRANSPARENT>
+    </params></getmap>
+  </source>
+
+  <source name="wv_full_east" type="wms">
+    <http><url>http://127.0.0.1/CAP_WxCOP/api/satellite/wms?product=wv_full_east&amp;</url></http>
+    <getmap><params>
+      <FORMAT>image/png</FORMAT>
+      <LAYERS>wv_full_east</LAYERS>
+      <TRANSPARENT>true</TRANSPARENT>
+    </params></getmap>
+  </source>
+
+  <source name="wv_full_west" type="wms">
+    <http><url>http://127.0.0.1/CAP_WxCOP/api/satellite/wms?product=wv_full_west&amp;</url></http>
+    <getmap><params>
+      <FORMAT>image/png</FORMAT>
+      <LAYERS>wv_full_west</LAYERS>
+      <TRANSPARENT>true</TRANSPARENT>
+    </params></getmap>
+  </source>
+
+  <source name="ir_full_east" type="wms">
+    <http><url>http://127.0.0.1/CAP_WxCOP/api/satellite/wms?product=ir_full_east&amp;</url></http>
+    <getmap><params>
+      <FORMAT>image/png</FORMAT>
+      <LAYERS>ir_full_east</LAYERS>
+      <TRANSPARENT>true</TRANSPARENT>
+    </params></getmap>
+  </source>
+
+  <source name="ir_full_west" type="wms">
+    <http><url>http://127.0.0.1/CAP_WxCOP/api/satellite/wms?product=ir_full_west&amp;</url></http>
+    <getmap><params>
+      <FORMAT>image/png</FORMAT>
+      <LAYERS>ir_full_west</LAYERS>
+      <TRANSPARENT>true</TRANSPARENT>
+    </params></getmap>
+  </source>
+
+  <!-- ═══ Tilesets ═══
+       ts dimension: "current" (live frame) or an explicit YYYYMMDD-HHMMSS
+       frame timestamp, passed straight through to the backend's own ts=
+       param (same name, no remapping needed). Tile cache lifetime is
+       4h per operational policy; raw MRMS/satellite data are retained
+       36h for incident documentation, but rendered tiles don't need to
+       outlive an active mission. -->
+
+  <tileset name="composite">
+    <metadata><title>MRMS Composite Reflectivity</title></metadata>
+    <source>composite</source>
+    <cache>disk</cache>
+    <format>PNG</format>
+    <grid>WGS84</grid>
+    <grid>GoogleMapsCompatible</grid>
+    <expires>14400</expires>
+    <dimensions>
+      <dimension name="ts" type="sqlite" default="current">
+        <dbfile>/var/cache/mapcache/dims.sqlite</dbfile>
+        <validate_query>SELECT ts FROM frames WHERE tileset = :tileset AND ts = :dim</validate_query>
+        <list_query>SELECT ts FROM frames WHERE tileset = :tileset ORDER BY ts</list_query>
+      </dimension>
+    </dimensions>
+  </tileset>
+
+  <tileset name="azshear_low">
+    <metadata><title>MRMS AzShear 0-2km AGL</title></metadata>
+    <source>azshear_low</source>
+    <cache>disk</cache>
+    <format>PNG</format>
+    <grid>WGS84</grid>
+    <grid>GoogleMapsCompatible</grid>
+    <expires>14400</expires>
+    <dimensions>
+      <dimension name="ts" type="sqlite" default="current">
+        <dbfile>/var/cache/mapcache/dims.sqlite</dbfile>
+        <validate_query>SELECT ts FROM frames WHERE tileset = :tileset AND ts = :dim</validate_query>
+        <list_query>SELECT ts FROM frames WHERE tileset = :tileset ORDER BY ts</list_query>
+      </dimension>
+    </dimensions>
+  </tileset>
+
+  <tileset name="mesh">
+    <metadata><title>MRMS MESH Instantaneous Hail</title></metadata>
+    <source>mesh</source>
+    <cache>disk</cache>
+    <format>PNG</format>
+    <grid>WGS84</grid>
+    <grid>GoogleMapsCompatible</grid>
+    <expires>14400</expires>
+    <dimensions>
+      <dimension name="ts" type="sqlite" default="current">
+        <dbfile>/var/cache/mapcache/dims.sqlite</dbfile>
+        <validate_query>SELECT ts FROM frames WHERE tileset = :tileset AND ts = :dim</validate_query>
+        <list_query>SELECT ts FROM frames WHERE tileset = :tileset ORDER BY ts</list_query>
+      </dimension>
+    </dimensions>
+  </tileset>
+
+  <tileset name="composite_alaska">
+    <metadata><title>MRMS Composite — Alaska</title></metadata>
+    <source>composite_alaska</source>
+    <cache>disk</cache>
+    <format>PNG</format>
+    <grid>WGS84</grid>
+    <grid>GoogleMapsCompatible</grid>
+    <expires>14400</expires>
+    <dimensions>
+      <dimension name="ts" type="sqlite" default="current">
+        <dbfile>/var/cache/mapcache/dims.sqlite</dbfile>
+        <validate_query>SELECT ts FROM frames WHERE tileset = :tileset AND ts = :dim</validate_query>
+        <list_query>SELECT ts FROM frames WHERE tileset = :tileset ORDER BY ts</list_query>
+      </dimension>
+    </dimensions>
+  </tileset>
+
+  <tileset name="composite_hawaii">
+    <metadata><title>MRMS Composite — Hawaii</title></metadata>
+    <source>composite_hawaii</source>
+    <cache>disk</cache>
+    <format>PNG</format>
+    <grid>WGS84</grid>
+    <grid>GoogleMapsCompatible</grid>
+    <expires>14400</expires>
+    <dimensions>
+      <dimension name="ts" type="sqlite" default="current">
+        <dbfile>/var/cache/mapcache/dims.sqlite</dbfile>
+        <validate_query>SELECT ts FROM frames WHERE tileset = :tileset AND ts = :dim</validate_query>
+        <list_query>SELECT ts FROM frames WHERE tileset = :tileset ORDER BY ts</list_query>
+      </dimension>
+    </dimensions>
+  </tileset>
+
+  <tileset name="composite_carib">
+    <metadata><title>MRMS Composite — Caribbean</title></metadata>
+    <source>composite_carib</source>
+    <cache>disk</cache>
+    <format>PNG</format>
+    <grid>WGS84</grid>
+    <grid>GoogleMapsCompatible</grid>
+    <expires>14400</expires>
+    <dimensions>
+      <dimension name="ts" type="sqlite" default="current">
+        <dbfile>/var/cache/mapcache/dims.sqlite</dbfile>
+        <validate_query>SELECT ts FROM frames WHERE tileset = :tileset AND ts = :dim</validate_query>
+        <list_query>SELECT ts FROM frames WHERE tileset = :tileset ORDER BY ts</list_query>
+      </dimension>
+    </dimensions>
+  </tileset>
+
+  <tileset name="composite_guam">
+    <metadata><title>MRMS Composite — Guam</title></metadata>
+    <source>composite_guam</source>
+    <cache>disk</cache>
+    <format>PNG</format>
+    <grid>WGS84</grid>
+    <grid>GoogleMapsCompatible</grid>
+    <expires>14400</expires>
+    <dimensions>
+      <dimension name="ts" type="sqlite" default="current">
+        <dbfile>/var/cache/mapcache/dims.sqlite</dbfile>
+        <validate_query>SELECT ts FROM frames WHERE tileset = :tileset AND ts = :dim</validate_query>
+        <list_query>SELECT ts FROM frames WHERE tileset = :tileset ORDER BY ts</list_query>
+      </dimension>
+    </dimensions>
+  </tileset>
+
+  <tileset name="wv_conus">
+    <metadata><title>GOES Water Vapor — CONUS mosaic</title></metadata>
+    <source>wv_conus</source>
+    <cache>disk</cache>
+    <format>PNG</format>
+    <grid>WGS84</grid>
+    <grid>GoogleMapsCompatible</grid>
+    <expires>14400</expires>
+    <dimensions>
+      <dimension name="ts" type="sqlite" default="current">
+        <dbfile>/var/cache/mapcache/dims.sqlite</dbfile>
+        <validate_query>SELECT ts FROM frames WHERE tileset = :tileset AND ts = :dim</validate_query>
+        <list_query>SELECT ts FROM frames WHERE tileset = :tileset ORDER BY ts</list_query>
+      </dimension>
+    </dimensions>
+  </tileset>
+
+  <tileset name="ir_conus">
+    <metadata><title>GOES Clean IR — CONUS mosaic</title></metadata>
+    <source>ir_conus</source>
+    <cache>disk</cache>
+    <format>PNG</format>
+    <grid>WGS84</grid>
+    <grid>GoogleMapsCompatible</grid>
+    <expires>14400</expires>
+    <dimensions>
+      <dimension name="ts" type="sqlite" default="current">
+        <dbfile>/var/cache/mapcache/dims.sqlite</dbfile>
+        <validate_query>SELECT ts FROM frames WHERE tileset = :tileset AND ts = :dim</validate_query>
+        <list_query>SELECT ts FROM frames WHERE tileset = :tileset ORDER BY ts</list_query>
+      </dimension>
+    </dimensions>
+  </tileset>
+
+  <tileset name="wv_full_east">
+    <metadata><title>GOES-East Water Vapor — Full Disk</title></metadata>
+    <source>wv_full_east</source>
+    <cache>disk</cache>
+    <format>PNG</format>
+    <grid>WGS84</grid>
+    <grid>GoogleMapsCompatible</grid>
+    <expires>14400</expires>
+    <dimensions>
+      <dimension name="ts" type="sqlite" default="current">
+        <dbfile>/var/cache/mapcache/dims.sqlite</dbfile>
+        <validate_query>SELECT ts FROM frames WHERE tileset = :tileset AND ts = :dim</validate_query>
+        <list_query>SELECT ts FROM frames WHERE tileset = :tileset ORDER BY ts</list_query>
+      </dimension>
+    </dimensions>
+  </tileset>
+
+  <tileset name="wv_full_west">
+    <metadata><title>GOES-West Water Vapor — Full Disk</title></metadata>
+    <source>wv_full_west</source>
+    <cache>disk</cache>
+    <format>PNG</format>
+    <grid>WGS84</grid>
+    <grid>GoogleMapsCompatible</grid>
+    <expires>14400</expires>
+    <dimensions>
+      <dimension name="ts" type="sqlite" default="current">
+        <dbfile>/var/cache/mapcache/dims.sqlite</dbfile>
+        <validate_query>SELECT ts FROM frames WHERE tileset = :tileset AND ts = :dim</validate_query>
+        <list_query>SELECT ts FROM frames WHERE tileset = :tileset ORDER BY ts</list_query>
+      </dimension>
+    </dimensions>
+  </tileset>
+
+  <tileset name="ir_full_east">
+    <metadata><title>GOES-East Clean IR — Full Disk</title></metadata>
+    <source>ir_full_east</source>
+    <cache>disk</cache>
+    <format>PNG</format>
+    <grid>WGS84</grid>
+    <grid>GoogleMapsCompatible</grid>
+    <expires>14400</expires>
+    <dimensions>
+      <dimension name="ts" type="sqlite" default="current">
+        <dbfile>/var/cache/mapcache/dims.sqlite</dbfile>
+        <validate_query>SELECT ts FROM frames WHERE tileset = :tileset AND ts = :dim</validate_query>
+        <list_query>SELECT ts FROM frames WHERE tileset = :tileset ORDER BY ts</list_query>
+      </dimension>
+    </dimensions>
+  </tileset>
+
+  <tileset name="ir_full_west">
+    <metadata><title>GOES-West Clean IR — Full Disk</title></metadata>
+    <source>ir_full_west</source>
+    <cache>disk</cache>
+    <format>PNG</format>
+    <grid>WGS84</grid>
+    <grid>GoogleMapsCompatible</grid>
+    <expires>14400</expires>
+    <dimensions>
+      <dimension name="ts" type="sqlite" default="current">
+        <dbfile>/var/cache/mapcache/dims.sqlite</dbfile>
+        <validate_query>SELECT ts FROM frames WHERE tileset = :tileset AND ts = :dim</validate_query>
+        <list_query>SELECT ts FROM frames WHERE tileset = :tileset ORDER BY ts</list_query>
+      </dimension>
+    </dimensions>
+  </tileset>
+
+  <default_format>PNG</default_format>
+  <service type="wms" enabled="true">
+    <format>PNG</format>
+  </service>
+  <service type="wmts" enabled="true"/>
+  <service type="gmaps" enabled="true"/>
+</mapcache>

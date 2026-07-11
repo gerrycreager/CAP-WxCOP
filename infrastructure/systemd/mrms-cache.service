@@ -1,0 +1,18 @@
+[Unit]
+Description=MRMS cache updater — gunzip latest grib2 for MapServer
+After=network.target
+
+[Service]
+Type=oneshot
+User=www-data
+Group=www-data
+ExecStart=/usr/bin/python3 /usr/local/bin/mrms_cache_updater.py
+StandardOutput=journal
+StandardError=journal
+# Prevent runaway if NFS is slow. Raised from 60s: per-file tiled-GeoTIFF
+# conversion (subprocess-isolated, ~5-10s/file) means a cycle covering
+# several products each with one new frame can legitimately run past a
+# minute; a large backlog (e.g. catching up after an outage) can take much
+# longer. Type=oneshot + this unit's own timer won't double-start while
+# still active, so a generous ceiling here is safe.
+TimeoutStartSec=900

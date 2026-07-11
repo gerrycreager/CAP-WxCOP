@@ -27,6 +27,7 @@ import sys
 import json
 import glob
 import shutil
+import sqlite3
 import logging
 import datetime
 import multiprocessing
@@ -39,8 +40,9 @@ LDM_BASE      = Path('/LDM/satellite')
 CACHE_DIR     = Path('/var/www/mapserver/cache')
 LOG_FILE      = '/var/log/satellite_cache_updater.log'
 BAD_FILE_CACHE = CACHE_DIR / '.satellite_bad_files.json'
-RETAIN_HOURS  = 24
+RETAIN_HOURS  = 36  # incident documentation needs 24-36h
 CHILD_TIMEOUT = 150  # seconds -- Full Disk C13 (5424x5424) reprojection can be slow
+MAPCACHE_DIMS_DB = Path('/var/cache/mapcache/dims.sqlite')
 
 # GOES filename timestamp: ..._sYYYYDDDHHMMSSs_e..._c...nc  (14 digits after 's')
 TS_RE = re.compile(r'_s(\d{14})_')
@@ -235,6 +237,37 @@ def convert_one(src: Path, dest: Path) -> tuple[bool, str]:
 
 # ── Per-product update ────────────────────────────────────────────────────────
 
+def sync_mapcache_dims(product: str, tif_files: list[Path]):
+    """
+    Keep MapCache's sqlite dimension table (dims.sqlite, tileset=product)
+    in sync with what's actually on disk -- see mrms_cache_updater.py's
+    copy of this function for the full rationale.
+    """
+    if not MAPCACHE_DIMS_DB.exists():
+        return
+    ts_re = re.compile(r'_(\d{8}-\d{6})\.tif$')
+    current_ts = {'current'}
+    for f in tif_files:
+        m = ts_re.search(f.name)
+        if m:
+            current_ts.add(m.group(1))
+    try:
+        conn = sqlite3.connect(str(MAPCACHE_DIMS_DB), timeout=5)
+        placeholders = ','.join('?' * len(current_ts))
+        conn.execute(
+            f'DELETE FROM frames WHERE tileset = ? AND ts NOT IN ({placeholders})',
+            [product, *current_ts]
+        )
+        conn.executemany(
+            'INSERT OR IGNORE INTO frames (tileset, ts) VALUES (?, ?)',
+            [(product, ts) for ts in current_ts]
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        log.warning(f'{product}: mapcache dims sync failed: {e}')
+
+
 def update_product(product: str, cfg: dict, cutoff: datetime.datetime, bad_files: dict):
     prod_dir = CACHE_DIR / product
     prod_dir.mkdir(parents=True, exist_ok=True)
@@ -295,6 +328,8 @@ def update_product(product: str, cfg: dict, cutoff: datetime.datetime, bad_files
                 log.warning(f'prune failed {f.name}: {e}')
     if pruned:
         log.info(f'{product}: pruned {pruned} expired frames')
+
+    sync_mapcache_dims(product, list(prod_dir.glob(f'{product}_*.tif')))
 
     remaining = len(list(prod_dir.glob(f'{product}_*.tif')))
     log.info(f'{product}: cache has {remaining} frames, latest={latest.name}')
@@ -421,6 +456,8 @@ def mosaic_conus_product(mosaic_name: str, east_product: str, west_product: str,
                 log.warning(f'prune failed {f.name}: {e2}')
     if pruned:
         log.info(f'{mosaic_name}: pruned {pruned} expired frames')
+
+    sync_mapcache_dims(mosaic_name, list(out_dir.glob(f'{mosaic_name}_*.tif')))
 
     remaining = len(list(out_dir.glob(f'{mosaic_name}_*.tif')))
     log.info(f'{mosaic_name}: cache has {remaining} frames, latest={latest.name}')

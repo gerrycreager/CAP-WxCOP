@@ -1,0 +1,175 @@
+MAP
+  NAME "MRMS_Composite"
+  STATUS ON
+  SIZE 800 600
+  EXTENT -130.0 20.0 -60.0 55.0
+  UNITS DD
+  IMAGECOLOR 0 0 0
+
+  PROJECTION
+    "init=epsg:4326"
+  END
+
+  SYMBOLSET "/var/www/mapserver/symbols/symbols.map"
+
+  WEB
+    METADATA
+      "wms_title"           "MRMS Composite Reflectivity"
+      "wms_onlineresource"  "http://209.248.90.253/wms/mrms_composite"
+      "wms_srs"             "EPSG:4326 EPSG:3857 EPSG:900913"
+      "wms_enable_request"  "*"
+      "wms_encoding"        "UTF-8"
+      "wms_allow_getmap_without_styles" "true"
+    END
+  END
+
+  OUTPUTFORMAT
+    NAME "png"
+    DRIVER "AGG/PNG"
+    MIMETYPE "image/png"
+    IMAGEMODE RGBA
+    EXTENSION "png"
+    TRANSPARENT ON
+  END
+
+  LAYER
+    NAME "composite"
+    TYPE RASTER
+    STATUS ON
+    DATA "/var/www/mapserver/cache/composite_current.tif"
+
+    PROJECTION
+      "init=epsg:4326"
+    END
+
+    PROCESSING "SCALE=-30,75"
+    PROCESSING "SCALE_BUCKETS=256"
+    PROCESSING "NODATA=-99"
+
+    CLASS
+      NAME "ND"
+      EXPRESSION ([pixel] <= -30)
+      STYLE
+        COLOR 0 0 0
+        OPACITY 0
+      END
+    END
+    CLASS
+      NAME "5-10 dBZ"
+      EXPRESSION ([pixel] >= 5 AND [pixel] < 10)
+      STYLE
+        COLOR 4 233 231
+        OPACITY 78
+      END
+    END
+    CLASS
+      NAME "10-20 dBZ"
+      EXPRESSION ([pixel] >= 10 AND [pixel] < 20)
+      STYLE
+        COLOR 1 159 244
+        OPACITY 86
+      END
+    END
+    CLASS
+      NAME "20-25 dBZ"
+      EXPRESSION ([pixel] >= 20 AND [pixel] < 25)
+      STYLE
+        COLOR 2 253 2
+        OPACITY 86
+      END
+    END
+    CLASS
+      NAME "25-30 dBZ"
+      EXPRESSION ([pixel] >= 25 AND [pixel] < 30)
+      STYLE
+        COLOR 0 200 0
+        OPACITY 86
+      END
+    END
+    CLASS
+      NAME "30-35 dBZ"
+      EXPRESSION ([pixel] >= 30 AND [pixel] < 35)
+      STYLE
+        COLOR 0 144 0
+        OPACITY 86
+      END
+    END
+    CLASS
+      NAME "35-40 dBZ"
+      EXPRESSION ([pixel] >= 35 AND [pixel] < 40)
+      STYLE
+        COLOR 255 255 0
+        OPACITY 86
+      END
+    END
+    CLASS
+      NAME "40-45 dBZ"
+      EXPRESSION ([pixel] >= 40 AND [pixel] < 45)
+      STYLE
+        COLOR 231 192 0
+        OPACITY 86
+      END
+    END
+    CLASS
+      NAME "45-50 dBZ"
+      EXPRESSION ([pixel] >= 45 AND [pixel] < 50)
+      STYLE
+        COLOR 255 144 0
+        OPACITY 86
+      END
+    END
+    CLASS
+      NAME "50-55 dBZ"
+      EXPRESSION ([pixel] >= 50 AND [pixel] < 55)
+      STYLE
+        COLOR 255 0 0
+        OPACITY 86
+      END
+    END
+    CLASS
+      NAME "55-60 dBZ"
+      EXPRESSION ([pixel] >= 55 AND [pixel] < 60)
+      STYLE
+        COLOR 214 0 0
+        OPACITY 86
+      END
+    END
+    CLASS
+      NAME "60-65 dBZ"
+      EXPRESSION ([pixel] >= 60 AND [pixel] < 65)
+      STYLE
+        COLOR 192 0 0
+        OPACITY 86
+      END
+    END
+    CLASS
+      NAME "65-70 dBZ"
+      EXPRESSION ([pixel] >= 65 AND [pixel] < 70)
+      STYLE
+        COLOR 255 0 255
+        OPACITY 90
+      END
+    END
+    CLASS
+      NAME "70-75 dBZ"
+      EXPRESSION ([pixel] >= 70 AND [pixel] < 75)
+      STYLE
+        COLOR 192 0 192
+        OPACITY 90
+      END
+    END
+    CLASS
+      NAME ">=75 dBZ"
+      EXPRESSION ([pixel] >= 75)
+      STYLE
+        COLOR 255 255 255
+        OPACITY 94
+      END
+    END
+
+    METADATA
+      "wms_title" "MRMS Composite Reflectivity"
+      "wms_srs"   "EPSG:4326 EPSG:3857"
+    END
+  END
+END

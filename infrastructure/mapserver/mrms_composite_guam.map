@@ -1,0 +1,119 @@
+MAP
+  NAME "MRMS_Composite_Guam"
+  STATUS ON
+  SIZE 800 600
+  EXTENT 139.0  9.0  148.0 22.0
+  UNITS DD
+  IMAGECOLOR 0 0 0
+
+  PROJECTION
+    "init=epsg:4326"
+  END
+
+  SYMBOLSET "/var/www/mapserver/symbols/symbols.map"
+
+  WEB
+    METADATA
+      "wms_title"           "MRMS Composite Reflectivity Guam"
+      "wms_onlineresource"  "http://209.248.90.253:8080/wms/mrms_composite_guam"
+      "wms_srs"             "EPSG:4326 EPSG:3857 EPSG:900913"
+      "wms_enable_request"  "*"
+      "wms_encoding"        "UTF-8"
+      "wms_allow_getmap_without_styles" "true"
+    END
+  END
+
+  OUTPUTFORMAT
+    NAME "png"
+    DRIVER "AGG/PNG"
+    MIMETYPE "image/png"
+    IMAGEMODE RGBA
+    EXTENSION "png"
+    TRANSPARENT ON
+  END
+
+  LAYER
+    NAME "composite_guam"
+    TYPE RASTER
+    STATUS ON
+    DATA "/var/www/mapserver/cache/composite_guam_current.tif"
+
+    PROJECTION
+      "init=epsg:4326"
+    END
+
+    PROCESSING "SCALE=-30,75"
+    PROCESSING "SCALE_BUCKETS=256"
+    PROCESSING "NODATA=-99"
+
+    CLASS
+      NAME "ND"
+      EXPRESSION ([pixel] <= -30)
+      STYLE
+        COLOR 0 0 0
+        OPACITY 0
+      END
+    END
+    CLASS
+      NAME "5-20 dBZ"
+      EXPRESSION ([pixel] >= 5 AND [pixel] < 20)
+      STYLE
+        COLOR 1 159 244
+        OPACITY 82
+      END
+    END
+    CLASS
+      NAME "20-30 dBZ"
+      EXPRESSION ([pixel] >= 20 AND [pixel] < 30)
+      STYLE
+        COLOR 0 200 0
+        OPACITY 86
+      END
+    END
+    CLASS
+      NAME "30-40 dBZ"
+      EXPRESSION ([pixel] >= 30 AND [pixel] < 40)
+      STYLE
+        COLOR 255 255 0
+        OPACITY 86
+      END
+    END
+    CLASS
+      NAME "40-50 dBZ"
+      EXPRESSION ([pixel] >= 40 AND [pixel] < 50)
+      STYLE
+        COLOR 255 144 0
+        OPACITY 86
+      END
+    END
+    CLASS
+      NAME "50-60 dBZ"
+      EXPRESSION ([pixel] >= 50 AND [pixel] < 60)
+      STYLE
+        COLOR 255 0 0
+        OPACITY 86
+      END
+    END
+    CLASS
+      NAME "60-70 dBZ"
+      EXPRESSION ([pixel] >= 60 AND [pixel] < 70)
+      STYLE
+        COLOR 255 0 255
+        OPACITY 90
+      END
+    END
+    CLASS
+      NAME ">=70 dBZ"
+      EXPRESSION ([pixel] >= 70)
+      STYLE
+        COLOR 255 255 255
+        OPACITY 94
+      END
+    END
+
+    METADATA
+      "wms_title" "MRMS Composite Reflectivity Guam"
+      "wms_srs"   "EPSG:4326 EPSG:3857"
+    END
+  END
+END

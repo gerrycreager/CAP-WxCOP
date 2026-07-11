@@ -49,16 +49,26 @@ TS_RE = re.compile(r'^\d{8}-\d{6}$')
 
 
 def get_cache_path(product: str, ts: str | None) -> Path | None:
-    """Resolve product + optional timestamp to a cached grib2 file path."""
+    """
+    Resolve product + optional timestamp to a cached file path.
+
+    Prefers the tiled GeoTIFF (what the mapfiles are set up to read --
+    genuine windowed reads, not a full-grid decode per tile). Falls back
+    to grib2 for the rare case a frame hasn't finished tif conversion yet
+    (cache-updater runs every 2 min; this closes that brief gap rather
+    than silently 404ing).
+    """
     prod_dir = CACHE_DIR / product
     if ts and TS_RE.match(ts):
-        candidate = prod_dir / f'{product}_{ts}.grib2'
-        if candidate.exists():
-            return candidate
+        for ext in ('tif', 'grib2'):
+            candidate = prod_dir / f'{product}_{ts}.{ext}'
+            if candidate.exists():
+                return candidate
     # Fall back to current symlink
-    current = CACHE_DIR / f'{product}_current.grib2'
-    if current.exists():
-        return current
+    for ext in ('tif', 'grib2'):
+        current = CACHE_DIR / f'{product}_current.{ext}'
+        if current.exists():
+            return current
     return None
 
 
@@ -95,7 +105,7 @@ def mrms_frames():
 
     Query params:
       product : composite | azshear_low | mesh  (required)
-      hours   : 1 | 2 | 3  (default 3)
+      hours   : 1-36  (default 3)
 
     Response:
       {
@@ -113,7 +123,7 @@ def mrms_frames():
         return jsonify({'error': f'Unknown product: {product}'}), 400
 
     try:
-        hours = min(3, max(1, int(request.args.get('hours', 3))))
+        hours = min(36, max(1, int(request.args.get('hours', 3))))
     except ValueError:
         hours = 3
 
@@ -122,10 +132,12 @@ def mrms_frames():
         return jsonify({'product': product, 'hours': hours, 'frames': []})
 
     cutoff = datetime.datetime.utcnow() - datetime.timedelta(hours=hours)
-    ts_re  = re.compile(r'_(\d{8}-\d{6})\.grib2$')
+    # tif is what's actually servable (mapfiles read tif, not grib2) --
+    # enumerate based on that, not the grib2 archival copy
+    ts_re  = re.compile(r'_(\d{8}-\d{6})\.tif$')
 
     frames = []
-    for f in sorted(prod_dir.glob(f'{product}_*.grib2')):
+    for f in sorted(prod_dir.glob(f'{product}_*.tif')):
         m = ts_re.search(f.name)
         if not m:
             continue

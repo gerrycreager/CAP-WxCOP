@@ -1,0 +1,135 @@
+MAP
+  NAME "MRMS_AzShear_Low"
+  STATUS ON
+  SIZE 800 600
+  EXTENT -130.0 20.0 -60.0 55.0
+  UNITS DD
+  IMAGECOLOR 0 0 0
+
+  PROJECTION
+    "init=epsg:4326"
+  END
+
+  SYMBOLSET "/var/www/mapserver/symbols/symbols.map"
+
+  WEB
+    METADATA
+      "wms_title"           "MRMS AzShear 0-2km AGL"
+      "wms_onlineresource"  "http://209.248.90.253/wms/mrms_azshear_low"
+      "wms_srs"             "EPSG:4326 EPSG:3857 EPSG:900913"
+      "wms_enable_request"  "*"
+      "wms_encoding"        "UTF-8"
+      "wms_allow_getmap_without_styles" "true"
+    END
+  END
+
+  OUTPUTFORMAT
+    NAME "png"
+    DRIVER "AGG/PNG"
+    MIMETYPE "image/png"
+    IMAGEMODE RGBA
+    EXTENSION "png"
+    TRANSPARENT ON
+  END
+
+  LAYER
+    NAME "azshear_low"
+    TYPE RASTER
+    STATUS ON
+    DATA "/var/www/mapserver/cache/azshear_low_current.tif"
+
+    PROJECTION
+      "init=epsg:4326"
+    END
+
+    PROCESSING "NODATA=0"
+
+    # Dead band -2 to +2 suppressed (noise)
+    # Negative = anticyclonic (blue), Positive = cyclonic (red/purple)
+    CLASS
+      NAME "suppress"
+      EXPRESSION ([pixel] > -2 AND [pixel] < 2)
+      STYLE
+        COLOR 0 0 0
+        OPACITY 0
+      END
+    END
+    CLASS
+      NAME "< -30 anticyclonic"
+      EXPRESSION ([pixel] <= -30)
+      STYLE
+        COLOR 0 0 180
+        OPACITY 80
+      END
+    END
+    CLASS
+      NAME "-30 to -20"
+      EXPRESSION ([pixel] > -30 AND [pixel] <= -20)
+      STYLE
+        COLOR 0 50 200
+        OPACITY 78
+      END
+    END
+    CLASS
+      NAME "-20 to -10"
+      EXPRESSION ([pixel] > -20 AND [pixel] <= -10)
+      STYLE
+        COLOR 50 100 255
+        OPACITY 75
+      END
+    END
+    CLASS
+      NAME "-10 to -2"
+      EXPRESSION ([pixel] > -10 AND [pixel] <= -2)
+      STYLE
+        COLOR 150 190 255
+        OPACITY 65
+      END
+    END
+    CLASS
+      NAME "2 to 10"
+      EXPRESSION ([pixel] >= 2 AND [pixel] < 10)
+      STYLE
+        COLOR 255 200 100
+        OPACITY 65
+      END
+    END
+    CLASS
+      NAME "10 to 20"
+      EXPRESSION ([pixel] >= 10 AND [pixel] < 20)
+      STYLE
+        COLOR 255 120 0
+        OPACITY 75
+      END
+    END
+    CLASS
+      NAME "20 to 30"
+      EXPRESSION ([pixel] >= 20 AND [pixel] < 30)
+      STYLE
+        COLOR 255 0 0
+        OPACITY 82
+      END
+    END
+    CLASS
+      NAME "30 to 40 strong rotation"
+      EXPRESSION ([pixel] >= 30 AND [pixel] < 40)
+      STYLE
+        COLOR 200 0 0
+        OPACITY 86
+      END
+    END
+    CLASS
+      NAME ">= 40 extreme rotation"
+      EXPRESSION ([pixel] >= 40)
+      STYLE
+        COLOR 255 0 255
+        OPACITY 90
+      END
+    END
+
+    METADATA
+      "wms_title" "MRMS Merged AzShear 0-2km AGL"
+      "wms_srs"   "EPSG:4326 EPSG:3857"
+    END
+  END
+END

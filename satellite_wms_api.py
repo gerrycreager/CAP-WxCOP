@@ -93,7 +93,7 @@ def satellite_frames():
     Query params:
       product : wv_conus_east | wv_conus_west | ir_conus_east | ir_conus_west |
                 wv_full_east | wv_full_west | ir_full_east | ir_full_west (required)
-      hours   : 1-24 (default 3)
+      hours   : 1-36 (default 3)
 
     Response:
       {
@@ -111,7 +111,7 @@ def satellite_frames():
         return jsonify({'error': f'Unknown product: {product}'}), 400
 
     try:
-        hours = min(24, max(1, int(request.args.get('hours', 3))))
+        hours = min(36, max(1, int(request.args.get('hours', 3))))
     except ValueError:
         hours = 3
 

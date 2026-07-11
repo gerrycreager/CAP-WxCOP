@@ -245,11 +245,15 @@
                 style="flex:1;margin:0 6px;accent-color:#4a9c6f;cursor:pointer;">
             <span id="iem-frame" style="font-family:monospace;font-size:13px;color:#ccc;min-width:55px;">— / —</span>
             <span id="iem-time"  style="font-family:monospace;font-size:13px;color:#8bc4a8;flex:1;">Loading…</span>
-            <select id="iem-duration" title="Playback duration"
+            <select id="iem-duration" title="Playback duration (MRMS/satellite retain 36h for incident documentation; NEXRAD/IEM loop is limited to its own external cache window)"
                 style="background:#2a2a3e;color:#ccc;border:1px solid #555;border-radius:4px;padding:3px 5px;font-size:11px;">
                 <option value="1" selected>1 hr</option>
                 <option value="2">2 hr</option>
                 <option value="3">3 hr</option>
+                <option value="6">6 hr</option>
+                <option value="12">12 hr</option>
+                <option value="24">24 hr</option>
+                <option value="36">36 hr</option>
             </select>
             <select id="iem-speed" title="Playback speed"
                 style="background:#2a2a3e;color:#ccc;border:1px solid #555;border-radius:4px;padding:3px 5px;font-size:11px;">
@@ -403,6 +407,12 @@
     var GLM_POLL_MS = 30000;   // refresh cadence
     var SATELLITE_FRAMES_API = '/CAP_WxCOP/api/satellite/frames';
     var SATELLITE_WMS_API    = '/CAP_WxCOP/api/satellite/wms';
+    // MapCache tile cache -- native XYZ grid (GoogleMapsCompatible), same
+    // tiling scheme Leaflet uses by default, so tiles are served straight
+    // from disk with no runtime reprojection. Falls straight through to
+    // mrms_wms_api.py / satellite_wms_api.py on a cache miss. Tileset names
+    // match the product keys 1:1 (composite, azshear_low, wv_conus, ...).
+    var MAPCACHE_GMAPS = '/mapcache/gmaps';
 
     var IEM_LAYERS = { 'n0q':'nexrad-n0q-900913', 'n0r':'nexrad-n0r-900913',
                        'n0s':'nexrad-n0s-900913', 'n0u':'nexrad-n0u-900913' };
@@ -577,15 +587,12 @@
 
     function mrmsMakeTileLayer(ts) {
         var eff = getEffectiveProduct();
-        var url = MRMS_WMS_API+'?product='+eff+'&ts='+(ts||'');
-        // Layer name matches the product key (composite_alaska, azshear_low, etc.)
-        var layerName = eff;
-        return L.tileLayer.wms(url, {
-            layers: layerName,
-            format:'image/png', transparent:true,
-            opacity:0, zIndex:400, version:'1.1.1',
-            srs: 'EPSG:4326',
-            attribution:'MRMS &copy; NOAA/CIMSS'
+        var url = MAPCACHE_GMAPS+'/'+eff+'@GoogleMapsCompatible/{z}/{x}/{y}.png'
+                  + (ts ? '?dim_ts='+ts : '');
+        return L.tileLayer(url, {
+            opacity:0, zIndex:400,
+            attribution:'MRMS &copy; NOAA/CIMSS',
+            errorTileUrl:'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
         });
     }
 
@@ -611,13 +618,13 @@
 
     function satelliteMakeTileLayer(ts) {
         var eff = getEffectiveSatelliteProduct();
-        var url = SATELLITE_WMS_API+'?product='+eff+'&ts='+(ts||'');
-        return L.tileLayer.wms(url, {
-            layers: eff,
-            format:'image/png', transparent:true,
-            opacity:0, zIndex:400, version:'1.1.1',
-            srs: 'EPSG:4326',
-            attribution:'GOES ABI &copy; NOAA/NESDIS'
+        if (!eff) return L.tileLayer('', {opacity:0, zIndex:400});
+        var url = MAPCACHE_GMAPS+'/'+eff+'@GoogleMapsCompatible/{z}/{x}/{y}.png'
+                  + (ts ? '?dim_ts='+ts : '');
+        return L.tileLayer(url, {
+            opacity:0, zIndex:400,
+            attribution:'GOES ABI &copy; NOAA/NESDIS',
+            errorTileUrl:'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
         });
     }
 
