@@ -1,0 +1,107 @@
+MAP
+  NAME "TPW_tpw_full_west"
+  STATUS ON
+  SIZE 1200 700
+  EXTENT -180.0 -81.0 -18.0 81.0
+  UNITS DD
+  IMAGECOLOR 0 0 0
+
+  PROJECTION
+    "init=epsg:4326"
+  END
+
+  WEB
+    METADATA
+      "wms_title"           "GOES ABI Total Precipitable Water — Full Disk (GOES-18/West)"
+      "wms_onlineresource"  "http://209.248.90.253/wms/tpw_full_west"
+      "wms_srs"             "EPSG:4326 EPSG:3857 EPSG:900913"
+      "wms_enable_request"  "*"
+      "wms_encoding"        "UTF-8"
+      "wms_allow_getmap_without_styles" "true"
+    END
+  END
+
+  OUTPUTFORMAT
+    NAME "png"
+    DRIVER "AGG/PNG"
+    MIMETYPE "image/png"
+    IMAGEMODE RGBA
+    EXTENSION "png"
+    TRANSPARENT ON
+  END
+
+  LAYER
+    NAME "tpw_full_west"
+    TYPE RASTER
+    STATUS ON
+    DATA "/var/www/mapserver/cache/tpw_full_west_current.tif"
+
+    PROJECTION
+      "init=epsg:4326"
+    END
+
+    PROCESSING "NODATA=nan"
+
+    CLASS
+      NAME "<10mm"
+      EXPRESSION ([pixel] < 10)
+      STYLE
+        COLOR 140 100 60
+      END
+    END
+    CLASS
+      NAME "10-20mm"
+      EXPRESSION ([pixel] >= 10 AND [pixel] < 20)
+      STYLE
+        COLOR 190 150 90
+      END
+    END
+    CLASS
+      NAME "20-30mm"
+      EXPRESSION ([pixel] >= 20 AND [pixel] < 30)
+      STYLE
+        COLOR 230 220 120
+      END
+    END
+    CLASS
+      NAME "30-40mm"
+      EXPRESSION ([pixel] >= 30 AND [pixel] < 40)
+      STYLE
+        COLOR 140 200 100
+      END
+    END
+    CLASS
+      NAME "40-50mm"
+      EXPRESSION ([pixel] >= 40 AND [pixel] < 50)
+      STYLE
+        COLOR 60 170 90
+      END
+    END
+    CLASS
+      NAME "50-60mm"
+      EXPRESSION ([pixel] >= 50 AND [pixel] < 60)
+      STYLE
+        COLOR 40 140 190
+      END
+    END
+    CLASS
+      NAME "60-70mm"
+      EXPRESSION ([pixel] >= 60 AND [pixel] < 70)
+      STYLE
+        COLOR 80 60 200
+      END
+    END
+    CLASS
+      NAME ">=70mm"
+      EXPRESSION ([pixel] >= 70)
+      STYLE
+        COLOR 200 60 200
+      END
+    END
+
+    METADATA
+      "wms_title" "GOES ABI Total Precipitable Water — Full Disk (GOES-18/West)"
+      "wms_srs"   "EPSG:4326 EPSG:3857"
+    END
+  END
+END

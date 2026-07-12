@@ -1,0 +1,15 @@
+[Unit]
+Description=TPW cache updater — GOES ABI L2 Total Precipitable Water for MapServer
+After=network.target
+
+[Service]
+Type=oneshot
+User=www-data
+Group=www-data
+ExecStart=/var/www/cap_winds_app/venv/bin/python3 /usr/local/bin/tpw_cache_updater.py
+StandardOutput=journal
+StandardError=journal
+# Generous -- first runs are catching up a backlog that had no scour/retention
+# rule until this feature was added (see scour.conf), and each file is a
+# subprocess-isolated conversion (~0.5-1s/file, but there can be many)
+TimeoutStartSec=900

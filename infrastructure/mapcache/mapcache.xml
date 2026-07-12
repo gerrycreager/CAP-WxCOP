@@ -130,6 +130,60 @@
     </params></getmap>
   </source>
 
+  <source name="tpw_conus_west" type="wms">
+    <http><url>http://127.0.0.1/CAP_WxCOP/api/tpw/wms?product=tpw_conus_west&amp;</url></http>
+    <getmap><params>
+      <FORMAT>image/png</FORMAT>
+      <LAYERS>tpw_conus_west</LAYERS>
+      <TRANSPARENT>true</TRANSPARENT>
+    </params></getmap>
+  </source>
+
+  <source name="tpw_conus_east" type="wms">
+    <http><url>http://127.0.0.1/CAP_WxCOP/api/tpw/wms?product=tpw_conus_east&amp;</url></http>
+    <getmap><params>
+      <FORMAT>image/png</FORMAT>
+      <LAYERS>tpw_conus_east</LAYERS>
+      <TRANSPARENT>true</TRANSPARENT>
+    </params></getmap>
+  </source>
+
+  <source name="tpw_full_west" type="wms">
+    <http><url>http://127.0.0.1/CAP_WxCOP/api/tpw/wms?product=tpw_full_west&amp;</url></http>
+    <getmap><params>
+      <FORMAT>image/png</FORMAT>
+      <LAYERS>tpw_full_west</LAYERS>
+      <TRANSPARENT>true</TRANSPARENT>
+    </params></getmap>
+  </source>
+
+  <source name="tpw_full_east" type="wms">
+    <http><url>http://127.0.0.1/CAP_WxCOP/api/tpw/wms?product=tpw_full_east&amp;</url></http>
+    <getmap><params>
+      <FORMAT>image/png</FORMAT>
+      <LAYERS>tpw_full_east</LAYERS>
+      <TRANSPARENT>true</TRANSPARENT>
+    </params></getmap>
+  </source>
+
+  <source name="tpw_meso_west" type="wms">
+    <http><url>http://127.0.0.1/CAP_WxCOP/api/tpw/wms?product=tpw_meso_west&amp;</url></http>
+    <getmap><params>
+      <FORMAT>image/png</FORMAT>
+      <LAYERS>tpw_meso_west</LAYERS>
+      <TRANSPARENT>true</TRANSPARENT>
+    </params></getmap>
+  </source>
+
+  <source name="tpw_meso_east" type="wms">
+    <http><url>http://127.0.0.1/CAP_WxCOP/api/tpw/wms?product=tpw_meso_east&amp;</url></http>
+    <getmap><params>
+      <FORMAT>image/png</FORMAT>
+      <LAYERS>tpw_meso_east</LAYERS>
+      <TRANSPARENT>true</TRANSPARENT>
+    </params></getmap>
+  </source>
+
   <!-- ═══ Tilesets ═══
        ts dimension: "current" (live frame) or an explicit YYYYMMDD-HHMMSS
        frame timestamp, passed straight through to the backend's own ts=
@@ -345,6 +399,108 @@
   <tileset name="ir_full_west">
     <metadata><title>GOES-West Clean IR — Full Disk</title></metadata>
     <source>ir_full_west</source>
+    <cache>disk</cache>
+    <format>PNG</format>
+    <grid>WGS84</grid>
+    <grid>GoogleMapsCompatible</grid>
+    <expires>14400</expires>
+    <dimensions>
+      <dimension name="ts" type="sqlite" default="current">
+        <dbfile>/var/cache/mapcache/dims.sqlite</dbfile>
+        <validate_query>SELECT ts FROM frames WHERE tileset = :tileset AND ts = :dim</validate_query>
+        <list_query>SELECT ts FROM frames WHERE tileset = :tileset ORDER BY ts</list_query>
+      </dimension>
+    </dimensions>
+  </tileset>
+
+  <tileset name="tpw_conus_west">
+    <metadata><title>GOES-18/West Total Precipitable Water — CONUS</title></metadata>
+    <source>tpw_conus_west</source>
+    <cache>disk</cache>
+    <format>PNG</format>
+    <grid>WGS84</grid>
+    <grid>GoogleMapsCompatible</grid>
+    <expires>14400</expires>
+    <dimensions>
+      <dimension name="ts" type="sqlite" default="current">
+        <dbfile>/var/cache/mapcache/dims.sqlite</dbfile>
+        <validate_query>SELECT ts FROM frames WHERE tileset = :tileset AND ts = :dim</validate_query>
+        <list_query>SELECT ts FROM frames WHERE tileset = :tileset ORDER BY ts</list_query>
+      </dimension>
+    </dimensions>
+  </tileset>
+
+  <tileset name="tpw_conus_east">
+    <metadata><title>GOES-19/East Total Precipitable Water — CONUS</title></metadata>
+    <source>tpw_conus_east</source>
+    <cache>disk</cache>
+    <format>PNG</format>
+    <grid>WGS84</grid>
+    <grid>GoogleMapsCompatible</grid>
+    <expires>14400</expires>
+    <dimensions>
+      <dimension name="ts" type="sqlite" default="current">
+        <dbfile>/var/cache/mapcache/dims.sqlite</dbfile>
+        <validate_query>SELECT ts FROM frames WHERE tileset = :tileset AND ts = :dim</validate_query>
+        <list_query>SELECT ts FROM frames WHERE tileset = :tileset ORDER BY ts</list_query>
+      </dimension>
+    </dimensions>
+  </tileset>
+
+  <tileset name="tpw_full_west">
+    <metadata><title>GOES-18/West Total Precipitable Water — Full Disk</title></metadata>
+    <source>tpw_full_west</source>
+    <cache>disk</cache>
+    <format>PNG</format>
+    <grid>WGS84</grid>
+    <grid>GoogleMapsCompatible</grid>
+    <expires>14400</expires>
+    <dimensions>
+      <dimension name="ts" type="sqlite" default="current">
+        <dbfile>/var/cache/mapcache/dims.sqlite</dbfile>
+        <validate_query>SELECT ts FROM frames WHERE tileset = :tileset AND ts = :dim</validate_query>
+        <list_query>SELECT ts FROM frames WHERE tileset = :tileset ORDER BY ts</list_query>
+      </dimension>
+    </dimensions>
+  </tileset>
+
+  <tileset name="tpw_full_east">
+    <metadata><title>GOES-19/East Total Precipitable Water — Full Disk</title></metadata>
+    <source>tpw_full_east</source>
+    <cache>disk</cache>
+    <format>PNG</format>
+    <grid>WGS84</grid>
+    <grid>GoogleMapsCompatible</grid>
+    <expires>14400</expires>
+    <dimensions>
+      <dimension name="ts" type="sqlite" default="current">
+        <dbfile>/var/cache/mapcache/dims.sqlite</dbfile>
+        <validate_query>SELECT ts FROM frames WHERE tileset = :tileset AND ts = :dim</validate_query>
+        <list_query>SELECT ts FROM frames WHERE tileset = :tileset ORDER BY ts</list_query>
+      </dimension>
+    </dimensions>
+  </tileset>
+
+  <tileset name="tpw_meso_west">
+    <metadata><title>GOES-18/West Total Precipitable Water — Mesoscale</title></metadata>
+    <source>tpw_meso_west</source>
+    <cache>disk</cache>
+    <format>PNG</format>
+    <grid>WGS84</grid>
+    <grid>GoogleMapsCompatible</grid>
+    <expires>14400</expires>
+    <dimensions>
+      <dimension name="ts" type="sqlite" default="current">
+        <dbfile>/var/cache/mapcache/dims.sqlite</dbfile>
+        <validate_query>SELECT ts FROM frames WHERE tileset = :tileset AND ts = :dim</validate_query>
+        <list_query>SELECT ts FROM frames WHERE tileset = :tileset ORDER BY ts</list_query>
+      </dimension>
+    </dimensions>
+  </tileset>
+
+  <tileset name="tpw_meso_east">
+    <metadata><title>GOES-19/East Total Precipitable Water — Mesoscale</title></metadata>
+    <source>tpw_meso_east</source>
     <cache>disk</cache>
     <format>PNG</format>
     <grid>WGS84</grid>

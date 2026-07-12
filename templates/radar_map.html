@@ -51,14 +51,14 @@
         .ctrl-section { font-size: 11px; font-weight: 700; color: #666; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px; }
 
         .radar-btns { display: flex; gap: 4px; margin-bottom: 4px; }
-        .radar-btn {
+        .radar-btn, .satbg-btn {
             flex: 1; padding: 5px 4px; border: 2px solid #ccc;
             border-radius: 4px; background: white; cursor: pointer;
             font-size: 11px; font-weight: 600; color: #555;
             transition: all 0.15s; text-align: center;
         }
-        .radar-btn:hover { border-color: #888; color: #222; }
-        .radar-btn.active { border-color: #2c5f41; background: #2c5f41; color: white; }
+        .radar-btn:hover, .satbg-btn:hover { border-color: #888; color: #222; }
+        .radar-btn.active, .satbg-btn.active { border-color: #2c5f41; background: #2c5f41; color: white; }
         .radar-btn.disabled { opacity: 0.4; cursor: not-allowed; }
 
         #opacitySlider { width: 100%; margin: 4px 0; accent-color: #2c5f41; }
@@ -177,17 +177,25 @@
             <div class="radar-btn" data-product="azshear_low" data-source="mrms" title="AzShear 0-2km AGL">AZS</div>
             <div class="radar-btn" data-product="mesh"        data-source="mrms" title="MESH Instantaneous Hail">MESH</div>
         </div>
-        <div style="font-size:10px;color:#888;margin-top:6px;margin-bottom:3px;">GOES Satellite — loop</div>
-        <div class="radar-btns">
-            <div class="radar-btn" data-product="wv" data-source="satellite" title="GOES Water Vapor (Band 8)">WV</div>
-            <div class="radar-btn" data-product="ir" data-source="satellite" title="GOES Clean IR (Band 13)">IR</div>
-        </div>
-
         <div class="divider"></div>
-        <div class="ctrl-section">Opacity</div>
+        <div class="ctrl-section">Opacity (Radar)</div>
         <div class="opacity-row">
             <span>Low</span>
             <input type="range" id="opacitySlider" min="20" max="100" value="75">
+            <span>High</span>
+        </div>
+
+        <div class="divider"></div>
+        <div class="ctrl-section">Satellite (background)</div>
+        <label class="checkbox-label"><input type="checkbox" id="satBgToggle"> Show GOES satellite</label>
+        <div class="radar-btns" style="margin-top:4px;">
+            <div class="satbg-btn active" data-satbg="ir"  title="GOES Clean IR (Band 13)">IR</div>
+            <div class="satbg-btn"        data-satbg="wv"  title="GOES Water Vapor (Band 8)">WV</div>
+            <div class="satbg-btn"        data-satbg="tpw" title="GOES L2 Total Precipitable Water (surface to ~300 hPa)">TPW</div>
+        </div>
+        <div class="opacity-row">
+            <span>Low</span>
+            <input type="range" id="satBgOpacitySlider" min="20" max="100" value="70">
             <span>High</span>
         </div>
 
@@ -245,7 +253,7 @@
                 style="flex:1;margin:0 6px;accent-color:#4a9c6f;cursor:pointer;">
             <span id="iem-frame" style="font-family:monospace;font-size:13px;color:#ccc;min-width:55px;">— / —</span>
             <span id="iem-time"  style="font-family:monospace;font-size:13px;color:#8bc4a8;flex:1;">Loading…</span>
-            <select id="iem-duration" title="Playback duration (Radar/satellite retain 36h for incident documentation; NEXRAD/IEM loop is limited to its own external cache window)"
+            <select id="iem-duration" title="Radar loop playback duration, up to 36h for incident documentation (satellite background is always live; NEXRAD/IEM loop is limited to its own external cache window)"
                 style="background:#2a2a3e;color:#ccc;border:1px solid #555;border-radius:4px;padding:3px 5px;font-size:11px;">
                 <option value="1" selected>1 hr</option>
                 <option value="2">2 hr</option>
@@ -397,6 +405,8 @@
     var pollTimer = null, dragging = false;
     var lastPollTime = null;
     var glmLayer = null, glmTimer = null;
+    var satBgLayer = null, satBgProduct = 'ir', satBgEnabled = false;
+    var _lastSatBgEffectiveProduct = null;
 
     // ── Radar config ──────────────────────────────────────────────────────────
     var IEM_BASE = 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/';
@@ -407,6 +417,7 @@
     var GLM_POLL_MS = 30000;   // refresh cadence
     var SATELLITE_FRAMES_API = '/CAP_WxCOP/api/satellite/frames';
     var SATELLITE_WMS_API    = '/CAP_WxCOP/api/satellite/wms';
+    var TPW_FRAMES_API       = '/CAP_WxCOP/api/tpw/frames';
     // MapCache tile cache -- native XYZ grid (GoogleMapsCompatible), same
     // tiling scheme Leaflet uses by default, so tiles are served straight
     // from disk with no runtime reprojection. Falls straight through to
@@ -475,12 +486,33 @@
     };
 
     // Resolve effective satellite product key, e.g. 'wv' -> 'wv_conus' or 'wv_full_east'
-    function getEffectiveSatelliteProduct() {
+    function getEffectiveSatelliteProduct(baseProduct) {
         var sec = getSector();
         var m = SATELLITE_SECTOR_MAP.hasOwnProperty(sec) ? SATELLITE_SECTOR_MAP[sec] : SATELLITE_SECTOR_MAP[''];
         if (!m) return null;  // e.g. Guam
-        if (m.mosaic) return currentProduct + '_conus';
-        return currentProduct + '_' + m.sector + '_' + m.sat;
+        if (m.mosaic) return baseProduct + '_conus';
+        return baseProduct + '_' + m.sector + '_' + m.sat;
+    }
+
+    // TPW: no East+West CONUS mosaic (unlike WV/IR) -- GOES-East's own CONUS
+    // sector alone has decent coverage, so just use it directly. OCONUS
+    // sectors fall back to whichever satellite's Full Disk reaches that area,
+    // same assignment as satellite WV/IR. Mesoscale-1/2 products exist and
+    // are decoded (tpw_meso_west/east) but aren't exposed here -- their
+    // footprint moves scene-to-scene per NOAA tasking, not fixed over any
+    // area, which doesn't fit this always-live background layer well.
+    var TPW_SECTOR_MAP = {
+        '':   { product: 'tpw_conus_east' },  // CONUS default
+        'ak': { product: 'tpw_full_west' },   // Alaska: GOES-West Full Disk
+        'hi': { product: 'tpw_full_west' },   // Hawaii: GOES-West Full Disk
+        'pr': { product: 'tpw_full_east' },   // PR/USVI: GOES-East Full Disk
+        'gu': null,                           // not available
+    };
+
+    function getEffectiveTpwProduct() {
+        var sec = getSector();
+        var m = TPW_SECTOR_MAP.hasOwnProperty(sec) ? TPW_SECTOR_MAP[sec] : TPW_SECTOR_MAP[''];
+        return m ? m.product : null;
     }
 
     // Is currentProduct an MRMS product (routed to MapServer)?
@@ -596,43 +628,88 @@
         });
     }
 
-    // ── Satellite WMS proxy frames ────────────────────────────────────────────
-    function satelliteFetchFrames(callback) {
-        var hrs = parseInt(document.getElementById('iem-duration').value)||1;
-        var eff = getEffectiveSatelliteProduct();
-        if (!eff) { callback([]); return; }
-        fetch(SATELLITE_FRAMES_API+'?product='+eff+'&hours='+hrs)
-            .then(function(r){ return r.json(); })
-            .then(function(data){
-                var frames = (data.frames||[]).map(function(f){
-                    return { key:'satellite:'+f.ts, layer:null,
-                             label:f.label, source:'satellite', ts:f.ts };
-                });
-                callback(frames);
-            })
-            .catch(function(e){
-                console.warn('Satellite frames fetch failed:', e);
-                callback([]);
-            });
+    // ── Satellite/TPW background overlay (independent of the radar loop) ─────
+    // Not part of the unified timeline -- always shows the latest available
+    // frame, refreshed on the same 2-min cadence as autoRefresh(). Sits below
+    // the radar foreground layer (zIndex 390 < 400). WV/IR and TPW use
+    // different sector-routing (TPW has no CONUS mosaic, and exposes fixed
+    // CONUS-sector products instead) and different frame-list APIs, so both
+    // are dispatched through baseProduct here rather than duplicating this
+    // whole overlay machinery a second time for TPW.
+    function getEffectiveBgProduct(baseProduct) {
+        return baseProduct === 'tpw' ? getEffectiveTpwProduct() : getEffectiveSatelliteProduct(baseProduct);
     }
 
-    function satelliteMakeTileLayer(ts) {
-        var eff = getEffectiveSatelliteProduct();
-        if (!eff) return L.tileLayer('', {opacity:0, zIndex:400});
+    function bgFramesApiUrl(baseProduct) {
+        return baseProduct === 'tpw' ? TPW_FRAMES_API : SATELLITE_FRAMES_API;
+    }
+
+    function satBgMakeTileLayer(baseProduct, ts) {
+        var eff = getEffectiveBgProduct(baseProduct);
+        if (!eff) return L.tileLayer('', {opacity:0, zIndex:390});
         var url = MAPCACHE_GMAPS+'/'+eff+'@GoogleMapsCompatible/{z}/{x}/{y}.png'
                   + (ts ? '?dim_ts='+ts : '');
         return L.tileLayer(url, {
-            opacity:0, zIndex:400,
-            attribution:'GOES ABI &copy; NOAA/NESDIS',
+            opacity:0, zIndex:390,
+            attribution: baseProduct === 'tpw' ? 'GOES ABI L2 TPW &copy; NOAA/NESDIS' : 'GOES ABI &copy; NOAA/NESDIS',
             errorTileUrl:'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
         });
     }
 
-    // ── Unified loop player ───────────────────────────────────────────────────
+    function getSatBgOpacity() {
+        return parseInt(document.getElementById('satBgOpacitySlider').value)/100;
+    }
+
+    function satBgFetchLatestTs(baseProduct, callback) {
+        var eff = getEffectiveBgProduct(baseProduct);
+        if (!eff) { callback(null); return; }
+        fetch(bgFramesApiUrl(baseProduct)+'?product='+eff+'&hours=1')
+            .then(function(r){ return r.json(); })
+            .then(function(data){
+                var frames = data.frames||[];
+                callback(frames.length ? frames[frames.length-1].ts : null);
+            })
+            .catch(function(e){
+                console.warn('Satellite background fetch failed:', e);
+                callback(null);
+            });
+    }
+
+    function satBgRefresh() {
+        if (!satBgEnabled) return;
+        var eff = getEffectiveBgProduct(satBgProduct);
+        _lastSatBgEffectiveProduct = eff;
+        if (!eff) {
+            if (satBgLayer) { map.removeLayer(satBgLayer); satBgLayer = null; }
+            return;
+        }
+        satBgFetchLatestTs(satBgProduct, function(ts) {
+            if (!satBgEnabled) return;
+            var next = satBgMakeTileLayer(satBgProduct, ts);
+            next.setOpacity(getSatBgOpacity());
+            next.addTo(map);
+            var prev = satBgLayer;
+            satBgLayer = next;
+            if (prev && prev !== next) {
+                setTimeout(function(){ if (map.hasLayer(prev)) map.removeLayer(prev); }, 300);
+            }
+            bringOverlaysToFront();
+        });
+    }
+
+    function setSatBgVisible(on) {
+        satBgEnabled = on;
+        if (on) {
+            satBgRefresh();
+        } else {
+            if (satBgLayer) { map.removeLayer(satBgLayer); satBgLayer = null; }
+        }
+    }
+
+    // ── Unified loop player (radar foreground: IEM/MRMS only) ────────────────
     function loopEnsureLayer(frame) {
         if (!loopLayers[frame.key]) {
             loopLayers[frame.key] = frame.source==='iem' ? iemMakeTileLayer(frame.layer)
-                : frame.source==='satellite' ? satelliteMakeTileLayer(frame.ts)
                 : mrmsMakeTileLayer(frame.ts);
         }
         return loopLayers[frame.key];
@@ -689,22 +766,6 @@
             var sl=document.getElementById('iem-slider');
             if(sl) sl.max=loopFrames.length-1;
             loopGoTo(loopFrames.length-1);
-        } else if (currentSource==='satellite') {
-            // Satellite — fetch frame list from API
-            // Track effective product so autoRefresh can detect sector changes
-            _lastEffectiveProduct = getEffectiveSatelliteProduct();
-            satelliteFetchFrames(function(frames){
-                var timeEl=document.getElementById('iem-time');
-                if (!frames.length) {
-                    if(timeEl) timeEl.textContent = _lastEffectiveProduct
-                        ? 'No satellite frames available' : 'Not available for this area';
-                    return;
-                }
-                loopFrames=frames;
-                var sl=document.getElementById('iem-slider');
-                if(sl) sl.max=loopFrames.length-1;
-                loopGoTo(loopFrames.length-1);
-            });
         } else {
             // MRMS — fetch frame list from API
             // Track effective product so autoRefresh can detect sector changes
@@ -787,14 +848,14 @@
             if (currentSource==='iem' && getSector()!==loopSector) loopRebuild();
             if (currentSource==='mrms' && currentProduct==='composite' &&
                 getEffectiveProduct()!==_lastEffectiveProduct) loopRebuild();
-            if (currentSource==='satellite' &&
-                getEffectiveSatelliteProduct()!==_lastEffectiveProduct) loopRebuild();
+            if (satBgEnabled && getEffectiveBgProduct(satBgProduct)!==_lastSatBgEffectiveProduct) satBgRefresh();
             fetchGlmFlashes();
         });
 
         // Auto-refresh every 2 min for MRMS, 5 min for IEM
         // Advances to latest frame without interrupting active playback
         function autoRefresh() {
+            if (satBgEnabled) satBgRefresh();
             if (currentSource === 'mrms') {
                 // Rebuild if sector changed (e.g. user panned to Alaska)
                 if (getEffectiveProduct() !== _lastEffectiveProduct) {
@@ -802,20 +863,6 @@
                 }
                 var hrs = parseInt(document.getElementById('iem-duration').value)||1;
                 mrmsFetchFrames(function(frames) {
-                    if (!frames.length) return;
-                    loopFrames = frames;
-                    var sl=document.getElementById('iem-slider');
-                    if(sl) sl.max=loopFrames.length-1;
-                    if (!loopPlaying) loopGoTo(loopFrames.length-1);
-                    lastPollTime = new Date();
-                    updatePlayerUI();
-                });
-            } else if (currentSource === 'satellite') {
-                // Rebuild if sector changed (e.g. user panned to Alaska)
-                if (getEffectiveSatelliteProduct() !== _lastEffectiveProduct) {
-                    loopRebuild(); return;
-                }
-                satelliteFetchFrames(function(frames) {
                     if (!frames.length) return;
                     loopFrames = frames;
                     var sl=document.getElementById('iem-slider');
@@ -860,12 +907,10 @@
                 document.querySelectorAll('.radar-btn').forEach(function(b){ b.classList.remove('active'); });
                 this.classList.add('active');
                 currentProduct = this.dataset.product;
-                currentSource  = this.dataset.source;   // 'iem', 'mrms', or 'satellite'
+                currentSource  = this.dataset.source;   // 'iem' or 'mrms'
                 // Colorbar
                 if (currentProduct==='azshear_low')  drawColorbar('azshear');
                 else if (currentProduct==='mesh')     drawColorbar('mesh');
-                else if (currentProduct==='wv')       drawColorbar('wv');
-                else if (currentProduct==='ir')       drawColorbar('ir');
                 else                                  drawColorbar('composite');
                 loopRebuild();
             });
@@ -888,6 +933,19 @@
         });
 
         document.getElementById('glmToggle').addEventListener('change', function(){ setGlmVisible(this.checked); });
+
+        document.getElementById('satBgToggle').addEventListener('change', function(){ setSatBgVisible(this.checked); });
+        document.querySelectorAll('.satbg-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                document.querySelectorAll('.satbg-btn').forEach(function(b){ b.classList.remove('active'); });
+                this.classList.add('active');
+                satBgProduct = this.dataset.satbg;
+                if (satBgEnabled) satBgRefresh();
+            });
+        });
+        document.getElementById('satBgOpacitySlider').addEventListener('input', function() {
+            if (satBgLayer) satBgLayer.setOpacity(getSatBgOpacity());
+        });
 
         document.getElementById('symbolToggle').addEventListener('change', updateAirports);
         document.getElementById('labelToggle').addEventListener('change', function() {

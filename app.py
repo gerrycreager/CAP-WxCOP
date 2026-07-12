@@ -181,6 +181,14 @@ try:
 except Exception as e:
     print(f'⚠ Could not load Satellite WMS API: {e}')
 
+# TPW WMS proxy — GOES ABI L2 Total Precipitable Water MapServer rendering
+try:
+    from tpw_wms_api import tpw_wms_bp
+    app.register_blueprint(tpw_wms_bp)
+    print('✓ TPW WMS API registered at /CAP_WxCOP/api/tpw')
+except Exception as e:
+    print(f'⚠ Could not load TPW WMS API: {e}')
+
 try:
     from weather_impacts_api import weather_impacts_api
     app.register_blueprint(weather_impacts_api, url_prefix='/api/weather-impacts')
