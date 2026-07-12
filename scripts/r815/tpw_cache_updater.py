@@ -140,6 +140,15 @@ def receipt_timestamp(fname: str) -> datetime.datetime | None:
 
 
 def collect_source_files(cutoff: datetime.datetime) -> list[Path]:
+    """
+    Newest-first. Sorting by path (IXTO89_... < IXTO99_...) would drain one
+    WMO header's entire backlog before ever touching the other -- observed
+    firsthand: east-side buckets sat frozen while west churned through
+    thousands of older files first. Newest-first means every bucket's
+    "current" frame goes live almost immediately regardless of backlog size,
+    with older history filling in behind at whatever pace -- same idea as
+    prewarmMrmsFrames() on the frontend.
+    """
     if not LDM_DIR.is_dir():
         return []
     results = []
@@ -147,8 +156,9 @@ def collect_source_files(cutoff: datetime.datetime) -> list[Path]:
         ts = receipt_timestamp(f.name)
         if ts is None or ts < cutoff:
             continue
-        results.append(f)
-    results.sort()
+        results.append((ts, f))
+    results.sort(key=lambda x: x[0], reverse=True)
+    results = [f for _, f in results]
     return results
 
 
@@ -389,6 +399,12 @@ def main():
     added_by_product = {}
     skipped_bad = skipped_done = 0
 
+    # Save every 200 conversions, not just at the end -- a long backlog
+    # (this script had none until scour.conf got a retention rule for it)
+    # can legitimately run past TimeoutStartSec, and losing everything
+    # learned in an unsaved run means redoing it next cycle. Same rationale
+    # as satellite_cache_updater.py's per-product save.
+    since_save = 0
     for src in sources:
         src_key = str(src)
         if src_key in processed:
@@ -405,6 +421,12 @@ def main():
             continue
         processed.add(src_key)
         added_by_product[info] = added_by_product.get(info, 0) + 1
+
+        since_save += 1
+        if since_save >= 200:
+            save_bad_files(bad_files, cutoff)
+            save_json_set(PROCESSED_FILE_CACHE, processed)
+            since_save = 0
 
     for product, n in added_by_product.items():
         log.info(f'{product}: added {n} new frames')

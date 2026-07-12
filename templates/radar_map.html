@@ -86,6 +86,7 @@
         .colorbar-title { font-weight: 700; font-size: 11px; margin-bottom: 4px; color: #222; }
         .colorbar-strip { height: 14px; width: 200px; border-radius: 2px; border: 1px solid #aaa; margin-bottom: 2px; }
         .colorbar-labels { display: flex; justify-content: space-between; font-size: 9px; color: #444; width: 200px; }
+        .colorbar-heights { display: flex; justify-content: space-between; font-size: 9px; color: #888; width: 200px; margin-top: 1px; }
 
         /* Airport label classes */
         .apt-t1-lbl { font-size: 11px; font-weight: 700; color: white; background: rgba(200,30,30,0.93); padding: 2px 5px; border-radius: 3px; border: 1px solid #800; white-space: nowrap; pointer-events: none; box-shadow: 0 1px 4px rgba(0,0,0,0.5); transform: translateX(-50%); }
@@ -234,6 +235,7 @@
             <div class="colorbar-title" id="colorbarTitle">Base Reflectivity (dBZ) — NEXRAD N0Q</div>
             <canvas class="colorbar-strip" id="colorbarCanvas" width="200" height="14"></canvas>
             <div class="colorbar-labels" id="colorbarLabels"></div>
+            <div class="colorbar-heights" id="colorbarHeights" style="display:none;"></div>
         </div>
     </div>
 
@@ -338,14 +340,37 @@
             ]
         },
         ir: {
-            title: 'Clean IR Brightness Temp (K) — warm → cold tops',
+            // heights is a rough US Standard Atmosphere estimate (15C
+            // sea-level, 6.5K/km lapse rate) from brightness temp -- a real
+            // approximation, not a retrieval. Breaks down at/above the
+            // ~36kft tropopause, where temperature stops decreasing with
+            // height (or even rises), so very cold overshooting convective
+            // tops don't map to a real height above that -- shown as
+            // "≥36kf" rather than extrapolated further.
+            title: 'Clean IR Brightness Temp (K) — cold/high → warm/low',
             vmin: 200, vmax: 300,
-            labels: ['<200','220','250','280','300K'],
+            labels: ['<200', '220', '250', '280', '300K'],
+            heights: ['≥36kf', '34kf', '19kf', '4kf', 'sfc'],
             stops: [
                 [200,[255,0,0,255]],   [210,[255,150,0,255]],
                 [220,[255,255,0,255]], [230,[235,235,235,255]],
                 [250,[165,165,165,255]],[270,[100,100,100,255]],
                 [290,[45,45,45,255]],  [300,[20,20,20,255]]
+            ]
+        },
+        tpw: {
+            // Colors/breakpoints match the mm CLASS thresholds in the
+            // tpw_*.map mapfiles (server-side rendering) -- this is a smooth
+            // gradient approximation of those discrete class bands, same
+            // convention already used for the other legends here.
+            title: 'Total Precipitable Water (mm), surface to ~300 hPa',
+            vmin: 0, vmax: 70,
+            labels: ['0','10','20','30','40','50','60','≥70mm'],
+            stops: [
+                [0, [140,100,60,220]], [10,[190,150,90,220]],
+                [20,[230,220,120,220]],[30,[140,200,100,220]],
+                [40,[60,170,90,220]],  [50,[40,140,190,220]],
+                [60,[80,60,200,220]],  [70,[200,60,200,230]]
             ]
         }
     };
@@ -383,6 +408,22 @@
         document.getElementById('colorbarTitle').textContent = cm.title;
         document.getElementById('colorbarLabels').innerHTML =
             cm.labels.map(function(l){ return '<span>'+l+'</span>'; }).join('');
+        var hEl = document.getElementById('colorbarHeights');
+        if (cm.heights) {
+            hEl.style.display = 'flex';
+            hEl.innerHTML = cm.heights.map(function(l){ return '<span>'+l+'</span>'; }).join('');
+        } else {
+            hEl.style.display = 'none';
+            hEl.innerHTML = '';
+        }
+    }
+
+    // Which CMAPS key matches the currently-selected radar/IEM product --
+    // shared by the radar-btn handler and by satBgToggle switching back off.
+    function radarColorbarKey() {
+        if (currentProduct==='azshear_low') return 'azshear';
+        if (currentProduct==='mesh') return 'mesh';
+        return 'composite';
     }
 
     // ── Airport display tiers ──────────────────────────────────────────────
@@ -908,10 +949,7 @@
                 this.classList.add('active');
                 currentProduct = this.dataset.product;
                 currentSource  = this.dataset.source;   // 'iem' or 'mrms'
-                // Colorbar
-                if (currentProduct==='azshear_low')  drawColorbar('azshear');
-                else if (currentProduct==='mesh')     drawColorbar('mesh');
-                else                                  drawColorbar('composite');
+                drawColorbar(radarColorbarKey());
                 loopRebuild();
             });
         });
@@ -934,13 +972,16 @@
 
         document.getElementById('glmToggle').addEventListener('change', function(){ setGlmVisible(this.checked); });
 
-        document.getElementById('satBgToggle').addEventListener('change', function(){ setSatBgVisible(this.checked); });
+        document.getElementById('satBgToggle').addEventListener('change', function(){
+            setSatBgVisible(this.checked);
+            drawColorbar(this.checked ? satBgProduct : radarColorbarKey());
+        });
         document.querySelectorAll('.satbg-btn').forEach(function(btn) {
             btn.addEventListener('click', function() {
                 document.querySelectorAll('.satbg-btn').forEach(function(b){ b.classList.remove('active'); });
                 this.classList.add('active');
                 satBgProduct = this.dataset.satbg;
-                if (satBgEnabled) satBgRefresh();
+                if (satBgEnabled) { satBgRefresh(); drawColorbar(satBgProduct); }
             });
         });
         document.getElementById('satBgOpacitySlider').addEventListener('input', function() {
