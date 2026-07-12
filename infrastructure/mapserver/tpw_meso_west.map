@@ -53,42 +53,48 @@ MAP
       NAME "10-20mm"
       EXPRESSION ([pixel] >= 10 AND [pixel] < 20)
       STYLE
-        COLOR 190 150 90
+        COLORRANGE 190 150 90  230 220 120
+        DATARANGE 10 20
       END
     END
     CLASS
       NAME "20-30mm"
       EXPRESSION ([pixel] >= 20 AND [pixel] < 30)
       STYLE
-        COLOR 230 220 120
+        COLORRANGE 230 220 120  140 200 100
+        DATARANGE 20 30
       END
     END
     CLASS
       NAME "30-40mm"
       EXPRESSION ([pixel] >= 30 AND [pixel] < 40)
       STYLE
-        COLOR 140 200 100
+        COLORRANGE 140 200 100  60 170 90
+        DATARANGE 30 40
       END
     END
     CLASS
       NAME "40-50mm"
       EXPRESSION ([pixel] >= 40 AND [pixel] < 50)
       STYLE
-        COLOR 60 170 90
+        COLORRANGE 60 170 90  40 140 190
+        DATARANGE 40 50
       END
     END
     CLASS
       NAME "50-60mm"
       EXPRESSION ([pixel] >= 50 AND [pixel] < 60)
       STYLE
-        COLOR 40 140 190
+        COLORRANGE 40 140 190  80 60 200
+        DATARANGE 50 60
       END
     END
     CLASS
       NAME "60-70mm"
       EXPRESSION ([pixel] >= 60 AND [pixel] < 70)
       STYLE
-        COLOR 80 60 200
+        COLORRANGE 80 60 200  200 60 200
+        DATARANGE 60 70
       END
     END
     CLASS

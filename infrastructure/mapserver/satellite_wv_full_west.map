@@ -53,49 +53,56 @@ MAP
       NAME "190-200K"
       EXPRESSION ([pixel] >= 190 AND [pixel] < 200)
       STYLE
-        COLOR 220 220 255
+        COLORRANGE 220 220 255  170 190 255
+        DATARANGE 190 200
       END
     END
     CLASS
       NAME "200-210K"
       EXPRESSION ([pixel] >= 200 AND [pixel] < 210)
       STYLE
-        COLOR 170 190 255
+        COLORRANGE 170 190 255  90 140 255
+        DATARANGE 200 210
       END
     END
     CLASS
       NAME "210-220K"
       EXPRESSION ([pixel] >= 210 AND [pixel] < 220)
       STYLE
-        COLOR 90 140 255
+        COLORRANGE 90 140 255  40 190 190
+        DATARANGE 210 220
       END
     END
     CLASS
       NAME "220-230K"
       EXPRESSION ([pixel] >= 220 AND [pixel] < 230)
       STYLE
-        COLOR 40 190 190
+        COLORRANGE 40 190 190  60 160 60
+        DATARANGE 220 230
       END
     END
     CLASS
       NAME "230-240K"
       EXPRESSION ([pixel] >= 230 AND [pixel] < 240)
       STYLE
-        COLOR 60 160 60
+        COLORRANGE 60 160 60  200 190 40
+        DATARANGE 230 240
       END
     END
     CLASS
       NAME "240-250K"
       EXPRESSION ([pixel] >= 240 AND [pixel] < 250)
       STYLE
-        COLOR 200 190 40
+        COLORRANGE 200 190 40  170 100 30
+        DATARANGE 240 250
       END
     END
     CLASS
       NAME "250-260K"
       EXPRESSION ([pixel] >= 250 AND [pixel] < 260)
       STYLE
-        COLOR 170 100 30
+        COLORRANGE 170 100 30  90 50 20
+        DATARANGE 250 260
       END
     END
     CLASS
