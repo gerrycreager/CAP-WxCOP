@@ -351,6 +351,43 @@
         #mrmsColorbar .cb-labels {
             display: flex; justify-content: space-between; width: 160px; font-size: 9px; color: #444;
         }
+
+        /* TPW colorbar — sits to the right of the MRMS colorbar, same row */
+        #tpwColorbar {
+            display: none; position: fixed; bottom: 215px; left: 190px; z-index: 1001;
+        }
+        body.radar-open #tpwColorbar { bottom: 270px; }
+        #tpwColorbar .cb-panel {
+            background: rgba(255,255,255,0.93); border-radius: 6px;
+            padding: 5px 8px; box-shadow: 0 1px 6px rgba(0,0,0,0.3);
+            font-size: 10px; font-family: monospace;
+        }
+        #tpwColorbar .cb-title { font-weight: 700; font-size: 11px; margin-bottom: 3px; }
+        #tpwColorbar canvas { display: block; border: 1px solid #aaa; border-radius: 2px; margin-bottom: 2px; }
+        #tpwColorbar .cb-labels {
+            display: flex; justify-content: space-between; width: 160px; font-size: 9px; color: #444;
+        }
+
+        /* Satellite (IR/WV) colorbar — sits right of the TPW colorbar, same row.
+           Only shown for IR/WV (our own pipeline); VIS stays on nowCOAST, whose
+           color rendering we don't control, so no legend for it. */
+        #satColorbar {
+            display: none; position: fixed; bottom: 215px; left: 370px; z-index: 1001;
+        }
+        body.radar-open #satColorbar { bottom: 270px; }
+        #satColorbar .cb-panel {
+            background: rgba(255,255,255,0.93); border-radius: 6px;
+            padding: 5px 8px; box-shadow: 0 1px 6px rgba(0,0,0,0.3);
+            font-size: 10px; font-family: monospace;
+        }
+        #satColorbar .cb-title { font-weight: 700; font-size: 11px; margin-bottom: 3px; }
+        #satColorbar canvas { display: block; border: 1px solid #aaa; border-radius: 2px; margin-bottom: 2px; }
+        #satColorbar .cb-labels {
+            display: flex; justify-content: space-between; width: 160px; font-size: 9px; color: #444;
+        }
+        #satColorbar .cb-heights {
+            display: flex; justify-content: space-between; width: 160px; font-size: 9px; color: #888; margin-top: 1px;
+        }
         /* ── Hazard sidebar (AIRMET/SIGMET click) ──────────────────── */
         #hazardSidebar {
             position: fixed;
@@ -592,6 +629,22 @@
                 </label>
             </div>
             <div id="satStatus" style="font-size:10px;color:#888;margin-top:3px;"></div>
+        </div>
+        <div class="divider"></div>
+        <h3>Precipitable Water</h3>
+        <label class="checkbox-label">
+            <input type="checkbox" id="tpwToggle"> GOES TPW (background)
+        </label>
+        <div id="tpwSubOptions" style="display:none;margin-left:16px;margin-top:2px;font-size:11px;">
+            <div style="margin-top:4px;">
+                <label style="font-size:10px;color:#ccc;display:flex;align-items:center;gap:6px;">
+                    Opacity
+                    <input type="range" id="tpwOpacity" min="0" max="100" value="70"
+                           style="flex:1;accent-color:#4a9c6f;cursor:pointer;">
+                    <span id="tpwOpacityVal" style="font-size:10px;color:#888;min-width:28px;">70%</span>
+                </label>
+            </div>
+            <div id="tpwStatus" style="font-size:10px;color:#888;margin-top:3px;"></div>
         </div>
         <div class="divider"></div>
         <h3>Wind Flow</h3>
@@ -2090,6 +2143,169 @@
         </div>
     </div>
 
+    <!-- TPW colorbar -->
+    <div id="tpwColorbar">
+        <div class="cb-panel">
+            <div class="cb-title">Total Precipitable Water (mm)</div>
+            <canvas id="tpwCbCanvas" width="160" height="12"></canvas>
+            <div class="cb-labels" id="tpwCbLabels"></div>
+        </div>
+    </div>
+
+    <!-- Satellite (IR/WV) colorbar -->
+    <div id="satColorbar">
+        <div class="cb-panel">
+            <div class="cb-title" id="satCbTitle">GOES IR Brightness Temp (K)</div>
+            <canvas id="satCbCanvas" width="160" height="12"></canvas>
+            <div class="cb-labels" id="satCbLabels"></div>
+            <div class="cb-heights" id="satCbHeights" style="display:none;"></div>
+        </div>
+    </div>
+
+    <script>
+    // ── GOES ABI L2 TPW (background) — outside all IIFEs ──────────────────
+    // This page is CONUS-only (no OCONUS sector logic anywhere), so unlike
+    // radar_map.html's satBg there's no sector routing needed -- always the
+    // CONUS-sector product.
+    (function() {
+        document.addEventListener('DOMContentLoaded', function() {
+            var TPW_PRODUCT    = 'tpw_conus_east';
+            var TPW_FRAMES_API = '/CAP_WxCOP/api/tpw/frames';
+            var MAPCACHE_GMAPS = '/mapcache/gmaps';
+            var TPW_ZINDEX     = 393;   // below satellite(395) and MRMS(410)
+            var TPW_POLL_MS    = 120000;
+
+            function getMap() { return window._capMap; }
+
+            var tpwLayer = null, tpwTimer = null, tpwEnabled = false;
+
+            function tpwOpacity() {
+                var el = document.getElementById('tpwOpacity');
+                return el ? parseInt(el.value) / 100 : 0.7;
+            }
+
+            function tpwMakeLayer(ts) {
+                var url = MAPCACHE_GMAPS + '/' + TPW_PRODUCT + '@GoogleMapsCompatible/{z}/{x}/{y}.png'
+                          + (ts ? '?dim_ts=' + ts : '');
+                return L.tileLayer(url, {
+                    opacity: 0, zIndex: TPW_ZINDEX,
+                    attribution: 'GOES ABI L2 TPW &copy; NOAA/NESDIS',
+                    errorTileUrl: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
+                });
+            }
+
+            function tpwRefresh() {
+                if (!tpwEnabled) return;
+                var m = getMap(); if (!m) return;
+                var statusEl = document.getElementById('tpwStatus');
+                fetch(TPW_FRAMES_API + '?product=' + TPW_PRODUCT + '&hours=1')
+                    .then(function(r){ return r.json(); })
+                    .then(function(data){
+                        if (!tpwEnabled) return;
+                        var frames = data.frames || [];
+                        var last = frames.length ? frames[frames.length - 1] : null;
+                        var next = tpwMakeLayer(last ? last.ts : null);
+                        next.setOpacity(tpwOpacity());
+                        next.addTo(m);
+                        var prev = tpwLayer;
+                        tpwLayer = next;
+                        if (prev && prev !== next) {
+                            setTimeout(function(){ if (m.hasLayer(prev)) m.removeLayer(prev); }, 300);
+                        }
+                        if (statusEl) statusEl.textContent = last ? ('TPW · ' + last.label) : 'No TPW frames available';
+                    })
+                    .catch(function(e){
+                        console.warn('TPW fetch failed:', e);
+                        if (statusEl) statusEl.textContent = 'TPW unavailable';
+                    });
+            }
+
+            function setTpwVisible(on) {
+                tpwEnabled = on;
+                var m = getMap();
+                if (on) {
+                    tpwRefresh();
+                    if (tpwTimer) clearInterval(tpwTimer);
+                    tpwTimer = setInterval(tpwRefresh, TPW_POLL_MS);
+                } else {
+                    if (tpwTimer) { clearInterval(tpwTimer); tpwTimer = null; }
+                    if (tpwLayer && m) { m.removeLayer(tpwLayer); tpwLayer = null; }
+                    var statusEl = document.getElementById('tpwStatus');
+                    if (statusEl) statusEl.textContent = '';
+                }
+            }
+
+            // ── TPW colorbar -- same mm breakpoints/colors as the tpw_*.map
+            // mapfiles (our own rendering pipeline, so these actually match
+            // what's on screen, unlike the nowCOAST-backed IR/VIS/WV above) ──
+            var TPW_STOPS = [
+                [0, [140,100,60]], [10,[190,150,90]],
+                [20,[230,220,120]],[30,[140,200,100]],
+                [40,[60,170,90]],  [50,[40,140,190]],
+                [60,[80,60,200]],  [70,[200,60,200]]
+            ];
+            function tpwInterp(t) {
+                var v = t * 70;
+                if (v <= TPW_STOPS[0][0]) return TPW_STOPS[0][1];
+                if (v >= TPW_STOPS[TPW_STOPS.length-1][0]) return TPW_STOPS[TPW_STOPS.length-1][1];
+                for (var i=0; i<TPW_STOPS.length-1; i++) {
+                    var v0=TPW_STOPS[i][0], c0=TPW_STOPS[i][1];
+                    var v1=TPW_STOPS[i+1][0], c1=TPW_STOPS[i+1][1];
+                    if (v>=v0 && v<=v1) {
+                        var f = (v1>v0) ? (v-v0)/(v1-v0) : 0;
+                        return [
+                            Math.round(c0[0]+f*(c1[0]-c0[0])),
+                            Math.round(c0[1]+f*(c1[1]-c0[1])),
+                            Math.round(c0[2]+f*(c1[2]-c0[2]))
+                        ];
+                    }
+                }
+                return [0,0,0];
+            }
+            function drawTpwColorbar() {
+                var canvas = document.getElementById('tpwCbCanvas');
+                if (!canvas) return;
+                var ctx = canvas.getContext('2d');
+                var w = canvas.width, h = canvas.height;
+                for (var x=0; x<w; x++) {
+                    var c = tpwInterp(x/w);
+                    ctx.fillStyle = 'rgb(' + c[0] + ',' + c[1] + ',' + c[2] + ')';
+                    ctx.fillRect(x, 0, 1, h);
+                }
+                var labelsEl = document.getElementById('tpwCbLabels');
+                if (labelsEl) labelsEl.innerHTML =
+                    '<span>0</span><span>10</span><span>20</span><span>30</span><span>40</span>' +
+                    '<span>50</span><span>60</span><span>≥70mm</span>';
+            }
+            function setTpwColorbarVisible(on) {
+                var cb = document.getElementById('tpwColorbar');
+                if (!cb) return;
+                cb.style.display = on ? 'block' : 'none';
+                if (on) drawTpwColorbar();
+            }
+
+            var tpwTog = document.getElementById('tpwToggle');
+            if (tpwTog) {
+                tpwTog.addEventListener('change', function() {
+                    var sub = document.getElementById('tpwSubOptions');
+                    if (sub) sub.style.display = this.checked ? 'block' : 'none';
+                    setTpwVisible(this.checked);
+                    setTpwColorbarVisible(this.checked);
+                });
+            }
+            var tpwOpSlider = document.getElementById('tpwOpacity');
+            var tpwOpVal    = document.getElementById('tpwOpacityVal');
+            if (tpwOpSlider) {
+                tpwOpSlider.addEventListener('input', function() {
+                    var pct = parseInt(this.value);
+                    if (tpwOpVal) tpwOpVal.textContent = pct + '%';
+                    if (tpwLayer) tpwLayer.setOpacity(pct / 100);
+                });
+            }
+        });
+    })();
+    </script>
+
     <!-- NEXRAD radar player bar -->
     <div id="mrmsPlayerBar">
         <button class="mpb" id="mBtnFirst" title="Oldest">&#9198;</button>
@@ -2915,17 +3131,22 @@
     </script>
 
 
-<!-- ── GOES Satellite overlay via nowCOAST GeoServer WMS ──────────────── -->
+<!-- ── GOES Satellite overlay — IR/WV via our own pipeline, VIS via nowCOAST ── -->
     <script>
     (function() {
         'use strict';
         /*
-         * nowCOAST GeoServer satellite WMS — GOES-East + GOES-West composited
-         * per channel, updated every 5 minutes.
+         * IR and WV come from our own GOES L1b decode -> MapServer -> MapCache
+         * pipeline (same source as radar_map.html's satellite background) --
+         * switched over from nowCOAST because nowCOAST's global mosaic is
+         * visibly lower resolution. VIS stays on nowCOAST since we don't
+         * decode the visible band ourselves (yet -- may add later depending
+         * on requirements/CPU budget).
          *
-         * Animation: fetch TIME dimension from GetCapabilities, build N frames
-         * of WMS layers with TIME= parameter, hijack the existing MRMS timeline
-         * bar (same pattern as NIDS). Radar is a layer above satellite.
+         * Animation: for VIS, fetch TIME dimension from nowCOAST's
+         * GetCapabilities; for IR/WV, fetch real frame timestamps from our
+         * own /api/satellite/frames. Either way, build N frame layers and
+         * hijack the existing MRMS timeline bar (same pattern as NIDS).
          *
          * Layer z-order: satellite(395) < MRMS(410) < NIDS(420)
          */
@@ -2935,6 +3156,8 @@
         var SAT_CAPS_URL   = NOWCOAST_WMS + '?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetCapabilities';
         var SAT_FRAMES_MAX = 12;   /* up to 12 frames (~60 min at 5-min intervals) */
         var SAT_ZINDEX     = 395;
+        var MAPCACHE_GMAPS       = '/mapcache/gmaps';
+        var SATELLITE_FRAMES_API = '/CAP_WxCOP/api/satellite/frames';
 
         var SAT_LAYERS = {
             'ir':  'global_longwave_imagery_mosaic',
@@ -2946,6 +3169,13 @@
             'vis': 'GOES Visible',
             'wv':  'GOES Water Vapor'
         };
+        // key -> our own MapCache tileset name. VIS has no entry here --
+        // it's not in this pipeline at all, still routed to nowCOAST below.
+        var OWN_SAT_PRODUCTS = {
+            'ir': 'ir_conus',
+            'wv': 'wv_conus'
+        };
+        function isOwnProduct(key) { return OWN_SAT_PRODUCTS.hasOwnProperty(key); }
 
         /* ── State ──────────────────────────────────────────────────────────── */
         var satLayer       = null;    /* current single live layer (non-animate mode) */
@@ -3009,10 +3239,43 @@
             xhr.send();
         }
 
-        /* ── Build a single WMS layer with TIME parameter ──────────────────── */
-        function makeSatLayer(layerName, timeStr, opacity) {
+        /* ── Our own frames API — real frame timestamps for IR/WV ───────────── */
+        function fetchOwnSatTimes(product, callback) {
+            fetch(SATELLITE_FRAMES_API + '?product=' + product + '&hours=1')
+                .then(function(r){ return r.json(); })
+                .then(function(data){
+                    var frames = data.frames || [];
+                    callback(frames.map(function(f){ return f.ts; }));
+                })
+                .catch(function(e){
+                    console.warn('Satellite frames fetch failed:', e);
+                    callback(null);
+                });
+        }
+
+        /* ── Parse a frame timestamp for display -- our own pipeline uses
+           YYYYMMDD-HHMMSS, nowCOAST uses full ISO8601 ─────────────────────── */
+        function parseFrameDate(ts) {
+            var m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})$/.exec(ts);
+            if (m) return new Date(Date.UTC(+m[1], +m[2]-1, +m[3], +m[4], +m[5], +m[6]));
+            return new Date(ts);
+        }
+
+        /* ── Build a single tile layer -- our own MapCache tiles for IR/WV,
+           nowCOAST WMS (with TIME param) for VIS ──────────────────────────── */
+        function makeSatLayer(key, timeStr, opacity) {
+            if (isOwnProduct(key)) {
+                var product = OWN_SAT_PRODUCTS[key];
+                var url = MAPCACHE_GMAPS + '/' + product + '@GoogleMapsCompatible/{z}/{x}/{y}.png'
+                          + (timeStr ? '?dim_ts=' + timeStr : '');
+                return L.tileLayer(url, {
+                    opacity: opacity, zIndex: SAT_ZINDEX,
+                    attribution: 'GOES ABI &copy; NOAA/NESDIS',
+                    errorTileUrl: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
+                });
+            }
             var params = {
-                layers:      layerName,
+                layers:      SAT_LAYERS[key],
                 format:      'image/png',
                 transparent: true,
                 opacity:     opacity,
@@ -3030,7 +3293,28 @@
             var statusEl = document.getElementById('satStatus');
             if (statusEl) statusEl.textContent = 'Loading\u2026';
             if (satLayer) { map.removeLayer(satLayer); satLayer = null; }
-            satLayer = makeSatLayer(SAT_LAYERS[key], null, getOpacity());
+
+            if (isOwnProduct(key)) {
+                // Fetch the real latest frame ts rather than omitting it --
+                // MapCache's "current" dimension default is disk-cached for
+                // up to 4h keyed by the literal string "current", which
+                // would go stale; an explicit ts is a fresh cache key each time.
+                fetchOwnSatTimes(OWN_SAT_PRODUCTS[key], function(times) {
+                    if (getKey() !== key) return; // user switched product mid-fetch
+                    var last = (times && times.length) ? times[times.length-1] : null;
+                    satLayer = makeSatLayer(key, last, getOpacity());
+                    satLayer.on('load', function() {
+                        if (statusEl) statusEl.textContent = SAT_LABELS[key] + ' \u00b7 latest';
+                    });
+                    satLayer.on('tileerror', function() {
+                        if (statusEl) statusEl.textContent = 'Satellite tiles unavailable';
+                    });
+                    satLayer.addTo(map);
+                });
+                return;
+            }
+
+            satLayer = makeSatLayer(key, null, getOpacity());
             satLayer.on('load', function() {
                 if (statusEl) statusEl.textContent = SAT_LABELS[key] + ' \u00b7 latest';
             });
@@ -3072,13 +3356,13 @@
             var ts = satFrameTimes[idx] || '';
             var statusEl = document.getElementById('satStatus');
             if (statusEl && ts) {
-                var d = new Date(ts);
+                var d = parseFrameDate(ts);
                 var hhmm = ('0'+d.getUTCHours()).slice(-2) + ':' + ('0'+d.getUTCMinutes()).slice(-2) + 'Z';
                 statusEl.textContent = SAT_LABELS[getKey()] + ' \u00b7 ' + hhmm;
             }
             var lbl = document.getElementById('mrmsLocalLabel');
             if (lbl && ts) {
-                var d2 = new Date(ts);
+                var d2 = parseFrameDate(ts);
                 var hhmmZ = ('0'+d2.getUTCHours()).slice(-2) + ':' + ('0'+d2.getUTCMinutes()).slice(-2) + 'Z';
                 lbl.textContent = SAT_LABELS[getKey()] + ' \u00b7 ' + hhmmZ;
             }
@@ -3209,14 +3493,13 @@
         function loadSatAnimation() {
             var map = getMap(); if (!map) return;
             var key       = getKey();
-            var layerName = SAT_LAYERS[key];
             var statusEl  = document.getElementById('satStatus');
             if (statusEl) statusEl.textContent = 'Fetching frames\u2026';
 
             /* Remove existing single layer */
             if (satLayer) { map.removeLayer(satLayer); satLayer = null; }
 
-            fetchSatTimes(layerName, function(times) {
+            function onTimes(times) {
                 if (!times || times.length === 0) {
                     if (statusEl) statusEl.textContent = 'Animation unavailable \u2014 loading latest';
                     loadSat();
@@ -3233,14 +3516,104 @@
 
                 /* Preload all frames at opacity 0 */
                 frames.forEach(function(ts) {
-                    var l = makeSatLayer(layerName, ts, 0);
+                    var l = makeSatLayer(key, ts, 0);
                     l.addTo(map);
                     satFrameLayers.push(l);
                 });
 
                 if (statusEl) statusEl.textContent = SAT_LABELS[key] + ' \u00b7 ' + frames.length + ' frames';
                 hijackSatTimeline();
-            });
+            }
+
+            if (isOwnProduct(key)) {
+                fetchOwnSatTimes(OWN_SAT_PRODUCTS[key], onTimes);
+            } else {
+                fetchSatTimes(SAT_LAYERS[key], onTimes);
+            }
+        }
+
+        /* ── IR/WV colorbar -- same stops as radar_map.html's CMAPS, and the
+           tpw/ir_conus/wv_conus mapfiles that actually render these tiles,
+           so (unlike VIS, which nowCOAST colors itself) this legend is
+           accurate. IR also gets a rough cloud-top-height row (US Standard
+           Atmosphere, breaks down at/above the ~36kft tropopause). ────────── */
+        var SAT_CMAPS = {
+            wv: {
+                title: 'Water Vapor Brightness Temp (K)',
+                vmin: 190, vmax: 260,
+                labels: ['<190','200','220','240','260K'],
+                stops: [
+                    [190,[255,255,255]],[200,[220,220,255]],
+                    [210,[170,190,255]],[220,[90,140,255]],
+                    [230,[40,190,190]], [240,[60,160,60]],
+                    [250,[200,190,40]], [260,[170,100,30]]
+                ]
+            },
+            ir: {
+                title: 'GOES IR Brightness Temp (K)',
+                vmin: 200, vmax: 300,
+                labels: ['<200','220','250','280','300K'],
+                heights: ['\u226536kf', '34kf', '19kf', '4kf', 'sfc'],
+                stops: [
+                    [200,[255,0,0]],   [210,[255,150,0]],
+                    [220,[255,255,0]], [230,[235,235,235]],
+                    [250,[165,165,165]],[270,[100,100,100]],
+                    [290,[45,45,45]],  [300,[20,20,20]]
+                ]
+            }
+        };
+        function satCmapInterp(stops, vmin, vmax, t) {
+            var v = vmin + t * (vmax - vmin);
+            if (v <= stops[0][0]) return stops[0][1];
+            if (v >= stops[stops.length-1][0]) return stops[stops.length-1][1];
+            for (var i=0; i<stops.length-1; i++) {
+                var v0=stops[i][0], c0=stops[i][1];
+                var v1=stops[i+1][0], c1=stops[i+1][1];
+                if (v>=v0 && v<=v1) {
+                    var f = (v1>v0) ? (v-v0)/(v1-v0) : 0;
+                    return [
+                        Math.round(c0[0]+f*(c1[0]-c0[0])),
+                        Math.round(c0[1]+f*(c1[1]-c0[1])),
+                        Math.round(c0[2]+f*(c1[2]-c0[2]))
+                    ];
+                }
+            }
+            return [0,0,0];
+        }
+        function drawSatColorbar(key) {
+            var cm = SAT_CMAPS[key];
+            if (!cm) return;
+            var canvas = document.getElementById('satCbCanvas');
+            if (!canvas) return;
+            var ctx = canvas.getContext('2d');
+            var w = canvas.width, h = canvas.height;
+            for (var x=0; x<w; x++) {
+                var c = satCmapInterp(cm.stops, cm.vmin, cm.vmax, x/w);
+                ctx.fillStyle = 'rgb(' + c[0] + ',' + c[1] + ',' + c[2] + ')';
+                ctx.fillRect(x, 0, 1, h);
+            }
+            var titleEl = document.getElementById('satCbTitle');
+            if (titleEl) titleEl.textContent = cm.title;
+            var labelsEl = document.getElementById('satCbLabels');
+            if (labelsEl) labelsEl.innerHTML =
+                cm.labels.map(function(l){ return '<span>'+l+'</span>'; }).join('');
+            var heightsEl = document.getElementById('satCbHeights');
+            if (heightsEl) {
+                if (cm.heights) {
+                    heightsEl.style.display = 'flex';
+                    heightsEl.innerHTML = cm.heights.map(function(l){ return '<span>'+l+'</span>'; }).join('');
+                } else {
+                    heightsEl.style.display = 'none';
+                    heightsEl.innerHTML = '';
+                }
+            }
+        }
+        function setSatColorbarVisible(on, key) {
+            var cb = document.getElementById('satColorbar');
+            if (!cb) return;
+            var show = on && isOwnProduct(key);
+            cb.style.display = show ? 'block' : 'none';
+            if (show) drawSatColorbar(key);
         }
 
         /* ── UI wiring ──────────────────────────────────────────────────────── */
@@ -3252,6 +3625,7 @@
                 tog.addEventListener('change', function() {
                     var sub = document.getElementById('satSubOptions');
                     if (sub) sub.style.display = this.checked ? 'block' : 'none';
+                    setSatColorbarVisible(this.checked, getKey());
                     if (this.checked) {
                         /* Check if animation checkbox is on */
                         var animCb = document.getElementById('satAnimToggle');
@@ -3272,6 +3646,7 @@
                 r.addEventListener('change', function() {
                     var tog = document.getElementById('satToggle');
                     if (tog && tog.checked) {
+                        setSatColorbarVisible(true, this.value);
                         var animCb = document.getElementById('satAnimToggle');
                         if (animCb && animCb.checked) {
                             restoreSatTimeline();
