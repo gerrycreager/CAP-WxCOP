@@ -2171,11 +2171,23 @@
         document.addEventListener('DOMContentLoaded', function() {
             var TPW_PRODUCT    = 'tpw_conus_east';
             var TPW_FRAMES_API = '/CAP_WxCOP/api/tpw/frames';
-            var MAPCACHE_GMAPS = '/mapcache/gmaps';
             var TPW_ZINDEX     = 393;   // below satellite(395) and MRMS(410)
             var TPW_POLL_MS    = 120000;
 
             function getMap() { return window._capMap; }
+
+            // MapCache's gmaps/TMS service silently ignores the ts query
+            // param and always serves the "current"-dimension cache entry
+            // regardless of what was requested (confirmed via byte-identical
+            // tiles for genuinely different timestamps, and the on-disk cache
+            // never creating per-ts directories under GoogleMapsCompatible/
+            // the way it does under WGS84/). WMTS GetTile honors it correctly.
+            function mapcacheTileUrl(tileset, ts) {
+                return '/mapcache/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0'
+                     + '&LAYER=' + tileset + '&STYLE=&TILEMATRIXSET=GoogleMapsCompatible'
+                     + '&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image/png'
+                     + (ts ? '&ts=' + ts : '');
+            }
 
             var tpwLayer = null, tpwTimer = null, tpwEnabled = false;
 
@@ -2185,8 +2197,7 @@
             }
 
             function tpwMakeLayer(ts) {
-                var url = MAPCACHE_GMAPS + '/' + TPW_PRODUCT + '@GoogleMapsCompatible/{z}/{x}/{y}.png'
-                          + (ts ? '?dim_ts=' + ts : '');
+                var url = mapcacheTileUrl(TPW_PRODUCT, ts);
                 return L.tileLayer(url, {
                     opacity: 0, zIndex: TPW_ZINDEX,
                     attribution: 'GOES ABI L2 TPW &copy; NOAA/NESDIS',
@@ -3156,8 +3167,18 @@
         var SAT_CAPS_URL   = NOWCOAST_WMS + '?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetCapabilities';
         var SAT_FRAMES_MAX = 12;   /* up to 12 frames (~60 min at 5-min intervals) */
         var SAT_ZINDEX     = 395;
-        var MAPCACHE_GMAPS       = '/mapcache/gmaps';
         var SATELLITE_FRAMES_API = '/CAP_WxCOP/api/satellite/frames';
+
+        // MapCache's gmaps/TMS service silently ignores the ts query param
+        // and always serves the "current"-dimension cache entry regardless
+        // of what was requested (confirmed via byte-identical tiles for
+        // genuinely different timestamps). WMTS GetTile honors it correctly.
+        function mapcacheTileUrl(tileset, ts) {
+            return '/mapcache/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0'
+                 + '&LAYER=' + tileset + '&STYLE=&TILEMATRIXSET=GoogleMapsCompatible'
+                 + '&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image/png'
+                 + (ts ? '&ts=' + ts : '');
+        }
 
         var SAT_LAYERS = {
             'ir':  'global_longwave_imagery_mosaic',
@@ -3266,8 +3287,7 @@
         function makeSatLayer(key, timeStr, opacity) {
             if (isOwnProduct(key)) {
                 var product = OWN_SAT_PRODUCTS[key];
-                var url = MAPCACHE_GMAPS + '/' + product + '@GoogleMapsCompatible/{z}/{x}/{y}.png'
-                          + (timeStr ? '?dim_ts=' + timeStr : '');
+                var url = mapcacheTileUrl(product, timeStr);
                 return L.tileLayer(url, {
                     opacity: opacity, zIndex: SAT_ZINDEX,
                     attribution: 'GOES ABI &copy; NOAA/NESDIS',
