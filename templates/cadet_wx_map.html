@@ -206,6 +206,18 @@
       </div>
       <div id="glmStatus" style="font-size:0.7rem;color:#778;margin-top:3px;"></div>
     </div>
+    <div class="sidebar-section">
+      <h3>&#9678; Range Rings</h3>
+      <label style="font-size:0.8rem;cursor:pointer;">
+        <input type="checkbox" id="ringsToggle" style="margin-right:4px;">
+        Show 5/15/25 SM rings around sites
+      </label>
+      <div style="margin-top:5px;font-size:0.72rem;line-height:1.7;">
+        <span style="display:inline-block;width:12px;height:12px;border-radius:50%;border:2px solid #ff4444;vertical-align:middle;margin-right:4px;"></span> 5 SM<br>
+        <span style="display:inline-block;width:12px;height:12px;border-radius:50%;border:2px solid #ffdd00;vertical-align:middle;margin-right:4px;"></span> 15 SM<br>
+        <span style="display:inline-block;width:12px;height:12px;border-radius:50%;border:2px solid #44cc88;vertical-align:middle;margin-right:4px;"></span> 25 SM
+      </div>
+    </div>
   </div>
 
   <!-- Map -->
@@ -305,7 +317,53 @@ function renderMap() {
     marker.addTo(map);
     markers[site.site_id] = marker;
   });
+  renderRangeRings();
 }
+
+// ===========================================================================
+// Range rings — 5/15/25 SM around every site, so a user can gauge how close
+// a lightning flash or radar echo is to the site without eyeballing the map
+// scale. Site locations don't change between data refreshes, but rebuilding
+// alongside markers each cycle keeps them in sync if the site list itself
+// changes (e.g. an encampment site added/removed).
+// ===========================================================================
+var rangeRingLayers = [];
+var SM_TO_M = 1609.344;
+var RING_RADII_SM = [5, 15, 25];
+var RING_COLORS   = ['#ff4444', '#ffdd00', '#44cc88'];
+
+function clearRangeRings() {
+  rangeRingLayers.forEach(function(l) { map.removeLayer(l); });
+  rangeRingLayers = [];
+}
+
+function renderRangeRings() {
+  clearRangeRings();
+  if (!document.getElementById('ringsToggle').checked) return;
+  siteData.forEach(function(site) {
+    if (!site.lat || !site.lon) return;
+    RING_RADII_SM.forEach(function(sm, i) {
+      var circle = L.circle([site.lat, site.lon], {
+        radius: sm * SM_TO_M, color: RING_COLORS[i], weight: 1.5,
+        fill: false, dashArray: '4 4', opacity: 0.7, interactive: false,
+      }).addTo(map);
+      rangeRingLayers.push(circle);
+      // Label at the ring's north edge -- a permanent small tooltip, not a
+      // popup, so it's visible without a click
+      var label = L.marker([site.lat + sm * SM_TO_M / 111320, site.lon], {
+        icon: L.divIcon({
+          className: '', html: '<div style="font-size:0.62rem;color:' + RING_COLORS[i]
+            + ';text-shadow:0 0 2px #000,0 0 2px #000;white-space:nowrap;">' + sm + ' SM</div>',
+          iconSize: null,
+        }),
+        interactive: false,
+      }).addTo(map);
+      rangeRingLayers.push(label);
+    });
+  });
+}
+
+document.getElementById('ringsToggle').addEventListener('change', renderRangeRings);
 
 // ===========================================================================
 // Sidebar site list
