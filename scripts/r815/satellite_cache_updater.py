@@ -69,7 +69,20 @@ MOSAIC_PRODUCTS = {
     'ir_conus': {'east': 'ir_conus_east', 'west': 'ir_conus_west'},
 }
 MOSAIC_EXTENT = (-130.0, 20.0, -60.0, 55.0)  # left, bottom, right, top
-MOSAIC_RES    = 0.025  # degrees/pixel
+# Matches CONUS_SAT_RES below -- was 0.025 (~2.7km), coarser than native ABI
+# CONUS resolution (2km), which would have silently thrown away the
+# per-satellite fix at mosaic time.
+MOSAIC_RES    = 0.018  # degrees/pixel
+
+# calculate_default_transform()'s auto resolution estimate for a geos->4326
+# warp comes out coarser than the source's true native sampling for any
+# CONUS/OCONUS sector (i.e. anything off the sub-satellite point) -- measured
+# ~3.2-4.1km/pixel actual output vs 2.0km/pixel native ABI CONUS resolution.
+# Force it explicitly for CONUS scenes instead of trusting the auto-estimate.
+# 0.018 deg ~= 2.0km at CONUS latitudes (~38N in the lat direction; finer
+# than 2km in the lon direction, so this errs toward not losing resolution
+# anywhere in the sector rather than an exact match everywhere).
+CONUS_SAT_RES = 0.018  # degrees/pixel
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -180,10 +193,33 @@ def _convert_worker(src_path: str, dest_path: str, result_path: str):
         src_transform = Affine(x_res, 0, x[0] - x_res / 2, 0, y_res, y[0] - y_res / 2)
 
         dst_crs = CRS.from_epsg(4326)
-        dst_transform, width, height = calculate_default_transform(
-            src_crs, dst_crs, bt_filled.shape[1], bt_filled.shape[0],
-            left=x.min(), right=x.max(), bottom=y.min(), top=y.max(),
-        )
+        # calculate_default_transform()'s auto resolution estimate comes out
+        # coarser than native for an oblique geos->4326 warp -- force it for
+        # CONUS scenes (see CONUS_SAT_RES). Full Disk/Mesoscale left on the
+        # auto-estimate for now (coarser, but not the operationally-relevant
+        # sector, and 4-9x the pixel count is a real cost not worth paying
+        # there yet).
+        #
+        # Also can't trust calculate_default_transform's auto-detected
+        # bounding box for CONUS either -- GOES-West's oblique view of CONUS
+        # distorts badly enough near its limb that the auto bbox comes out
+        # ~99 degrees of longitude (west blew up to 19999px wide before this
+        # was caught), vastly larger than the real CONUS footprint. Use the
+        # same fixed target extent as the East+West mosaic instead (also
+        # makes the mosaic's regrid step a near-trivial resample now that
+        # both inputs already share its grid/extent).
+        scene_id = getattr(ds, 'scene_id', '')
+        if scene_id == 'CONUS':
+            import rasterio.transform
+            left, bottom, right, top = MOSAIC_EXTENT
+            width  = int(round((right - left) / CONUS_SAT_RES))
+            height = int(round((top - bottom) / CONUS_SAT_RES))
+            dst_transform = rasterio.transform.from_bounds(left, bottom, right, top, width, height)
+        else:
+            dst_transform, width, height = calculate_default_transform(
+                src_crs, dst_crs, bt_filled.shape[1], bt_filled.shape[0],
+                left=x.min(), right=x.max(), bottom=y.min(), top=y.max(),
+            )
 
         dst = np.full((height, width), np.nan, dtype=np.float32)
         reproject(
