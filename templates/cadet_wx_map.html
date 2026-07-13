@@ -337,6 +337,17 @@ function clearRangeRings() {
   rangeRingLayers = [];
 }
 
+// Default range rings on when lightning or local radar is turned on -- that's
+// the main use case for them (gauging flash/echo distance from a site).
+// Still independently toggleable afterward, this is just the starting state.
+function defaultRingsOn() {
+  var ringsToggle = document.getElementById('ringsToggle');
+  if (ringsToggle && !ringsToggle.checked) {
+    ringsToggle.checked = true;
+    renderRangeRings();
+  }
+}
+
 function renderRangeRings() {
   clearRangeRings();
   if (!document.getElementById('ringsToggle').checked) return;
@@ -634,6 +645,7 @@ document.getElementById('glmToggle').addEventListener('change', function() {
   if (this.checked) {
     loadGLM();
     glmTimer = setInterval(loadGLM, 60000);
+    defaultRingsOn();
   } else {
     if (glmLayer) { map.removeLayer(glmLayer); glmLayer = null; }
     if (glmTimer) { clearInterval(glmTimer); glmTimer = null; }
@@ -792,6 +804,7 @@ document.getElementById('mrmsToggle').addEventListener('change', function() {
     statusEl.style.display = 'block';
     refreshRadar();
     radarTimer = setInterval(refreshRadar, 120000);
+    defaultRingsOn();
   } else {
     statusEl.style.display = 'none';
     removeRadarLayer();
