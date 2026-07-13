@@ -117,7 +117,14 @@ log = logging.getLogger('mrms_cache')
 
 
 def date_dirs():
-    today = datetime.date.today()
+    # UTC, not local date -- the raw product filenames/paths are UTC-dated
+    # (both the NOAAPort product timestamps and data2 pqact's %Y/%m/%d
+    # substitution). Server-local date (MDT, UTC-6) used to be used here,
+    # which meant every day from 00:00-06:00 UTC (18:00-00:00 MDT) the
+    # freshly-arriving day's directory didn't exist yet as far as this
+    # function was concerned -- a recurring ~6h blind window for every
+    # MRMS product, CONUS and OCONUS alike.
+    today = datetime.datetime.now(datetime.UTC).date()
     for i in range(MAX_DAYS_BACK + 1):
         yield LDM_BASE / (today - datetime.timedelta(days=i)).strftime('%Y/%m/%d')
 
