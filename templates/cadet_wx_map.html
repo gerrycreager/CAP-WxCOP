@@ -213,9 +213,9 @@
         Show 5/15/25 SM rings around sites
       </label>
       <div style="margin-top:5px;font-size:0.72rem;line-height:1.7;">
-        <span style="display:inline-block;width:12px;height:12px;border-radius:50%;border:2px solid #ff4444;vertical-align:middle;margin-right:4px;"></span> 5 SM<br>
-        <span style="display:inline-block;width:12px;height:12px;border-radius:50%;border:2px solid #ffdd00;vertical-align:middle;margin-right:4px;"></span> 15 SM<br>
-        <span style="display:inline-block;width:12px;height:12px;border-radius:50%;border:2px solid #44cc88;vertical-align:middle;margin-right:4px;"></span> 25 SM
+        <span style="display:inline-block;width:12px;height:12px;border-radius:50%;border:2px solid #ff0000;vertical-align:middle;margin-right:4px;"></span> 5 mi<br>
+        <span style="display:inline-block;width:12px;height:12px;border-radius:50%;border:2px solid #ff8c00;vertical-align:middle;margin-right:4px;"></span> 15 mi<br>
+        <span style="display:inline-block;width:12px;height:12px;border-radius:50%;border:2px solid #00cc00;vertical-align:middle;margin-right:4px;"></span> 25 mi
       </div>
     </div>
   </div>
@@ -330,7 +330,7 @@ function renderMap() {
 var rangeRingLayers = [];
 var SM_TO_M = 1609.344;
 var RING_RADII_SM = [5, 15, 25];
-var RING_COLORS   = ['#ff4444', '#ffdd00', '#44cc88'];
+var RING_COLORS   = ['#ff0000', '#ff8c00', '#00cc00'];  // saturated red/orange/green
 
 function clearRangeRings() {
   rangeRingLayers.forEach(function(l) { map.removeLayer(l); });
@@ -355,16 +355,16 @@ function renderRangeRings() {
     if (!site.lat || !site.lon) return;
     RING_RADII_SM.forEach(function(sm, i) {
       var circle = L.circle([site.lat, site.lon], {
-        radius: sm * SM_TO_M, color: RING_COLORS[i], weight: 1.5,
-        fill: false, dashArray: '4 4', opacity: 0.7, interactive: false,
+        radius: sm * SM_TO_M, color: RING_COLORS[i], weight: 2,
+        fill: false, opacity: 0.9, interactive: false,
       }).addTo(map);
       rangeRingLayers.push(circle);
-      // Label at the ring's north edge -- a permanent small tooltip, not a
+      // Label at the ring's south edge -- a permanent small tooltip, not a
       // popup, so it's visible without a click
-      var label = L.marker([site.lat + sm * SM_TO_M / 111320, site.lon], {
+      var label = L.marker([site.lat - sm * SM_TO_M / 111320, site.lon], {
         icon: L.divIcon({
-          className: '', html: '<div style="font-size:0.62rem;color:' + RING_COLORS[i]
-            + ';text-shadow:0 0 2px #000,0 0 2px #000;white-space:nowrap;">' + sm + ' SM</div>',
+          className: '', html: '<div style="font-size:0.68rem;font-weight:bold;color:' + RING_COLORS[i]
+            + ';text-shadow:0 0 2px #000,0 0 2px #000,0 0 2px #000;white-space:nowrap;">' + sm + ' mi</div>',
           iconSize: null,
         }),
         interactive: false,
