@@ -210,12 +210,12 @@
       <h3>&#9678; Range Rings</h3>
       <label style="font-size:0.8rem;cursor:pointer;">
         <input type="checkbox" id="ringsToggle" style="margin-right:4px;">
-        Show 5/15/25 SM rings around sites
+        Show 5/15/25 NM rings around sites
       </label>
       <div style="margin-top:5px;font-size:0.72rem;line-height:1.7;">
-        <span style="display:inline-block;width:12px;height:12px;border-radius:50%;border:2px solid #ff0000;vertical-align:middle;margin-right:4px;"></span> 5 mi<br>
-        <span style="display:inline-block;width:12px;height:12px;border-radius:50%;border:2px solid #ff8c00;vertical-align:middle;margin-right:4px;"></span> 15 mi<br>
-        <span style="display:inline-block;width:12px;height:12px;border-radius:50%;border:2px solid #00cc00;vertical-align:middle;margin-right:4px;"></span> 25 mi
+        <span style="display:inline-block;width:12px;height:12px;border-radius:50%;border:2px solid #ff0000;vertical-align:middle;margin-right:4px;"></span> 5 NM<br>
+        <span style="display:inline-block;width:12px;height:12px;border-radius:50%;border:2px solid #ff8c00;vertical-align:middle;margin-right:4px;"></span> 15 NM<br>
+        <span style="display:inline-block;width:12px;height:12px;border-radius:50%;border:2px solid #00cc00;vertical-align:middle;margin-right:4px;"></span> 25 NM
       </div>
     </div>
   </div>
@@ -321,15 +321,18 @@ function renderMap() {
 }
 
 // ===========================================================================
-// Range rings — 5/15/25 SM around every site, so a user can gauge how close
+// Range rings — 5/15/25 NM around every site, so a user can gauge how close
 // a lightning flash or radar echo is to the site without eyeballing the map
-// scale. Site locations don't change between data refreshes, but rebuilding
+// scale. NM, not statute miles -- DAFMAN 91-203's outdoor-activity-suspension
+// threshold is 5 NM (same regulation the GLM legend below already cites),
+// not 5 SM (5 NM ≈ 5.75 SM -- a real difference for a safety-relevant ring).
+// Site locations don't change between data refreshes, but rebuilding
 // alongside markers each cycle keeps them in sync if the site list itself
 // changes (e.g. an encampment site added/removed).
 // ===========================================================================
 var rangeRingLayers = [];
-var SM_TO_M = 1609.344;
-var RING_RADII_SM = [5, 15, 25];
+var NM_TO_M = 1852;
+var RING_RADII_NM = [5, 15, 25];
 var RING_COLORS   = ['#ff0000', '#ff8c00', '#00cc00'];  // saturated red/orange/green
 
 function clearRangeRings() {
@@ -353,18 +356,18 @@ function renderRangeRings() {
   if (!document.getElementById('ringsToggle').checked) return;
   siteData.forEach(function(site) {
     if (!site.lat || !site.lon) return;
-    RING_RADII_SM.forEach(function(sm, i) {
+    RING_RADII_NM.forEach(function(nm, i) {
       var circle = L.circle([site.lat, site.lon], {
-        radius: sm * SM_TO_M, color: RING_COLORS[i], weight: 2,
+        radius: nm * NM_TO_M, color: RING_COLORS[i], weight: 2,
         fill: false, opacity: 0.9, interactive: false,
       }).addTo(map);
       rangeRingLayers.push(circle);
       // Label at the ring's south edge -- a permanent small tooltip, not a
       // popup, so it's visible without a click
-      var label = L.marker([site.lat - sm * SM_TO_M / 111320, site.lon], {
+      var label = L.marker([site.lat - nm * NM_TO_M / 111320, site.lon], {
         icon: L.divIcon({
           className: '', html: '<div style="font-size:0.68rem;font-weight:bold;color:' + RING_COLORS[i]
-            + ';text-shadow:0 0 2px #000,0 0 2px #000,0 0 2px #000;white-space:nowrap;">' + sm + ' mi</div>',
+            + ';white-space:nowrap;">' + nm + ' NM</div>',
           iconSize: null,
         }),
         interactive: false,
