@@ -176,9 +176,22 @@
       <br>
       <label style="font-size:0.8rem;cursor:pointer;margin-top:6px;display:block;">
         <input type="checkbox" id="mrmsToggle" style="margin-right:4px;">
-        Show Radar Composite &#8635;
+        Show Local Radar (auto) &#8635;
       </label>
       <div id="mrmsStatus" style="font-size:0.72rem;color:#8bc4a8;margin-top:2px;display:none;">Loading&hellip;</div>
+      <!-- MRMS composite at low zoom, nearest WSR-88D site reflectivity past
+           zoom 7 -- same auto-switch pattern as enhanced_weather_map_complete.html.
+           Reflectivity dBZ color scale is the same NWS standard for both. -->
+      <div id="radarLegend" style="display:none;margin-top:5px;font-size:0.7rem;">
+        <div id="radarLegendTitle" style="color:#8af;margin-bottom:3px;">Reflectivity (dBZ)</div>
+        <div style="line-height:1.7;">
+          <span style="display:inline-block;width:10px;height:10px;background:#04e9e7;vertical-align:middle;margin-right:4px;"></span>5&ndash;20 light<br>
+          <span style="display:inline-block;width:10px;height:10px;background:#02fd02;vertical-align:middle;margin-right:4px;"></span>20&ndash;35 moderate<br>
+          <span style="display:inline-block;width:10px;height:10px;background:#fdf802;vertical-align:middle;margin-right:4px;"></span>35&ndash;45 heavy<br>
+          <span style="display:inline-block;width:10px;height:10px;background:#fd0000;vertical-align:middle;margin-right:4px;"></span>45&ndash;60 very heavy/hail<br>
+          <span style="display:inline-block;width:10px;height:10px;background:#f800fd;vertical-align:middle;margin-right:4px;"></span>60+ extreme
+        </div>
+      </div>
       <select id="glmMinutes" style="width:100%;font-size:0.78rem;margin-top:4px;
               background:#1a2540;border:1px solid #334;color:#ccd;padding:2px;">
         <option value="5">Last 5 min</option>
@@ -574,44 +587,171 @@ document.getElementById('glmMinutes').addEventListener('change', function() {
 });
 
 // ===========================================================================
-// MRMS Composite live tile
+// Local Radar: MRMS composite (zoom <= threshold) -> nearest WSR-88D site
+// reflectivity (zoom > threshold). Composite is served via the MapCache/
+// WMTS pipeline (mapcacheTileUrl), not the old static tile pyramid this
+// used to use -- that pyramid stopped generating tiles past a fixed zoom,
+// which is exactly why zooming in close on a site (e.g. MOTS) used to go
+// blank. WSR-88D gives real ~250m-gate resolution once zoomed in, same
+// auto-switch pattern already proven in enhanced_weather_map_complete.html.
+// Live single-frame only, no history/animation -- this page has no
+// timeline UI to hijack, and periodic refresh is enough for situational use.
 // ===========================================================================
-var mrmsLayer = null, mrmsTimer = null;
-var MRMS_INDEX = '/CAP_WxCOP/static/mrms_tiles/composite/CONUS/index.json';
+var radarLayer = null, radarTimer = null;
+var radarMode  = null;   // 'composite' or 'nids'
+var radarSiteList = null;
+var RADAR_ZOOM_THRESHOLD = 7;
+var MRMS_FRAMES_API = '/CAP_WxCOP/api/mrms/frames';
+var NIDS_API = '/CAP_WxCOP/api/nids';
 
-function loadMRMS() {
-  if (!document.getElementById('mrmsToggle').checked) return;
-  fetch(MRMS_INDEX + '?_=' + Date.now())
+function radarEnabled() {
+  return document.getElementById('mrmsToggle').checked;
+}
+
+function mapcacheTileUrl(tileset, ts) {
+  // WMTS, not gmaps -- MapCache's gmaps/TMS service silently ignores the
+  // ts query param and always serves the "current"-dimension cache entry
+  // regardless of what's requested. WMTS GetTile honors it correctly.
+  return '/mapcache/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0'
+       + '&LAYER=' + tileset + '&STYLE=&TILEMATRIXSET=GoogleMapsCompatible'
+       + '&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image/png'
+       + (ts ? '&ts=' + ts : '');
+}
+
+function nearestNidsSite(lat, lon, list) {
+  if (!list || !list.length) return null;
+  var best = null, bestDist = Infinity;
+  var cosLat = Math.cos(lat * Math.PI / 180);
+  list.forEach(function(s) {
+    var dlat = (s.lat - lat) * 111.32;
+    var dlon = (s.lon - lon) * 111.32 * cosLat;
+    var distKm = Math.sqrt(dlat * dlat + dlon * dlon);
+    var range = s.range_km || 230;
+    if (distKm < range && distKm < bestDist) { bestDist = distKm; best = s; }
+  });
+  return best;
+}
+
+function nidsSiteBounds(lat, lon, range_km) {
+  range_km = range_km || 230;
+  var kmlat = 111.32;
+  var kmlon = kmlat * Math.cos(lat * Math.PI / 180);
+  var lr = range_km / kmlat, lo = range_km / kmlon;
+  return [[lat - lr, lon - lo], [lat + lr, lon + lo]];
+}
+
+function ensureRadarSiteList(cb) {
+  if (radarSiteList) { cb(); return; }
+  fetch(NIDS_API + '/sites?product=N0B&radar_type=WSR-88D')
     .then(function(r) { return r.json(); })
-    .then(function(idx) {
-      var frames = idx.frames || [];
-      if (!frames.length) return;
-      var frame = frames[frames.length - 1];
-      if (mrmsLayer) { map.removeLayer(mrmsLayer); mrmsLayer = null; }
-      mrmsLayer = L.tileLayer(frame.tile_url + '?_=' + Date.now(), {
-        opacity: 0.7, tileSize: 256, zIndex: 410, attribution: 'MRMS &copy; NOAA/NSSL',
-      });
-      mrmsLayer.addTo(map);
-      var el = document.getElementById('mrmsStatus');
-      if (el) el.textContent = (frame.valid_time || idx.latest) + ' UTC';
+    .then(function(d) { radarSiteList = d.sites || []; cb(); })
+    .catch(function() { radarSiteList = []; cb(); });
+}
+
+function removeRadarLayer() {
+  if (radarLayer) { map.removeLayer(radarLayer); radarLayer = null; }
+}
+
+function showRadarLegend(title) {
+  var legend = document.getElementById('radarLegend');
+  if (legend) legend.style.display = 'block';
+  var lt = document.getElementById('radarLegendTitle');
+  if (lt) lt.textContent = title;
+}
+
+function loadCompositeRadar() {
+  var statusEl = document.getElementById('mrmsStatus');
+  fetch(MRMS_FRAMES_API + '?product=composite&hours=1')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (!radarEnabled() || map.getZoom() > RADAR_ZOOM_THRESHOLD) return; // stale by the time this resolved
+      var frames = data.frames || [];
+      var last = frames.length ? frames[frames.length - 1] : null;
+      var url = mapcacheTileUrl('composite', last ? last.ts : null);
+      removeRadarLayer();
+      radarMode = 'composite';
+      radarLayer = L.tileLayer(url, {
+        opacity: 0.7, zIndex: 410, attribution: 'MRMS &copy; NOAA/NSSL',
+        errorTileUrl: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
+      }).addTo(map);
+      if (statusEl) statusEl.textContent = 'MRMS composite' + (last ? ' · ' + last.label : '');
+      showRadarLegend('MRMS Composite Reflectivity (dBZ)');
     })
     .catch(function() {
-      var el = document.getElementById('mrmsStatus');
-      if (el) el.textContent = 'Radar unavailable';
+      if (statusEl) statusEl.textContent = 'Radar unavailable';
     });
+}
+
+function loadLocalRadar() {
+  var statusEl = document.getElementById('mrmsStatus');
+  var center = map.getCenter();
+  ensureRadarSiteList(function() {
+    var site = nearestNidsSite(center.lat, center.lng, radarSiteList);
+    if (!site) {
+      removeRadarLayer();
+      radarMode = null;
+      if (statusEl) statusEl.textContent = 'No radar site in range here';
+      return;
+    }
+    fetch(NIDS_API + '/' + site.site_id + '/N0B/meta')
+      .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function(meta) {
+        if (!radarEnabled() || map.getZoom() <= RADAR_ZOOM_THRESHOLD) return; // stale by the time this resolved
+        var bounds = nidsSiteBounds(meta.lat, meta.lon, meta.range_km);
+        var url = NIDS_API + '/' + site.site_id + '/N0B?_=' + Date.now();
+        radarMode = 'nids';
+        if (radarLayer && radarLayer.setUrl) {
+          radarLayer.setUrl(url);
+          radarLayer.setBounds(bounds);
+        } else {
+          removeRadarLayer();
+          radarLayer = L.imageOverlay(url, bounds, { opacity: 0.75, interactive: false, zIndex: 420 }).addTo(map);
+        }
+        var age = meta.age_secs < 60 ? '<1 min' : Math.round(meta.age_secs / 60) + ' min ago';
+        if (statusEl) statusEl.textContent = site.site_id + ' N0B · ' + age;
+        showRadarLegend(site.site_id + ' Base Reflectivity (N0B)');
+      })
+      .catch(function() {
+        if (statusEl) statusEl.textContent = 'No data for ' + site.site_id;
+      });
+  });
+}
+
+function refreshRadar() {
+  if (!radarEnabled()) return;
+  if (map.getZoom() <= RADAR_ZOOM_THRESHOLD) {
+    if (radarMode === 'nids') { removeRadarLayer(); radarMode = null; }
+    loadCompositeRadar();
+  } else {
+    if (radarMode === 'composite') { removeRadarLayer(); radarMode = null; }
+    loadLocalRadar();
+  }
 }
 
 document.getElementById('mrmsToggle').addEventListener('change', function() {
   var statusEl = document.getElementById('mrmsStatus');
   if (this.checked) {
     statusEl.style.display = 'block';
-    loadMRMS();
-    mrmsTimer = setInterval(loadMRMS, 120000);
+    refreshRadar();
+    radarTimer = setInterval(refreshRadar, 120000);
   } else {
     statusEl.style.display = 'none';
-    if (mrmsLayer) { map.removeLayer(mrmsLayer); mrmsLayer = null; }
-    if (mrmsTimer) { clearInterval(mrmsTimer); mrmsTimer = null; }
+    removeRadarLayer();
+    radarMode = null;
+    if (radarTimer) { clearInterval(radarTimer); radarTimer = null; }
+    var legend = document.getElementById('radarLegend');
+    if (legend) legend.style.display = 'none';
   }
+});
+
+map.on('zoomend', function() {
+  if (!radarEnabled()) return;
+  var wantMode = map.getZoom() <= RADAR_ZOOM_THRESHOLD ? 'composite' : 'nids';
+  if (wantMode !== radarMode) refreshRadar();
+});
+map.on('moveend', function() {
+  // Re-pick nearest site when panning around at NIDS zoom
+  if (radarEnabled() && map.getZoom() > RADAR_ZOOM_THRESHOLD) refreshRadar();
 });
 
 
