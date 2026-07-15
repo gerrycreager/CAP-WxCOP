@@ -558,9 +558,13 @@
                     <input type="radio" name="radarProduct" id="radarN0B" value="N0B" checked
                            style="accent-color:#2c5f41;"> Reflectivity (N0B)
                 </label>
-                <label id="radarN0HLabel" style="display:flex;align-items:center;gap:5px;cursor:pointer;">
+                <label id="radarN0HLabel" style="display:flex;align-items:center;gap:5px;cursor:pointer;margin-bottom:2px;">
                     <input type="radio" name="radarProduct" id="radarN0H" value="N0H"
                            style="accent-color:#2c5f41;"> Hydrometeor Class (N0H)
+                </label>
+                <label id="radarN0SLabel" style="display:flex;align-items:center;gap:5px;cursor:pointer;">
+                    <input type="radio" name="radarProduct" id="radarN0S" value="N0S"
+                           style="accent-color:#2c5f41;"> Storm-Relative Velocity (N0S)
                 </label>
             </div>
             <!-- TDWR products (shown when TDWR auto-selected) -->
@@ -1942,14 +1946,15 @@
             // Timeline click-to-seek
             var timeline = document.getElementById('mrmsTimeline');
             if(timeline) {
-                timeline.addEventListener('click', function(e) {
+                timeline._mrmsHandler = function(e) {
                     if(!mlFrames.length) return;
                     var rect = this.getBoundingClientRect();
                     var pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
                     var targetFrame = Math.round(pct * (mlFrames.length - 1));
                     mlPause();
                     mlGoFrame(targetFrame);
-                });
+                };
+                timeline.addEventListener('click', timeline._mrmsHandler);
             }
             document.getElementById('mrmsLocalDuration').addEventListener('change',function(){
                 if(document.getElementById('mrmsLocalToggle').checked) {
@@ -1967,11 +1972,21 @@
                     nidsAnimPause(); nidsAnimPlay();
                 }
             });
-            document.getElementById('mBtnFirst').addEventListener('click',function(){mlPause();mlGoFrame(0);});
-            document.getElementById('mBtnPrev').addEventListener('click', function(){mlPause();mlGoFrame(mlCurrent-1);});
-            document.getElementById('mBtnPlay').addEventListener('click', function(){mlPlaying?mlPause():mlPlay();});
-            document.getElementById('mBtnNext').addEventListener('click', function(){mlPause();mlGoFrame(mlCurrent+1);});
-            document.getElementById('mBtnLast').addEventListener('click', function(){mlPause();mlGoFrame(mlFrames.length-1);});
+            var mBtnFirstEl = document.getElementById('mBtnFirst');
+            mBtnFirstEl._mrmsHandler = function(){mlPause();mlGoFrame(0);};
+            mBtnFirstEl.addEventListener('click', mBtnFirstEl._mrmsHandler);
+            var mBtnPrevEl = document.getElementById('mBtnPrev');
+            mBtnPrevEl._mrmsHandler = function(){mlPause();mlGoFrame(mlCurrent-1);};
+            mBtnPrevEl.addEventListener('click', mBtnPrevEl._mrmsHandler);
+            var mBtnPlayEl = document.getElementById('mBtnPlay');
+            mBtnPlayEl._mrmsHandler = function(){mlPlaying?mlPause():mlPlay();};
+            mBtnPlayEl.addEventListener('click', mBtnPlayEl._mrmsHandler);
+            var mBtnNextEl = document.getElementById('mBtnNext');
+            mBtnNextEl._mrmsHandler = function(){mlPause();mlGoFrame(mlCurrent+1);};
+            mBtnNextEl.addEventListener('click', mBtnNextEl._mrmsHandler);
+            var mBtnLastEl = document.getElementById('mBtnLast');
+            mBtnLastEl._mrmsHandler = function(){mlPause();mlGoFrame(mlFrames.length-1);};
+            mBtnLastEl.addEventListener('click', mBtnLastEl._mrmsHandler);
 
             /* Expose to window scope for NIDS timeline integration */
             window.mlGoFrame    = mlGoFrame;
@@ -2658,6 +2673,16 @@
             <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:10px;background:rgb(255,255,255);border:1px solid #ccc;border-radius:2px;"></span>Hail+Rain</div>
             <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:10px;background:rgb(100,100,100);border-radius:2px;"></span>GC/Unknown</div>
         </div>
+        <!-- Storm-relative velocity scale (N0S) -->
+        <div id="nidsLegendVel" style="display:none;">
+            <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgb(50,200,50);"></span>5&ndash;20 kt inbound</div>
+            <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgb(0,140,0);"></span>20&ndash;40 kt inbound</div>
+            <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgb(0,60,0);"></span>40+ kt inbound</div>
+            <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgb(240,120,120);"></span>5&ndash;20 kt outbound</div>
+            <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgb(220,20,20);"></span>20&ndash;40 kt outbound</div>
+            <div style="display:flex;align-items:center;gap:5px;margin:2px 0;"><span style="display:inline-block;width:14px;height:3px;background:rgb(110,0,0);"></span>40+ kt outbound</div>
+            <div style="font-size:9px;color:#777;margin-top:2px;">green = toward radar, red = away</div>
+        </div>
         <div id="nidsLegendSite" style="margin-top:4px;font-size:10px;color:#666;">NEXRAD N0B</div>
         <!-- Animation controlled by bottom timeline bar when NIDS active -->
     </div>
@@ -2711,13 +2736,16 @@
             var tw   = document.getElementById('tdwrProducts');
             var ind  = document.getElementById('radarTypeIndicator');
             var n0hL = document.getElementById('radarN0HLabel');
-            /* N0H tiles only exist for NIDS WSR-88D — hide otherwise */
+            var n0sL = document.getElementById('radarN0SLabel');
+            /* N0H/N0S tiles only exist for NIDS WSR-88D — hide otherwise */
             if (n0hL) n0hL.style.display = (type === 'WSR-88D') ? 'flex' : 'none';
-            /* If switching away from WSR-88D with N0H selected, revert to N0B */
+            if (n0sL) n0sL.style.display = (type === 'WSR-88D') ? 'flex' : 'none';
+            /* If switching away from WSR-88D with N0H/N0S selected, revert to N0B */
             if (type !== 'WSR-88D') {
                 var n0h = document.getElementById('radarN0H');
+                var n0s = document.getElementById('radarN0S');
                 var n0b = document.getElementById('radarN0B');
-                if (n0h && n0h.checked && n0b) { n0b.checked = true; }
+                if (((n0h && n0h.checked) || (n0s && n0s.checked)) && n0b) { n0b.checked = true; }
             }
             if (nx)  nx.style.display  = (type === 'WSR-88D') ? 'block' : 'none';
             if (tw)  tw.style.display  = (type === 'TDWR')    ? 'block' : 'none';
@@ -2854,27 +2882,57 @@
             nidsGoFrame(frames.length - 1);
             var lbl = document.getElementById('mrmsLocalLabel');
             if (lbl) lbl.textContent = (currentType === 'TDWR' ? 'TDWR · ' : 'WSR-88D · ') + currentSite + ' ' + currentProd;
-            /* Wire play button to NIDS animation */
+            /* Wire play button to NIDS animation. hijackTimeline() can run
+               repeatedly in one session (product switch, TDWR handoff, the
+               5-min auto-refresh) -- always remove whatever's currently
+               attached (original MRMS handler on the first call, or our own
+               stale NIDS handler from a previous call) before adding a new
+               one, or duplicate listeners stack and each click fires the
+               play/pause toggle twice, canceling itself out. */
             var playBtn = document.getElementById('mBtnPlay');
             if (playBtn) {
+                playBtn.removeEventListener('click', playBtn._mrmsHandler);
+                playBtn.removeEventListener('click', playBtn._nidsHandler);
                 playBtn._nidsHandler = function() {
                     nidsAnimPlaying ? nidsAnimPause() : nidsAnimPlay();
                 };
-                playBtn.removeEventListener('click', playBtn._mrmsHandler);
                 playBtn.addEventListener('click', playBtn._nidsHandler);
             }
-            /* Wire prev/next/first/last to nidsGoFrame */
+            /* Wire prev/next/first/last to nidsGoFrame -- same re-hijack
+               guard as the play button above. */
             var btnFirst = document.getElementById('mBtnFirst');
             var btnPrev  = document.getElementById('mBtnPrev');
             var btnNext  = document.getElementById('mBtnNext');
             var btnLast  = document.getElementById('mBtnLast');
-            if (btnFirst) { btnFirst._nids = function(){nidsAnimPause();nidsGoFrame(0);}; btnFirst.addEventListener('click', btnFirst._nids); }
-            if (btnPrev)  { btnPrev._nids  = function(){nidsAnimPause();nidsGoFrame(Math.max(0,window.mlCurrent-1));}; btnPrev.addEventListener('click', btnPrev._nids); }
-            if (btnNext)  { btnNext._nids  = function(){nidsAnimPause();nidsGoFrame(Math.min(window._nidsFrames.length-1,window.mlCurrent+1));}; btnNext.addEventListener('click', btnNext._nids); }
-            if (btnLast)  { btnLast._nids  = function(){nidsAnimPause();nidsGoFrame(window._nidsFrames.length-1);}; btnLast.addEventListener('click', btnLast._nids); }
+            if (btnFirst) {
+                btnFirst.removeEventListener('click', btnFirst._mrmsHandler);
+                btnFirst.removeEventListener('click', btnFirst._nids);
+                btnFirst._nids = function(){nidsAnimPause();nidsGoFrame(0);};
+                btnFirst.addEventListener('click', btnFirst._nids);
+            }
+            if (btnPrev) {
+                btnPrev.removeEventListener('click', btnPrev._mrmsHandler);
+                btnPrev.removeEventListener('click', btnPrev._nids);
+                btnPrev._nids = function(){nidsAnimPause();nidsGoFrame(Math.max(0,window.mlCurrent-1));};
+                btnPrev.addEventListener('click', btnPrev._nids);
+            }
+            if (btnNext) {
+                btnNext.removeEventListener('click', btnNext._mrmsHandler);
+                btnNext.removeEventListener('click', btnNext._nids);
+                btnNext._nids = function(){nidsAnimPause();nidsGoFrame(Math.min(window._nidsFrames.length-1,window.mlCurrent+1));};
+                btnNext.addEventListener('click', btnNext._nids);
+            }
+            if (btnLast) {
+                btnLast.removeEventListener('click', btnLast._mrmsHandler);
+                btnLast.removeEventListener('click', btnLast._nids);
+                btnLast._nids = function(){nidsAnimPause();nidsGoFrame(window._nidsFrames.length-1);};
+                btnLast.addEventListener('click', btnLast._nids);
+            }
             /* Wire timeline scrubber */
             var tl = document.getElementById('mrmsTimeline');
             if (tl) {
+                tl.removeEventListener('click', tl._mrmsHandler);
+                tl.removeEventListener('click', tl._nidsHandler);
                 tl._nidsHandler = function(e) {
                     if (!window._nidsFrames || !window._nidsFrames.length) return;
                     var rect = this.getBoundingClientRect();
@@ -2892,21 +2950,24 @@
             nidsActive = false;
             window._nidsFrames = [];
             if (_origGoFrame) { window.mlGoFrame = _origGoFrame; }
-            /* Unwire NIDS button handlers */
+            /* Unwire NIDS button handlers and restore the original MRMS ones
+               removed in hijackTimeline(). */
             var playBtn = document.getElementById('mBtnPlay');
-            if (playBtn && playBtn._nidsHandler) {
-                playBtn.removeEventListener('click', playBtn._nidsHandler);
-                playBtn._nidsHandler = null;
+            if (playBtn) {
+                if (playBtn._nidsHandler) { playBtn.removeEventListener('click', playBtn._nidsHandler); playBtn._nidsHandler = null; }
                 playBtn.innerHTML = '&#9654;';
+                if (playBtn._mrmsHandler) playBtn.addEventListener('click', playBtn._mrmsHandler);
             }
             ['mBtnFirst','mBtnPrev','mBtnNext','mBtnLast'].forEach(function(id) {
                 var b = document.getElementById(id);
-                if (b && b._nids) { b.removeEventListener('click', b._nids); b._nids = null; }
+                if (!b) return;
+                if (b._nids) { b.removeEventListener('click', b._nids); b._nids = null; }
+                if (b._mrmsHandler) b.addEventListener('click', b._mrmsHandler);
             });
             var tl = document.getElementById('mrmsTimeline');
-            if (tl && tl._nidsHandler) {
-                tl.removeEventListener('click', tl._nidsHandler);
-                tl._nidsHandler = null;
+            if (tl) {
+                if (tl._nidsHandler) { tl.removeEventListener('click', tl._nidsHandler); tl._nidsHandler = null; }
+                if (tl._mrmsHandler) tl.addEventListener('click', tl._mrmsHandler);
             }
             /* Restore MRMS colorbar and tiles only if back at low zoom */
             var _restoreZoom = window._capMap ? window._capMap.getZoom() : 0;
@@ -2930,16 +2991,18 @@
         function updateLegendForProduct(prod) {
             var refl  = document.getElementById('nidsLegendRefl');
             var hydro = document.getElementById('nidsLegendHydro');
+            var vel   = document.getElementById('nidsLegendVel');
             var title = document.getElementById('nidsLegendTitle');
-            if (prod === 'N0H') {
-                if (title) title.textContent = '🌧 Hydrometeor Class';
-                if (refl)  refl.style.display  = 'none';
-                if (hydro) hydro.style.display = 'block';
-            } else {
-                if (title) title.textContent = '📡 Base Reflectivity';
-                if (refl)  refl.style.display  = 'block';
-                if (hydro) hydro.style.display = 'none';
-            }
+            var isHydro = (prod === 'N0H');
+            var isVel   = (prod === 'N0S');
+            // Reflectivity is the default legend -- covers N0B AND all TDWR
+            // products (TZ0/TZ1/TZ2/TZL), which share the same dBZ scale.
+            if (refl)  refl.style.display  = (isHydro || isVel) ? 'none' : 'block';
+            if (hydro) hydro.style.display = isHydro ? 'block' : 'none';
+            if (vel)   vel.style.display   = isVel   ? 'block' : 'none';
+            if (title) title.textContent = isHydro ? '🌧 Hydrometeor Class'
+                                          : isVel   ? '🌀 Storm-Relative Velocity'
+                                          : '📡 Base Reflectivity';
         }
 
         /* ── Remove NIDS overlay ── */
@@ -3065,10 +3128,13 @@
                                 : ('NEXRAD WSR-88D · ' + rng + 'km');
                             typeEl.style.display = 'block';
                         }
-                        var titleEl = document.getElementById('nidsLegendTitle');
-                        if (titleEl) titleEl.textContent = useTdwr
-                            ? 'TDWR Reflectivity'
-                            : 'Base Reflectivity';
+                        /* TDWR has only reflectivity — override the emoji-prefixed WSR-88D
+                           title set by updateLegendForProduct() above. Leave N0B/N0H/N0S
+                           titles alone; that function already set the right one. */
+                        if (useTdwr) {
+                            var titleEl = document.getElementById('nidsLegendTitle');
+                            if (titleEl) titleEl.textContent = 'TDWR Reflectivity';
+                        }
 
                         setRadarStatus(site.site_id + ' ' + prod
                             + (useTdwr ? ' (TDWR)' : ''));
@@ -3084,9 +3150,11 @@
 
         /* ---- DOM wiring ---- */
         document.addEventListener('DOMContentLoaded', function() {
-            /* N0H only available at NIDS zoom (Z>=8) — hidden at MRMS startup */
+            /* N0H/N0S only available at NIDS zoom (Z>=8) — hidden at MRMS startup */
             var n0hL = document.getElementById('radarN0HLabel');
             if (n0hL) n0hL.style.display = 'none';
+            var n0sL = document.getElementById('radarN0SLabel');
+            if (n0sL) n0sL.style.display = 'none';
 
             var poll = setInterval(function() {
                 if (!window._capMap) return;
@@ -3115,6 +3183,10 @@
                         if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
                     } else {
                         siteList = null; tdwrSiteList = null; currentSite = null;
+                        // updateRadarSource() only calls showRadarTypeUI() on an actual
+                        // WSR-88D<->TDWR switch, so N0H/N0S stay hidden if we're enabling
+                        // while already at the same type (the common case) -- sync it here.
+                        showRadarTypeUI(currentType);
                         ensureSiteLists(function() { updateRadarSource(); });
                         refreshTimer = setInterval(function() {
                             currentSite = null; updateRadarSource();
@@ -3126,6 +3198,11 @@
             document.querySelectorAll('input[name="radarProduct"]').forEach(function(r) {
                 r.addEventListener('change', function() {
                     if (isRadarEnabled()) {
+                        // Stop any in-flight animation timer first -- otherwise a tick
+                        // scheduled just before the switch can land after it and briefly
+                        // repaint the legend caption with the outgoing product's stale
+                        // site/age text via nidsGoFrame()'s currentProd read.
+                        if (typeof nidsAnimPause === 'function') nidsAnimPause();
                         currentProd = null;
                         updateRadarSource();
                         if (typeof updateLegendForProduct === 'function') {
@@ -3136,7 +3213,11 @@
             });
             document.querySelectorAll('input[name="tdwrProduct"]').forEach(function(r) {
                 r.addEventListener('change', function() {
-                    if (isRadarEnabled()) { currentProd = null; updateRadarSource(); }
+                    if (isRadarEnabled()) {
+                        if (typeof nidsAnimPause === 'function') nidsAnimPause();
+                        currentProd = null;
+                        updateRadarSource();
+                    }
                 });
             });
         });
