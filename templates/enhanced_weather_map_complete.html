@@ -2057,6 +2057,9 @@
                             var color = f.properties.color || '#AAAAAA';
                             var label = f.properties.label || '';
                             var wfo   = f.properties.wfo   || '';
+                            var begin = f.properties.begin_time
+                                        ? new Date(f.properties.begin_time).toUTCString().slice(17,22) + 'Z'
+                                        : '';
                             var end   = f.properties.end_time
                                         ? new Date(f.properties.end_time).toUTCString().slice(17,22) + 'Z'
                                         : '';
@@ -2075,6 +2078,7 @@
                             }).bindPopup(
                                 '<b>' + label + '</b><br>' +
                                 'WFO: ' + wfo + '<br>' +
+                                (begin ? 'Issued: ' + begin + '<br>' : '') +
                                 (end ? 'Expires: ' + end + '<br>' : '') +
                                 (sm  ? 'Motion: ' + sm + '<br>' : '') +
                                 (f.properties.headline

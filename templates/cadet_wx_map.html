@@ -885,6 +885,9 @@ function loadWWA() {
                 var props = f.properties;
                 var color = props.color || '#AAAAAA';
                 var label = props.label || (props.phenomena + '.' + props.significance);
+                var begin = props.begin_time
+                            ? new Date(props.begin_time).toUTCString().slice(17,22) + 'Z'
+                            : '';
                 var end   = props.end_time
                             ? new Date(props.end_time).toUTCString().slice(17,22) + 'Z'
                             : '';
@@ -899,6 +902,7 @@ function loadWWA() {
                 }).bindPopup(
                     '<b>' + label + '</b><br>' +
                     'WFO: ' + props.wfo + '<br>' +
+                    (begin ? 'Issued: ' + begin + '<br>' : '') +
                     (end ? 'Expires: ' + end + '<br>' : '') +
                     (sm  ? 'Motion: ' + sm.deg + '&deg; @ ' + sm.kts + ' kt<br>' : '') +
                     (props.headline
