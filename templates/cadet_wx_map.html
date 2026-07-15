@@ -178,18 +178,35 @@
         <input type="checkbox" id="mrmsToggle" style="margin-right:4px;">
         Show Local Radar (auto) &#8635;
       </label>
+      <div id="localRadarProductRow" style="display:none;margin-top:4px;">
+        <label style="font-size:0.72rem;color:#8bc4a8;">
+          <input type="radio" name="localRadarProduct" value="N0B" checked style="margin-right:3px;">Reflectivity
+        </label>
+        <label style="font-size:0.72rem;color:#8bc4a8;margin-left:10px;">
+          <input type="radio" name="localRadarProduct" value="N0S" style="margin-right:3px;">Velocity
+        </label>
+      </div>
       <div id="mrmsStatus" style="font-size:0.72rem;color:#8bc4a8;margin-top:2px;display:none;">Loading&hellip;</div>
-      <!-- MRMS composite at low zoom, nearest WSR-88D site reflectivity past
-           zoom 7 -- same auto-switch pattern as enhanced_weather_map_complete.html.
-           Reflectivity dBZ color scale is the same NWS standard for both. -->
+      <!-- MRMS composite at low zoom, nearest WSR-88D site reflectivity/velocity
+           past zoom 7 -- same auto-switch pattern as enhanced_weather_map_complete.html.
+           Reflectivity dBZ color scale is the same NWS standard for both; velocity
+           (N0S) shown only once zoomed into local-site mode -- composite has no
+           velocity equivalent. -->
       <div id="radarLegend" style="display:none;margin-top:5px;font-size:0.7rem;">
         <div id="radarLegendTitle" style="color:#8af;margin-bottom:3px;">Reflectivity (dBZ)</div>
-        <div style="line-height:1.7;">
+        <div id="radarLegendRefl" style="line-height:1.7;">
           <span style="display:inline-block;width:10px;height:10px;background:#04e9e7;vertical-align:middle;margin-right:4px;"></span>5&ndash;20 light<br>
           <span style="display:inline-block;width:10px;height:10px;background:#02fd02;vertical-align:middle;margin-right:4px;"></span>20&ndash;35 moderate<br>
           <span style="display:inline-block;width:10px;height:10px;background:#fdf802;vertical-align:middle;margin-right:4px;"></span>35&ndash;45 heavy<br>
           <span style="display:inline-block;width:10px;height:10px;background:#fd0000;vertical-align:middle;margin-right:4px;"></span>45&ndash;60 very heavy/hail<br>
           <span style="display:inline-block;width:10px;height:10px;background:#f800fd;vertical-align:middle;margin-right:4px;"></span>60+ extreme
+        </div>
+        <div id="radarLegendVel" style="line-height:1.7;display:none;">
+          <span style="display:inline-block;width:10px;height:10px;background:#326432;vertical-align:middle;margin-right:4px;"></span>10&ndash;40 kt inbound<br>
+          <span style="display:inline-block;width:10px;height:10px;background:#003c00;vertical-align:middle;margin-right:4px;"></span>40+ kt inbound<br>
+          <span style="display:inline-block;width:10px;height:10px;background:#f0b4b4;vertical-align:middle;margin-right:4px;"></span>10&ndash;40 kt outbound<br>
+          <span style="display:inline-block;width:10px;height:10px;background:#6e0000;vertical-align:middle;margin-right:4px;"></span>40+ kt outbound<br>
+          <span style="font-size:0.65rem;color:#789;">green = toward radar, red = away</span>
         </div>
       </div>
       <select id="glmMinutes" style="width:100%;font-size:0.78rem;margin-top:4px;
@@ -676,6 +693,7 @@ var radarSiteList = null;
 var RADAR_ZOOM_THRESHOLD = 7;
 var MRMS_FRAMES_API = '/CAP_WxCOP/api/mrms/frames';
 var NIDS_API = '/CAP_WxCOP/api/nids';
+var localRadarProduct = 'N0B';   // 'N0B' reflectivity or 'N0S' storm-relative velocity
 
 function radarEnabled() {
   return document.getElementById('mrmsToggle').checked;
@@ -725,11 +743,16 @@ function removeRadarLayer() {
   if (radarLayer) { map.removeLayer(radarLayer); radarLayer = null; }
 }
 
-function showRadarLegend(title) {
+function showRadarLegend(title, product) {
   var legend = document.getElementById('radarLegend');
   if (legend) legend.style.display = 'block';
   var lt = document.getElementById('radarLegendTitle');
   if (lt) lt.textContent = title;
+  var isVel = product === 'N0S';
+  var reflBox = document.getElementById('radarLegendRefl');
+  var velBox  = document.getElementById('radarLegendVel');
+  if (reflBox) reflBox.style.display = isVel ? 'none' : 'block';
+  if (velBox)  velBox.style.display  = isVel ? 'block' : 'none';
 }
 
 function loadCompositeRadar() {
@@ -766,12 +789,13 @@ function loadLocalRadar() {
       if (statusEl) statusEl.textContent = 'No radar site in range here';
       return;
     }
-    fetch(NIDS_API + '/' + site.site_id + '/N0B/meta')
+    var product = localRadarProduct;
+    fetch(NIDS_API + '/' + site.site_id + '/' + product + '/meta')
       .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(function(meta) {
         if (!radarEnabled() || map.getZoom() <= RADAR_ZOOM_THRESHOLD) return; // stale by the time this resolved
         var bounds = nidsSiteBounds(meta.lat, meta.lon, meta.range_km);
-        var url = NIDS_API + '/' + site.site_id + '/N0B?_=' + Date.now();
+        var url = NIDS_API + '/' + site.site_id + '/' + product + '?_=' + Date.now();
         radarMode = 'nids';
         if (radarLayer && radarLayer.setUrl) {
           radarLayer.setUrl(url);
@@ -781,8 +805,11 @@ function loadLocalRadar() {
           radarLayer = L.imageOverlay(url, bounds, { opacity: 0.75, interactive: false, zIndex: 420 }).addTo(map);
         }
         var age = meta.age_secs < 60 ? '<1 min' : Math.round(meta.age_secs / 60) + ' min ago';
-        if (statusEl) statusEl.textContent = site.site_id + ' N0B · ' + age;
-        showRadarLegend(site.site_id + ' Base Reflectivity (N0B)');
+        if (statusEl) statusEl.textContent = site.site_id + ' ' + product + ' · ' + age;
+        var title = product === 'N0S'
+          ? site.site_id + ' Storm-Relative Velocity (N0S)'
+          : site.site_id + ' Base Reflectivity (N0B)';
+        showRadarLegend(title, product);
       })
       .catch(function() {
         if (statusEl) statusEl.textContent = 'No data for ' + site.site_id;
@@ -803,19 +830,32 @@ function refreshRadar() {
 
 document.getElementById('mrmsToggle').addEventListener('change', function() {
   var statusEl = document.getElementById('mrmsStatus');
+  var productRow = document.getElementById('localRadarProductRow');
   if (this.checked) {
     statusEl.style.display = 'block';
+    if (productRow) productRow.style.display = 'block';
     refreshRadar();
     radarTimer = setInterval(refreshRadar, 120000);
     defaultRingsOn();
   } else {
     statusEl.style.display = 'none';
+    if (productRow) productRow.style.display = 'none';
     removeRadarLayer();
     radarMode = null;
     if (radarTimer) { clearInterval(radarTimer); radarTimer = null; }
     var legend = document.getElementById('radarLegend');
     if (legend) legend.style.display = 'none';
   }
+});
+
+document.querySelectorAll('input[name="localRadarProduct"]').forEach(function(radio) {
+  radio.addEventListener('change', function() {
+    if (!this.checked) return;
+    localRadarProduct = this.value;
+    // Product selection only affects local-site (nids) mode -- composite has
+    // no velocity equivalent, so there's nothing to refresh at low zoom.
+    if (radarMode === 'nids') loadLocalRadar();
+  });
 });
 
 map.on('zoomend', function() {
