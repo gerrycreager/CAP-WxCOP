@@ -37,7 +37,6 @@ import glob
 import json
 import logging
 import os
-import smtplib
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -57,15 +56,19 @@ LOG_FILE = Path("/var/log/cap_wxcop/freshness_monitor.log")
 # spamming every 5 minutes while an outage is already known/being worked)
 ESCALATION_INTERVAL = timedelta(hours=4)
 
-# Email alerting. Uses local MTA (postfix/sendmail) via smtplib to localhost,
-# which is the simplest reliable option on a box that already runs a mail
-# stack for AF Weather email ingest. Swap ALERT_TO for an SMS gateway
-# address (e.g. 1234567890@vtext.com) to also text yourself, same pattern
-# planned for cadet lightning alerts.
-ALERT_FROM = "wxcop-monitor@r815.wxcop.local"
-ALERT_TO = ["gerry@example.org"]          # <-- set real address(es)
-SMTP_HOST = "localhost"
-SMTP_PORT = 25
+# Email alerting via msmtp (/etc/msmtprc, relays through Gmail SMTP as
+# capwxcop.alerts@gmail.com) -- there's no local MTA on this box, so
+# smtplib-to-localhost silently failed on every alert until this was
+# found. msmtprc is 600 root:www-data; this script runs as ldm (systemd
+# User=ldm), so it needs a POSIX ACL for read access:
+#   setfacl -m u:ldm:r /etc/msmtprc
+# From address must match the authenticated msmtp account -- Gmail
+# rejects/rewrites an arbitrary From header otherwise. Swap ALERT_TO for
+# an SMS gateway address (e.g. 1234567890@vtext.com) to also text
+# yourself, same pattern planned for cadet lightning alerts.
+ALERT_FROM = "capwxcop.alerts@gmail.com"
+ALERT_TO = ["gcreager@capnhq.gov"]
+MSMTP_BIN = "/usr/bin/msmtp"
 
 
 @dataclass
@@ -126,6 +129,28 @@ CHECKS = [
         max_age=timedelta(minutes=10),
         file_glob="/LDM/radar/level3/*/T*/nids/*/*.nids",
     ),
+    # GLM East (G19) and West (G18) are two independent satellite feeds,
+    # not a primary/failover pair -- checked separately because a raw-file
+    # check across both directories combined would mask a real outage on
+    # one satellite as long as the other keeps delivering (this is exactly
+    # how a live G19 outage went unnoticed: querying the combined
+    # observations.glm_flashes table showed "fresh" because G18/West
+    # flashes were still landing normally). Checks file arrival, not flash
+    # content, since a legitimately quiet lightning period on one satellite
+    # shouldn't alert -- LCFA granules are produced continuously regardless
+    # of whether they contain any flashes.
+    Check(
+        name="GLM East (G19) lightning feed",
+        kind="file_mtime",
+        max_age=timedelta(minutes=15),
+        file_glob="/LDM/satellite/GLM/EAST/*.nc",
+    ),
+    Check(
+        name="GLM West (G18) lightning feed",
+        kind="file_mtime",
+        max_age=timedelta(minutes=15),
+        file_glob="/LDM/satellite/GLM/WEST/*.nc",
+    ),
     Check(
         # ingest_wwa_vtec.py logs "Done: N op(s)" on every pqact invocation,
         # ops=0 included -- this is a heartbeat that the pipe is alive, not
@@ -185,22 +210,15 @@ def send_alert(subject: str, body: str) -> None:
     msg["From"] = ALERT_FROM
     msg["To"] = ", ".join(ALERT_TO)
     try:
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as smtp:
-            smtp.sendmail(ALERT_FROM, ALERT_TO, msg.as_string())
+        subprocess.run(
+            [MSMTP_BIN] + ALERT_TO,
+            input=msg.as_bytes(),
+            check=True,
+            timeout=20,
+        )
         log.info(f"Alert sent: {subject}")
     except Exception as e:
-        # Fall back to local `mail` command if SMTP relay is unavailable
-        log.error(f"SMTP send failed ({e}), trying local mail command")
-        try:
-            subprocess.run(
-                ["mail", "-s", subject] + ALERT_TO,
-                input=body.encode(),
-                check=True,
-                timeout=15,
-            )
-            log.info("Alert sent via local mail command")
-        except Exception as e2:
-            log.error(f"Local mail fallback also failed: {e2}")
+        log.error(f"msmtp send failed: {e}")
 
 
 def check_db_max(check: Check) -> Optional[datetime]:
