@@ -30,7 +30,10 @@ def download_nda_data():
         params = {
             'where': '1=1',  # Get all records
             'outFields': '*',  # All fields
-            'f': 'json',     # JSON format (easier to handle than GeoJSON for now)
+            'f': 'geojson',  # Standard GeoJSON -- ST_GeomFromGeoJSON() can't parse
+                             # ESRI's native 'json' format (rings-based, no "type"
+                             # field), which is what was silently breaking every
+                             # geometry insert below.
             'returnGeometry': 'true'
         }
         
@@ -53,7 +56,9 @@ def parse_nda_features(features):
     
     try:
         for feature in features:
-            attrs = feature.get('attributes', {})
+            # GeoJSON Feature format: fields under 'properties', not ESRI's
+            # native 'attributes' -- same field names/casing either way.
+            attrs = feature.get('properties', {})
             geometry = feature.get('geometry', {})
             
             # Map ESRI fields to our database structure
@@ -108,23 +113,12 @@ def create_nda_table():
             )
         """)
         
-        # Create spatial index
-        cur.execute("""
-            CREATE INDEX IF NOT EXISTS idx_nda_geometry 
-            ON observations.national_defense_airspace USING GIST (geometry)
-        """)
-        
-        # Create other useful indexes
-        cur.execute("""
-            CREATE INDEX IF NOT EXISTS idx_nda_state 
-            ON observations.national_defense_airspace (state)
-        """)
-        
-        cur.execute("""
-            CREATE INDEX IF NOT EXISTS idx_nda_type 
-            ON observations.national_defense_airspace (type_code)
-        """)
-        
+        # Indexes (idx_nda_geometry/state/type) are one-time schema setup,
+        # already created and owned by postgres -- avwx_user isn't the table
+        # owner, so CREATE INDEX IF NOT EXISTS still checks ownership before
+        # the existence check and fails every run even though the indexes
+        # already exist. Not runtime ingest concerns; don't recreate here.
+
         conn.commit()
         cur.close()
         conn.close()
@@ -152,18 +146,12 @@ def ingest_nda_data(nda_areas):
         inserted = 0
         for nda in nda_areas:
             try:
-                # Convert rings geometry to proper format if needed
-                geometry_sql = None
                 if nda['geometry']:
-                    # Convert ESRI rings format to proper polygon
-                    geometry_sql = f"ST_GeomFromGeoJSON('{nda['geometry']}')"
-                
-                if geometry_sql:
-                    cur.execute(f"""
-                        INSERT INTO observations.national_defense_airspace 
-                        (global_id, name, type_code, local_type, city, state, country, 
+                    cur.execute("""
+                        INSERT INTO observations.national_defense_airspace
+                        (global_id, name, type_code, local_type, city, state, country,
                          wkhr_code, wkhr_rmk, geometry, active, raw_data)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, {geometry_sql}, TRUE, %s)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, ST_GeomFromGeoJSON(%s), TRUE, %s)
                         ON CONFLICT (global_id) DO UPDATE SET
                             active = TRUE,
                             name = EXCLUDED.name,
@@ -179,7 +167,7 @@ def ingest_nda_data(nda_areas):
                     """, (
                         nda['global_id'], nda['name'], nda['type_code'],
                         nda['local_type'], nda['city'], nda['state'], nda['country'],
-                        nda['wkhr_code'], nda['wkhr_rmk'], nda['raw_data']
+                        nda['wkhr_code'], nda['wkhr_rmk'], nda['geometry'], nda['raw_data']
                     ))
                 else:
                     # Insert without geometry
