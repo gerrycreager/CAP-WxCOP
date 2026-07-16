@@ -478,7 +478,10 @@ def main():
 
     typ, data = mail.search(None, 'UNSEEN')
     if typ != 'OK' or not data[0]:
-        log.debug("No unread messages")
+        # INFO, not DEBUG (which basicConfig filters out) -- the freshness
+        # monitor needs an unconditional per-run heartbeat here, since "no
+        # new mail" is the common case, not an error.
+        log.info("poll complete: no unread messages")
         mail.logout()
         return
 
@@ -567,7 +570,7 @@ def main():
 
     conn.close()
     mail.logout()
-    log.info("Done: %d message(s) processed", processed)
+    log.info("poll complete: %d message(s) processed", processed)
 
 
 if __name__ == '__main__':

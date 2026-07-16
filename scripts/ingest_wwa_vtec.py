@@ -35,6 +35,7 @@ import logging
 import re
 import sys
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 
 import psycopg2
 
@@ -74,10 +75,21 @@ DEACTIVATE_ACTIONS = {'CAN', 'EXP', 'UPG'}
 UPDATE_ACTIONS     = {'CON', 'EXT', 'EXA', 'EXB', 'COR'}
 
 # ── Logging ────────────────────────────────────────────────────────────────────
+# PIPE-invoked by pqact -- stderr alone goes nowhere persistent (inherited by
+# pqact's own process, not captured to a file), so the freshness monitor had
+# nothing to check. The "Done: N op(s)" line at the end of every invocation
+# (ops=0 counts) is the real "the pipe is alive" heartbeat -- write it
+# somewhere durable regardless of whether this particular product actually
+# changed anything.
+LOG_FILE = Path('/var/log/cap_wxcop/wwa_vtec_ingest.log')
+_handlers = [logging.StreamHandler()]
+if LOG_FILE.parent.exists():
+    _handlers.append(logging.FileHandler(LOG_FILE))
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s %(levelname)s %(message)s',
     datefmt='%Y-%m-%dT%H:%M:%SZ',
+    handlers=_handlers,
 )
 log = logging.getLogger('ingest_wwa_vtec')
 

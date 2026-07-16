@@ -127,17 +127,23 @@ CHECKS = [
         file_glob="/LDM/radar/level3/*/T*/nids/*/*.nids",
     ),
     Check(
+        # ingest_wwa_vtec.py logs "Done: N op(s)" on every pqact invocation,
+        # ops=0 included -- this is a heartbeat that the pipe is alive, not
+        # a claim that a hazard is active. WWA/VTEC products are issued
+        # as-needed, and calm/stagnant weather can mean multiple days with
+        # nothing matching nationwide, so the threshold has to be generous
+        # enough to not false-alarm on genuinely quiet weather.
         name="VTEC/WWA ingest heartbeat",
         kind="log_heartbeat",
-        max_age=timedelta(hours=3),
+        max_age=timedelta(hours=36),
         log_path="/var/log/cap_wxcop/wwa_vtec_ingest.log",
-        success_pattern="ingest cycle complete",
+        success_pattern="Done:",
     ),
     Check(
         name="AF Weather email parser heartbeat",
         kind="log_heartbeat",
         max_age=timedelta(hours=2),
-        log_path="/var/log/cap_wxcop/afwx_email_ingest.log",
+        log_path="/var/log/cap_wxcop/afwx_email.log",
         success_pattern="poll complete",
     ),
 ]
