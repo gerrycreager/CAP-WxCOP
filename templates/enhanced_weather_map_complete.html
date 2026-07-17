@@ -676,9 +676,9 @@
         </div>
     </div>
 
-    <link rel="stylesheet" href="https://unpkg.com/leaflet-velocity@1.10.1/dist/leaflet-velocity.min.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-velocity@2.1.4/dist/leaflet-velocity.min.css">
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="https://unpkg.com/leaflet-velocity@1.10.1/dist/leaflet-velocity.min.js"></script>
+    <script src="https://unpkg.com/leaflet-velocity@2.1.4/dist/leaflet-velocity.min.js"></script>
     <script>
         // ── Panel toggle ──────────────────────────────────────────
         function togglePanel() {
@@ -2721,7 +2721,7 @@
                 });
                 particlesLayer.addTo(map);
                 var hdr = (data[0] || {}).header || {};
-                setStatus(hdr.refTime ? hdr.refTime.slice(0,10) + ' ' + hdr.refTime.slice(11,16) + 'Z F+' +
+                setStatus(hdr.refTime ? hdr.refTime.slice(0,8) + ' ' + hdr.refTime.slice(9,14) + 'Z F+' +
                     String(hdr.forecastTime).padStart(3,'0') : '');
             });
         }
