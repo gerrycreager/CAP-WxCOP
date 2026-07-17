@@ -1,15 +1,22 @@
 #!/var/www/cap_winds_app/venv/bin/python3
 """
-ingest_airnow.py — Fetch PM2.5 observations from EPA AirNow via ACT
-(Atmospheric data Community Toolkit, act.discovery.get_airnow_bounded_obs)
-and store into observations.airnow_pm25.
+ingest_airnow.py — Fetch PM2.5 observations from EPA AirNow's bounded-obs
+CSV endpoint and store into observations.airnow_pm25.
 
 Feeds the Cadet Weather COP air-quality stoplight category (see
 cadet_wx_api.py: get_nearest_airnow_pm25(), air_quality_color()).
 
+Scoped from ARM's Atmospheric data Community Toolkit (ACT) example
+notebook, which uses act.discovery.get_airnow_bounded_obs() for this same
+endpoint -- but that wrapper builds a dense (variable, time, site) xarray
+cube via a slow triple-nested Python loop, and crashes outright on any
+row with a null site_name (confirmed against live data: 4 of 4704 rows in
+a real CONUS response had one). Since only "latest reading per site" is
+needed here, this fetches and parses the same CSV directly with a single
+pandas groupby instead.
+
 AirNow updates roughly hourly; this script requests a narrow (3h) trailing
-window and keeps only each station's most recent non-NaN reading, matching
-the "latest valid PM2.5 per site" pattern from ARM's example notebook.
+window and keeps only each station's most recent reading.
 
 Requires an AirNow API token (free, https://docs.airnowapi.org/) in
 /etc/cap_wxcop_secrets.conf as AIRNOW_API=<token>.
@@ -62,8 +69,18 @@ def load_secret(key, path=SECRETS_FILE):
 
 
 def fetch_pm25(token, bbox):
-    import act.discovery
-    import numpy as np
+    """Fetch and parse AirNow's bounded-obs CSV directly rather than going
+    through act.discovery.get_airnow_bounded_obs(): that wrapper builds a
+    dense (variable, time, site) xarray cube via a Python triple-nested
+    loop (slow for a CONUS-wide request with 1000+ sites), and -- found
+    while testing against live data -- it crashes outright when any row
+    has a null site_name, since pandas' unique() treats each NaN as a
+    distinct value but `df['site_name'] == nan` never matches it back
+    (confirmed: 4 of 4704 rows in a real CONUS response had null
+    site_name). Only need "latest reading per site" here, so do that
+    directly with a groupby instead."""
+    import pandas as pd
+    import requests as _req
 
     end = datetime.now(timezone.utc)
     start = end - timedelta(hours=3)
@@ -71,50 +88,52 @@ def fetch_pm25(token, bbox):
     end_str   = end.strftime('%Y-%m-%dT%H')
 
     log.info(f'Requesting AirNow PM2.5, bbox={bbox}, window={start_str}..{end_str}')
-    ds = act.discovery.get_airnow_bounded_obs(
-        token, start_str, end_str, bbox, parameters='PM25', data_type='B', mon_type=2,
+    url = (
+        'https://www.airnowapi.org/aq/data/?startDate=' + start_str
+        + '&endDate=' + end_str
+        + '&parameters=PM25&BBOX=' + bbox
+        + '&dataType=B&format=text/csv&verbose=1&monitorType=2'
+        + '&includerawconcentrations=1&API_KEY=' + token
     )
+    names = ['latitude', 'longitude', 'time', 'parameter', 'concentration', 'unit',
+              'raw_concentration', 'AQI', 'category', 'site_name', 'site_agency',
+              'aqs_id', 'full_aqs_id']
 
-    if 'PM25' not in ds.data_vars:
-        log.warning('No PM25 variable in response -- no data for this window/bbox')
+    resp = _req.get(url, timeout=60)
+    resp.raise_for_status()
+    if not resp.text.strip():
+        log.warning('Empty response -- no data for this window/bbox')
         return []
 
-    sites = ds.coords['sites'].values
-    times = ds.coords['time'].values
-    lats  = ds['latitude'].values
-    lons  = ds['longitude'].values
-    aqs   = ds['aqs_id'].values
-    pm25  = ds['PM25'].values          # shape (time, sites)
-    aqi   = ds['AQI'].values if 'AQI' in ds.data_vars else None
+    from io import StringIO
+    df = pd.read_csv(StringIO(resp.text), names=names)
+    df = df.dropna(subset=['aqs_id', 'concentration', 'time'])
+    # AirNow flags missing/invalid readings as -999 rather than omitting the
+    # row or using NaN -- confirmed against live data (13 of 4704 rows).
+    # Real PM2.5 concentrations are never negative, so drop on that basis
+    # rather than the magic-number literal, in case the sentinel varies.
+    df = df[df['concentration'] >= 0]
+    if df.empty:
+        log.warning('No usable rows after dropping incomplete records')
+        return []
+
+    df['time'] = pd.to_datetime(df['time'], utc=True)
+    # Keep each station's most recent reading only
+    df = df.sort_values('time').groupby('aqs_id', as_index=False).last()
 
     results = []
-    for s_idx, site_name in enumerate(sites):
-        # Latest non-NaN PM2.5 reading for this site
-        col = pm25[:, s_idx]
-        valid_idx = np.where(~np.isnan(col))[0]
-        if len(valid_idx) == 0:
-            continue
-        t_idx = valid_idx[-1]   # times is ascending, so last valid = most recent
-
+    for _, row in df.iterrows():
         aqi_val = None
-        if aqi is not None:
-            av = aqi[t_idx, s_idx]
-            if not np.isnan(av):
-                aqi_val = int(round(av))
-
-        station_id = str(aqs[s_idx]) if aqs[s_idx] not in (None, '', 'nan') else str(site_name)
-        obs_time = times[t_idx]
-        # numpy datetime64 -> aware UTC datetime
-        obs_dt = obs_time.astype('datetime64[s]').astype(datetime).replace(tzinfo=timezone.utc)
-
+        if pd.notna(row.get('AQI')):
+            aqi_val = int(round(row['AQI']))
         results.append({
-            'station_id':   station_id,
-            'station_name': str(site_name),
-            'lat':          float(lats[s_idx]),
-            'lon':          float(lons[s_idx]),
-            'pm25_ugm3':    float(col[t_idx]),
-            'aqi_value':    aqi_val,
-            'observation_time': obs_dt,
+            'station_id':       str(row['aqs_id']),
+            'station_name':     str(row['site_name']) if pd.notna(row['site_name']) else str(row['aqs_id']),
+            'lat':              float(row['latitude']),
+            'lon':              float(row['longitude']),
+            'pm25_ugm3':        float(row['concentration']),
+            'aqi_value':        aqi_val,
+            'observation_time': row['time'].to_pydatetime(),
         })
 
     return results
