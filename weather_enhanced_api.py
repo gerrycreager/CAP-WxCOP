@@ -543,8 +543,16 @@ WWA_LABELS = {
 def get_active_wwa():
     """
     Return active WWA polygons as GeoJSON FeatureCollection.
-    Only returns records with non-null geometry (storm-based warnings).
-    County-based watches (no polygon) are excluded — use UGC lookup separately.
+
+    Storm-based warnings (TOR/SVR/FFW etc.) carry a native polygon in
+    w.geom. County/zone-based watches (SPC Tornado/Severe Thunderstorm
+    Watches via WOU, and other UGC-only WWA products) carry no polygon —
+    for those, geometry is derived by unioning the county/zone boundaries
+    in observations.nws_zones for each UGC code in w.ugc_zones. A record
+    is only excluded if BOTH a native polygon and a resolvable UGC zone
+    union are unavailable (e.g. zones not yet loaded for that UGC, or an
+    empty ugc_zones array).
+
     Query params:
       bounds: west,south,east,north (optional — if omitted returns all active)
     """
@@ -567,7 +575,15 @@ def get_active_wwa():
                             f'ST_MakeEnvelope({west},{south},180,{north},4326))')
                 else:
                     geom = f'ST_MakeEnvelope({west},{south},{east},{north},4326)'
-                where_extra = f'AND ST_Intersects(w.geom, {geom})'
+                # Bounds filter applies to whichever geometry will actually
+                # be returned — native polygon, or the UGC zone union.
+                where_extra = (
+                    f'AND ST_Intersects('
+                    f'COALESCE(w.geom, '
+                    f'(SELECT ST_Union(nz.geom) FROM observations.nws_zones nz '
+                    f' WHERE nz.ugc = ANY(w.ugc_zones))'
+                    f'), {geom})'
+                )
             except (ValueError, TypeError):
                 where_extra = ''
         else:
@@ -584,12 +600,25 @@ def get_active_wwa():
                 w.end_time,
                 w.headline,
                 w.ugc_zones,
-                ST_AsGeoJSON(w.geom) AS geom_json,
+                ST_AsGeoJSON(
+                    COALESCE(
+                        w.geom,
+                        (SELECT ST_Union(nz.geom) FROM observations.nws_zones nz
+                         WHERE nz.ugc = ANY(w.ugc_zones))
+                    )
+                ) AS geom_json,
+                (w.geom IS NULL) AS is_zone_derived,
                 w.raw_segment
             FROM observations.wwa w
             WHERE w.is_active = TRUE
-              AND w.geom IS NOT NULL
               AND (w.end_time IS NULL OR w.end_time > NOW())
+              AND (
+                    w.geom IS NOT NULL
+                    OR EXISTS (
+                        SELECT 1 FROM observations.nws_zones nz
+                        WHERE nz.ugc = ANY(w.ugc_zones)
+                    )
+                  )
               {where_extra}
             ORDER BY
                 -- Warnings before watches, more severe first
@@ -608,7 +637,7 @@ def get_active_wwa():
         features = []
         for row in rows:
             (wid, wfo, ph, sig, etn, begin_time, end_time,
-             headline, ugc_zones, geom_json, raw_seg) = row
+             headline, ugc_zones, geom_json, is_zone_derived, raw_seg) = row
 
             if not geom_json:
                 continue
@@ -636,18 +665,19 @@ def get_active_wwa():
                 'type': 'Feature',
                 'geometry': json.loads(geom_json),
                 'properties': {
-                    'id':           wid,
-                    'wfo':          wfo.strip(),
-                    'phenomena':    ph.strip(),
-                    'significance': sig.strip(),
-                    'etn':          etn,
-                    'label':        label,
-                    'color':        color,
-                    'begin_time':   begin_time.strftime('%Y-%m-%dT%H:%M:%SZ') if begin_time else None,
-                    'end_time':     end_time.strftime('%Y-%m-%dT%H:%M:%SZ') if end_time else None,
-                    'headline':     headline,
-                    'ugc_zones':    ugc_zones,
-                    'storm_motion': storm_motion,
+                    'id':              wid,
+                    'wfo':             wfo.strip(),
+                    'phenomena':       ph.strip(),
+                    'significance':    sig.strip(),
+                    'etn':             etn,
+                    'label':           label,
+                    'color':           color,
+                    'begin_time':      begin_time.strftime('%Y-%m-%dT%H:%M:%SZ') if begin_time else None,
+                    'end_time':        end_time.strftime('%Y-%m-%dT%H:%M:%SZ') if end_time else None,
+                    'headline':        headline,
+                    'ugc_zones':       ugc_zones,
+                    'storm_motion':    storm_motion,
+                    'is_zone_derived': bool(is_zone_derived),
                 }
             })
 
