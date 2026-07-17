@@ -663,6 +663,7 @@
             <input type="checkbox" id="windParticlesToggle"> Animated Wind (GFS)
         </label>
         <div id="windParticlesSubOptions" style="display:none;margin-left:16px;margin-top:2px;font-size:11px;">
+            <select id="windParticlesSourceSelect" style="width:100%;font-size:12px;padding:2px;margin-bottom:3px;"></select>
             <select id="windParticlesLevelSelect" style="width:100%;font-size:12px;padding:2px;margin-bottom:3px;"></select>
             <div style="margin-top:4px;">
                 <label style="font-size:10px;color:#ccc;display:flex;align-items:center;gap:6px;">
@@ -2670,6 +2671,11 @@
     (function() {
         'use strict';
         var API = '/CAP_WxCOP/api/wind-particles';
+        var SOURCES = [
+            { key:'gfs',        label:'GFS' },
+            { key:'ecmwf-ifs',  label:'ECMWF IFS' },
+            { key:'ecmwf-aifs', label:'ECMWF AIFS (AI)' },
+        ];
         var LEVELS = [
             { key:'SFC', label:'Surface (10m AGL)' },
             { key:'850', label:'~5,000 ft MSL' },
@@ -2679,6 +2685,7 @@
             { key:'DLM', label:'Deep-Layer Mean (steering flow)' },
         ];
         var particlesLayer = null;
+        var source   = 'gfs';
         var level    = 'SFC';
         var fhr      = 0;
         var enabled  = false;
@@ -2690,10 +2697,10 @@
             if (el) el.textContent = msg;
         }
 
-        function fetchParticles(lv, cb) {
-            var key = lv + ':' + fhr;
+        function fetchParticles(src, lv, cb) {
+            var key = src + ':' + lv + ':' + fhr;
             if (_cache[key]) { cb(null, _cache[key]); return; }
-            fetch(API + '?source=gfs&level=' + lv + '&fhr=' + fhr)
+            fetch(API + '?source=' + src + '&level=' + lv + '&fhr=' + fhr)
                 .then(function(r) { if (!r.ok) throw new Error(r.status); return r.json(); })
                 .then(function(d) { _cache[key] = d; cb(null, d); })
                 .catch(function(e) { cb(e); });
@@ -2708,7 +2715,7 @@
             var map = window._capMap;
             if (!map || !enabled) return;
             setStatus('Loading…');
-            fetchParticles(level, function(err, data) {
+            fetchParticles(source, level, function(err, data) {
                 if (err) { setStatus('Unavailable'); return; }
                 removeLayer();
                 particlesLayer = L.velocityLayer({
@@ -2727,6 +2734,18 @@
         }
 
         document.addEventListener('DOMContentLoaded', function() {
+            var srcSel = document.getElementById('windParticlesSourceSelect');
+            if (srcSel) {
+                SOURCES.forEach(function(s) {
+                    var o = document.createElement('option');
+                    o.value = s.key; o.textContent = s.label;
+                    srcSel.appendChild(o);
+                });
+                srcSel.addEventListener('change', function() {
+                    source = this.value;
+                    if (enabled) loadParticles();
+                });
+            }
             var sel = document.getElementById('windParticlesLevelSelect');
             if (sel) {
                 LEVELS.forEach(function(lv) {
