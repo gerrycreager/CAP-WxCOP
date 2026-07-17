@@ -245,11 +245,31 @@ def check_db_max(check: Check) -> Optional[datetime]:
 
 
 def check_file_mtime(check: Check) -> Optional[datetime]:
+    """
+    Newest mtime among files matching check.file_glob, skipping any that
+    vanish between glob() and stat() rather than treating that race as a
+    check failure. Confirmed in production: LDM's scour/retention cleanup
+    can delete a just-globbed file (e.g. TDWR NIDS, 44 sites x 7 products,
+    globbed and scoured concurrently) before getmtime() runs on it,
+    raising FileNotFoundError -- which propagated all the way up to a
+    false "STALE" alert (100% of TDWR poller alerts traced back to this,
+    none were genuine sustained staleness). Only returns None if every
+    matched file vanished or nothing matched at all.
+    """
     matches = glob.glob(check.file_glob)
     if not matches:
         return None
-    newest = max(matches, key=os.path.getmtime)
-    return datetime.fromtimestamp(os.path.getmtime(newest), tz=timezone.utc)
+    newest_mtime = None
+    for f in matches:
+        try:
+            mtime = os.path.getmtime(f)
+        except OSError:
+            continue
+        if newest_mtime is None or mtime > newest_mtime:
+            newest_mtime = mtime
+    if newest_mtime is None:
+        return None
+    return datetime.fromtimestamp(newest_mtime, tz=timezone.utc)
 
 
 def check_log_heartbeat(check: Check) -> Optional[datetime]:
