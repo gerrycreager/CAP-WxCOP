@@ -213,6 +213,26 @@
       </div>
       <div id="glmStatus" style="font-size:0.7rem;color:#778;margin-top:3px;"></div>
     </div>
+    <div class="sidebar-section">
+      <h3>&#128168; Smoke (HRRR)</h3>
+      <label style="font-size:0.8rem;cursor:pointer;">
+        <input type="checkbox" id="smokeToggle" style="margin-right:4px;">
+        Show near-surface smoke (PM2.5-equiv.)
+      </label>
+      <div id="smokeOpacityRow" style="display:none;margin-top:4px;">
+        <label style="font-size:0.72rem;color:#8bc4a8;display:flex;align-items:center;gap:6px;">
+          Opacity
+          <input type="range" id="smokeOpacity" min="0" max="100" value="80"
+                 style="flex:1;accent-color:#4a9c6f;cursor:pointer;">
+          <span id="smokeOpacityVal" style="min-width:28px;">80%</span>
+        </label>
+      </div>
+      <div style="margin-top:5px;font-size:0.68rem;color:#889;">
+        Uses the same EPA AQI breakpoints/colors as the PM2.5 scale above
+        (Good untinted). HRRR F00&ndash;F03, updated hourly.
+      </div>
+      <div id="smokeStatus" style="font-size:0.7rem;color:#778;margin-top:3px;"></div>
+    </div>
   </div>
 
   <!-- Map -->
@@ -641,6 +661,84 @@ document.getElementById('mrmsToggle').addEventListener('change', function() {
     if (mrmsLayer) { map.removeLayer(mrmsLayer); mrmsLayer = null; }
     if (mrmsTimer) { clearInterval(mrmsTimer); mrmsTimer = null; }
   }
+});
+
+// ===========================================================================
+// HRRR near-surface smoke (MASSDEN) -- PM2.5-equivalent contour overlay.
+// Served via the MapCache/WMTS pipeline (mapcacheTileUrl) -- NOT the static
+// tile pyramid loadMRMS() above uses; this layer only ever exists via
+// MapCache since it was built new alongside this feature, no legacy path.
+// Backend is PROD's (hrrr_smoke_wms_api.py, /CAP_WxCOP/api/hrrr-smoke/*) --
+// MapCache's hrrr_smoke source is hardcoded to that path regardless of
+// which frontend requests the tile, same cross-app reuse as wind-particles.
+// ===========================================================================
+function mapcacheTileUrl(tileset, ts) {
+  return '/mapcache/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0'
+       + '&LAYER=' + tileset + '&STYLE=&TILEMATRIXSET=GoogleMapsCompatible'
+       + '&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image/png'
+       + (ts ? '&ts=' + ts : '');
+}
+
+var smokeLayer = null, smokeTimer = null;
+var SMOKE_FRAMES_API = '/CAP_WxCOP/api/hrrr-smoke/frames';
+
+function smokeEnabled() {
+  return document.getElementById('smokeToggle').checked;
+}
+
+function smokeOpacity() {
+  var el = document.getElementById('smokeOpacity');
+  return el ? parseInt(el.value) / 100 : 0.8;
+}
+
+function removeSmokeLayer() {
+  if (smokeLayer) { map.removeLayer(smokeLayer); smokeLayer = null; }
+}
+
+function loadSmoke() {
+  if (!smokeEnabled()) return;
+  var statusEl = document.getElementById('smokeStatus');
+  fetch(SMOKE_FRAMES_API + '?hours=6')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (!smokeEnabled()) return; // stale by the time this resolved
+      var frames = data.frames || [];
+      var last = frames.length ? frames[frames.length - 1] : null;
+      var url = mapcacheTileUrl('hrrr_smoke', last ? last.ts : null);
+      removeSmokeLayer();
+      smokeLayer = L.tileLayer(url, {
+        opacity: smokeOpacity(), zIndex: 405,
+        attribution: 'HRRR smoke &copy; NOAA/NCEP',
+        errorTileUrl: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
+      }).addTo(map);
+      if (statusEl) statusEl.textContent = last ? ('HRRR ' + last.label) : 'No smoke frames available';
+    })
+    .catch(function(e) {
+      console.warn('Smoke fetch failed:', e);
+      if (statusEl) statusEl.textContent = 'Smoke layer unavailable';
+    });
+}
+
+document.getElementById('smokeToggle').addEventListener('change', function() {
+  var statusEl = document.getElementById('smokeStatus');
+  var opacityRow = document.getElementById('smokeOpacityRow');
+  if (this.checked) {
+    if (opacityRow) opacityRow.style.display = 'block';
+    if (statusEl) statusEl.style.display = 'block';
+    loadSmoke();
+    smokeTimer = setInterval(loadSmoke, 300000);
+  } else {
+    if (opacityRow) opacityRow.style.display = 'none';
+    removeSmokeLayer();
+    if (smokeTimer) { clearInterval(smokeTimer); smokeTimer = null; }
+    if (statusEl) statusEl.textContent = '';
+  }
+});
+
+document.getElementById('smokeOpacity').addEventListener('input', function() {
+  var pct = parseInt(this.value);
+  document.getElementById('smokeOpacityVal').textContent = pct + '%';
+  if (smokeLayer) smokeLayer.setOpacity(pct / 100);
 });
 
 
