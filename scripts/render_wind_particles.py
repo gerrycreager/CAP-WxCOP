@@ -401,6 +401,246 @@ def render_cycle(date, cycle, force=False):
     return total_rendered, total_errors
 
 
+# ── ECMWF Open Data (Phase 2) ────────────────────────────────────────────────
+# IFS (physics) and AIFS-single (ECMWF's operational AI model), same 0.25deg
+# grid as GFS but already in -180..180 convention (confirmed via cfgrib: lon
+# runs -180.0 to 179.75, ascending, no discontinuity -- unlike GFS's native
+# 0..360 grid, so _fix_lons()/the contiguous-run crop workaround aren't
+# needed here). Unlike GFS (whole global file delivered by LDM, filtered
+# locally), each ECMWF request pulls only the exact param/level/step needed
+# -- a few MB per step instead of GFS's ~500MB whole-file pull.
+#
+# IFS/AIFS publish 7-9h after cycle time (ECMWF docs, confirmed empirically).
+# 06/18Z runs are "shortened" -- only 0-90h by 3h, vs 00/12Z's 0-144h by 3h
+# then 6h to 240h -- so not every requested step exists for every cycle.
+# fetch_ecmwf_step() treats a missing step as expected, not an error.
+ECMWF_MODELS = {
+    'ecmwf-ifs':  'ifs',
+    'ecmwf-aifs': 'aifs-single',
+}
+ECMWF_MODEL_LABELS = {
+    'ecmwf-ifs':  'ECMWF IFS',
+    'ecmwf-aifs': 'ECMWF AIFS (AI)',
+}
+ECMWF_CACHE_BASE = '/LDM/models/ecmwf'     # raw downloaded grib2, per model/cycle/step
+ECMWF_STEPS      = [0, 12, 24, 36, 48, 60, 72, 84, 96, 108, 120]
+ECMWF_PL_LEVELS  = [850, 700, 500, 200]
+ECMWF_MAX_CYCLES = 2   # fewer than GFS's 3 -- each cycle here always carries up to 11 steps
+
+
+def ecmwf_client(model_key):
+    from ecmwf.opendata import Client as ECMWFClient
+    return ECMWFClient(source='ecmwf', model=ECMWF_MODELS[model_key])
+
+
+def ecmwf_latest_cycle(model_key):
+    """Ask ECMWF what's actually published right now (a live existence
+    check) rather than guessing from wall-clock time and the documented
+    7-9h lag."""
+    client = ecmwf_client(model_key)
+    latest = client.latest(stream='oper', type='fc', step=0)
+    return latest, client
+
+
+def fetch_ecmwf_step(client, model_key, latest_dt, fhr):
+    """Download sfc + pl grib2 for one forecast step, caching locally so
+    repeated runs against the same cycle don't re-download. Returns
+    (sfc_path, pl_path), or (None, None) if this step isn't published for
+    this cycle (e.g. step>90 on a 06/18Z shortened run -- not an error)."""
+    date_str = latest_dt.strftime('%Y%m%d')
+    cyc_str  = latest_dt.strftime('%H')
+    cache_dir = Path(ECMWF_CACHE_BASE) / model_key / date_str / f'{cyc_str}z'
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    sfc_path = cache_dir / f'sfc_f{int(fhr):03d}.grib2'
+    pl_path  = cache_dir / f'pl_f{int(fhr):03d}.grib2'
+    try:
+        if not sfc_path.exists() or sfc_path.stat().st_size == 0:
+            client.retrieve(stream='oper', type='fc', step=fhr,
+                             param=['10u', '10v'], target=str(sfc_path))
+        if not pl_path.exists() or pl_path.stat().st_size == 0:
+            client.retrieve(stream='oper', type='fc', step=fhr,
+                             param=['u', 'v'], levelist=ECMWF_PL_LEVELS, target=str(pl_path))
+        return str(sfc_path), str(pl_path)
+    except Exception as e:
+        log.info(f'  {model_key} F{int(fhr):03d}: not published ({e})')
+        for p in (sfc_path, pl_path):
+            if p.exists():
+                p.unlink()
+        return None, None
+
+
+def get_ecmwf_sfc_winds(sfc_grib_path, np):
+    import cfgrib
+    datasets = cfgrib.open_datasets(sfc_grib_path)
+    for ds in datasets:
+        if 'u10' in ds.data_vars and 'v10' in ds.data_vars:
+            return ds['u10'].values, ds['v10'].values, ds.latitude.values, ds.longitude.values
+    raise ValueError('ECMWF sfc file missing u10/v10')
+
+
+def get_ecmwf_pl_winds(pl_grib_path, hpa, np):
+    import cfgrib
+    datasets = cfgrib.open_datasets(pl_grib_path)
+    for ds in datasets:
+        if 'u' not in ds.data_vars or 'v' not in ds.data_vars:
+            continue
+        if 'isobaricInhPa' not in ds.coords:
+            continue
+        levels = np.atleast_1d(ds.isobaricInhPa.values)
+        if hpa not in levels:
+            continue
+        if np.ndim(ds.isobaricInhPa.values) > 0:
+            idx = int(np.where(levels == hpa)[0][0])
+            u = ds['u'].values[idx]
+            v = ds['v'].values[idx]
+        else:
+            u = ds['u'].values
+            v = ds['v'].values
+        return u, v, ds.latitude.values, ds.longitude.values
+    raise ValueError(f'ECMWF pl file missing u/v at {hpa} hPa')
+
+
+def render_ecmwf_fhr(model_key, client, latest_dt, fhr, out_dir, force):
+    """Render all levels for one ECMWF forecast step -- mirrors render_fhr()
+    but fetches from ECMWF's API instead of reading an LDM-delivered file."""
+    import numpy as np
+
+    sfc_path, pl_path = fetch_ecmwf_step(client, model_key, latest_dt, fhr)
+    if sfc_path is None:
+        return fhr, None, 0, 0   # not published yet -- expected, not an error
+
+    ref_time = latest_dt.strftime('%Y%m%dT%H:%M:%SZ')  # match GFS's no-dash format (frontend parses this)
+    rendered, errors, fhr_ok = 0, 0, True
+    dlm_parts = {}
+
+    level_sources = [('SFC', None)] + [(lv, int(lv)) for lv in DIRECT_LEVELS if lv != 'SFC']
+    for level, hpa in level_sources:
+        out_file = out_dir / f'particles_{level}_f{fhr:03d}.json'
+        try:
+            if hpa is None:
+                u, v, lats, lons = get_ecmwf_sfc_winds(sfc_path, np)
+            else:
+                u, v, lats, lons = get_ecmwf_pl_winds(pl_path, hpa, np)
+            u_c, v_c, lats_c, lons_c = crop_to_atlantic(u, v, lats, lons, np)
+            if level in DLM_COMPONENTS:
+                dlm_parts[level] = (u_c, v_c, lats_c, lons_c)
+
+            if out_file.exists() and not force:
+                continue
+            grid = build_windjs_grid(u_c, v_c, lats_c, lons_c, ref_time, fhr)
+            tmp = out_file.with_suffix(f'.{fhr:03d}_{level}.tmp')
+            with open(tmp, 'w') as f:
+                json.dump(grid, f, separators=(',', ':'))
+            tmp.rename(out_file)
+            rendered += 1
+            log.info(f'  {model_key} F{fhr:03d} {level}: {u_c.shape} grid -> {out_file.name}')
+        except Exception as e:
+            log.error(f'  {model_key} F{fhr:03d} {level}: {e}')
+            errors += 1
+            fhr_ok = False
+
+    if len(dlm_parts) == len(DLM_COMPONENTS):
+        try:
+            out_file = out_dir / f'particles_DLM_f{fhr:03d}.json'
+            if force or not out_file.exists():
+                u_stack = np.stack([dlm_parts[lv][0] for lv in DLM_COMPONENTS])
+                v_stack = np.stack([dlm_parts[lv][1] for lv in DLM_COMPONENTS])
+                u_dlm = u_stack.mean(axis=0)
+                v_dlm = v_stack.mean(axis=0)
+                lats_c, lons_c = dlm_parts[DLM_COMPONENTS[0]][2], dlm_parts[DLM_COMPONENTS[0]][3]
+                grid = build_windjs_grid(u_dlm, v_dlm, lats_c, lons_c, ref_time, fhr)
+                tmp = out_file.with_suffix(f'.{fhr:03d}_DLM.tmp')
+                with open(tmp, 'w') as f:
+                    json.dump(grid, f, separators=(',', ':'))
+                tmp.rename(out_file)
+                rendered += 1
+                log.info(f'  {model_key} F{fhr:03d} DLM: vector mean of {DLM_COMPONENTS} -> {out_file.name}')
+        except Exception as e:
+            log.error(f'  {model_key} F{fhr:03d} DLM: {e}')
+            errors += 1
+    elif dlm_parts:
+        log.warning(f'  {model_key} F{fhr:03d}: DLM skipped, only got {list(dlm_parts.keys())}')
+
+    index_entry = None
+    if fhr_ok and rendered > 0:
+        index_entry = {'fhr': fhr, 'files': {lv: f'particles_{lv}_f{fhr:03d}.json' for lv in ALL_LEVELS}}
+    return fhr, index_entry, rendered, errors
+
+
+def render_ecmwf_cycle(model_key, force=False):
+    """Render all configured forecast steps for the latest available cycle
+    of one ECMWF model (ifs or aifs-single)."""
+    latest_dt, client = ecmwf_latest_cycle(model_key)
+    date_str = latest_dt.strftime('%Y%m%d')
+    cyc_str  = latest_dt.strftime('%H') + 'z'
+
+    out_base = f'/LDM/models/wind_particles/{model_key}'
+    out_dir  = Path(out_base) / date_str / cyc_str
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    log.info(f'Rendering {model_key} cycle {date_str} {cyc_str} -> {out_dir}  (steps: {ECMWF_STEPS})')
+
+    total_rendered, total_errors = 0, 0
+    index_entries = {}
+
+    for fhr in ECMWF_STEPS:
+        fhr_result, idx_entry, rendered, errors = render_ecmwf_fhr(
+            model_key, client, latest_dt, fhr, out_dir, force)
+        total_rendered += rendered
+        total_errors   += errors
+        if idx_entry:
+            index_entries[fhr_result] = idx_entry
+
+    index = {
+        'model':    ECMWF_MODEL_LABELS[model_key],
+        'cycle':    f'{date_str} {cyc_str}',
+        'date':     date_str,
+        'domain':   {'lat_min': LAT_MIN, 'lat_max': LAT_MAX, 'lon_min': LON_MIN, 'lon_max': LON_MAX},
+        'levels':   [{'key': k, 'label': LEVEL_LABELS[k]} for k in ALL_LEVELS],
+        'fhrs':     [index_entries[k] for k in sorted(index_entries.keys())],
+        'rendered': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+    }
+    with open(out_dir / 'index.json', 'w') as f:
+        json.dump(index, f, indent=2)
+
+    latest_link = Path(out_base) / 'latest'
+    tmp_link    = Path(out_base) / 'latest.tmp'
+    if tmp_link.is_symlink():
+        tmp_link.unlink()
+    tmp_link.symlink_to(out_dir)
+    tmp_link.rename(latest_link)
+    log.info(f'{model_key} latest -> {out_dir}')
+
+    log.info(f'{model_key} cycle {date_str} {cyc_str}: rendered={total_rendered} errors={total_errors}')
+    return total_rendered, total_errors
+
+
+def scour_old_ecmwf_cycles(model_key):
+    """Remove old rendered-output cycle dirs AND the raw downloaded grib2
+    cache for this model beyond ECMWF_MAX_CYCLES."""
+    out_base = Path(f'/LDM/models/wind_particles/{model_key}')
+    if out_base.exists():
+        dirs = sorted([d for d in out_base.glob('*/*z') if d.is_dir() and d.name.endswith('z')])
+        for d in dirs[:-ECMWF_MAX_CYCLES] if len(dirs) > ECMWF_MAX_CYCLES else []:
+            log.info(f'Scouring old {model_key} output cycle: {d}')
+            shutil.rmtree(d, ignore_errors=True)
+            try:
+                d.parent.rmdir()
+            except OSError:
+                pass
+
+    cache_base = Path(ECMWF_CACHE_BASE) / model_key
+    if cache_base.exists():
+        dirs = sorted([d for d in cache_base.glob('*/*z') if d.is_dir() and d.name.endswith('z')])
+        for d in dirs[:-ECMWF_MAX_CYCLES] if len(dirs) > ECMWF_MAX_CYCLES else []:
+            log.info(f'Scouring old {model_key} raw cache: {d}')
+            shutil.rmtree(d, ignore_errors=True)
+            try:
+                d.parent.rmdir()
+            except OSError:
+                pass
+
+
 def scour_old_cycles():
     """Remove cycle dirs older than MAX_CYCLES."""
     base = Path(OUTPUT_BASE)
@@ -418,27 +658,33 @@ def scour_old_cycles():
 
 # ── Main ───────────────────────────────────────────────────────────────────
 def main():
-    parser = argparse.ArgumentParser(description='Pre-render GFS wind-js grids for animated wind')
+    parser = argparse.ArgumentParser(description='Pre-render wind-js grids for animated wind (GFS / ECMWF IFS / ECMWF AIFS)')
+    parser.add_argument('--source', type=str, default='gfs', choices=['gfs', 'ecmwf-ifs', 'ecmwf-aifs'],
+                         help='Data source (default: gfs)')
     parser.add_argument('--force', action='store_true', help='Re-render even if output exists')
-    parser.add_argument('--cycle', type=str, default=None, help='Specific cycle, e.g. 12z')
-    parser.add_argument('--date',  type=str, default=None, help='Date for --cycle, e.g. 20260716')
+    parser.add_argument('--cycle', type=str, default=None, help='Specific cycle, e.g. 12z (GFS only)')
+    parser.add_argument('--date',  type=str, default=None, help='Date for --cycle, e.g. 20260716 (GFS only)')
     args = parser.parse_args()
 
     log.info('=' * 60)
-    log.info('GFS wind particle render started')
 
-    if args.cycle:
-        cycle = args.cycle if args.cycle.endswith('z') else args.cycle + 'z'
-        date  = args.date or datetime.now(timezone.utc).strftime('%Y%m%d')
+    if args.source == 'gfs':
+        log.info('GFS wind particle render started')
+        if args.cycle:
+            cycle = args.cycle if args.cycle.endswith('z') else args.cycle + 'z'
+            date  = args.date or datetime.now(timezone.utc).strftime('%Y%m%d')
+        else:
+            date, cycle = find_latest_cycle()
+            if not date:
+                log.error('No GFS cycle found')
+                sys.exit(1)
+        log.info(f'Rendering cycle: {date} {cycle}')
+        rendered, errors = render_cycle(date, cycle, force=args.force)
+        scour_old_cycles()
     else:
-        date, cycle = find_latest_cycle()
-        if not date:
-            log.error('No GFS cycle found')
-            sys.exit(1)
-
-    log.info(f'Rendering cycle: {date} {cycle}')
-    rendered, errors = render_cycle(date, cycle, force=args.force)
-    scour_old_cycles()
+        log.info(f'{args.source} wind particle render started')
+        rendered, errors = render_ecmwf_cycle(args.source, force=args.force)
+        scour_old_ecmwf_cycles(args.source)
 
     log.info(f'Done: {rendered} files rendered, {errors} errors')
     log.info('=' * 60)
