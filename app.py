@@ -122,6 +122,14 @@ try:
 except Exception as e:
     print(f'⚠ Could not load NIDS API: {e}')
 
+# Animated wind particles (leaflet-velocity / wind-js) - GFS Atlantic basin, TC steering flow
+try:
+    from wind_particles_api import wind_particles_api
+    app.register_blueprint(wind_particles_api, url_prefix='/api/wind-particles')
+    print('✓ Wind Particles API registered at /CAP_WxCOP/api/wind-particles')
+except Exception as e:
+    print(f'⚠ Could not load Wind Particles API: {e}')
+
 # Radar API - NEXRAD animation and data
 try:
     from radar_api import radar_api
