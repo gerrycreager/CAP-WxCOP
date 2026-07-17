@@ -1,7 +1,7 @@
 affine==2.4.0
 aiobotocore==3.1.0
 aiohappyeyeballs==2.6.1
-aiohttp==3.14.0
+aiohttp==3.14.1
 aioitertools==0.13.0
 aiosignal==1.4.0
 annotated-types==0.7.0
@@ -68,7 +68,7 @@ mdurl==0.1.2
 metar==1.11.0
 MetPy==1.7.1
 mod_wsgi==5.0.2
-msgpack==1.1.2
+msgpack==1.2.1
 multidict==6.7.0
 netCDF4==1.7.3
 numpy==2.4.0
@@ -118,7 +118,7 @@ shapely==2.1.2
 simplejson==3.20.2
 six==1.17.0
 sortedcontainers==2.4.0
-soupsieve==2.8.1
+soupsieve==2.8.4
 SQLAlchemy==2.0.48
 tomli==2.4.1
 tomli_w==1.2.0
