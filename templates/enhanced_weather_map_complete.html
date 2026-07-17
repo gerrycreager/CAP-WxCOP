@@ -653,15 +653,33 @@
         <div class="divider"></div>
         <h3>Wind Flow</h3>
         <label class="checkbox-label">
-            <input type="checkbox" id="windToggle"> Streamlines (HRRR)
+            <input type="checkbox" id="windToggle"> Wind Barbs (HRRR)
         </label>
         <div id="windControls" style="display:none;margin-top:4px;">
             <select id="windLevelSelect" style="width:100%;font-size:12px;padding:2px;margin-bottom:3px;"></select>
             <div id="windStatus" style="font-size:10px;color:#888;text-align:center;"></div>
         </div>
+        <label class="checkbox-label" style="margin-top:6px;">
+            <input type="checkbox" id="windParticlesToggle"> Animated Wind
+        </label>
+        <div id="windParticlesSubOptions" style="display:none;margin-left:16px;margin-top:2px;font-size:11px;">
+            <select id="windParticlesSourceSelect" style="width:100%;font-size:12px;padding:2px;margin-bottom:3px;"></select>
+            <select id="windParticlesLevelSelect" style="width:100%;font-size:12px;padding:2px;margin-bottom:3px;"></select>
+            <div style="margin-top:4px;">
+                <label style="font-size:10px;color:#ccc;display:flex;align-items:center;gap:6px;">
+                    Opacity
+                    <input type="range" id="windParticlesOpacity" min="0" max="100" value="85"
+                           style="flex:1;accent-color:#4a9c6f;cursor:pointer;">
+                    <span id="windParticlesOpacityVal" style="font-size:10px;color:#888;min-width:28px;">85%</span>
+                </label>
+            </div>
+            <div id="windParticlesStatus" style="font-size:10px;color:#888;margin-top:3px;"></div>
+        </div>
     </div>
 
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-velocity@2.1.4/dist/leaflet-velocity.min.css">
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-velocity@2.1.4/dist/leaflet-velocity.min.js"></script>
     <script>
         // ── Panel toggle ──────────────────────────────────────────
         function togglePanel() {
@@ -2644,6 +2662,122 @@
     })();
     </script>
 
+    <script>
+    // ── Animated Wind Particles (GFS / ECMWF IFS / ECMWF AIFS, Atlantic basin,
+    // leaflet-velocity) ─────────────────────────────────────────────────────
+    // Independent of the HRRR wind-barb layer above -- both can be on at once
+    // for side-by-side comparison. Backend: render_wind_particles.py /
+    // wind_particles_api.py.
+    (function() {
+        'use strict';
+        var API = '/CAP_WxCOP/api/wind-particles';
+        var SOURCES = [
+            { key:'gfs',        label:'GFS' },
+            { key:'ecmwf-ifs',  label:'ECMWF IFS' },
+            { key:'ecmwf-aifs', label:'ECMWF AIFS (AI)' },
+        ];
+        var LEVELS = [
+            { key:'SFC', label:'Surface (10m AGL)' },
+            { key:'850', label:'~5,000 ft MSL' },
+            { key:'700', label:'~10,000 ft MSL' },
+            { key:'500', label:'~18,000 ft MSL' },
+            { key:'200', label:'~39,000 ft MSL' },
+            { key:'DLM', label:'Deep-Layer Mean (steering flow)' },
+        ];
+        var particlesLayer = null;
+        var source   = 'gfs';
+        var level    = 'SFC';
+        var fhr      = 0;
+        var enabled  = false;
+        var opacity  = 0.85;
+        var _cache   = {};
+
+        function setStatus(msg) {
+            var el = document.getElementById('windParticlesStatus');
+            if (el) el.textContent = msg;
+        }
+
+        function fetchParticles(src, lv, cb) {
+            var key = src + ':' + lv + ':' + fhr;
+            if (_cache[key]) { cb(null, _cache[key]); return; }
+            fetch(API + '?source=' + src + '&level=' + lv + '&fhr=' + fhr)
+                .then(function(r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+                .then(function(d) { _cache[key] = d; cb(null, d); })
+                .catch(function(e) { cb(e); });
+        }
+
+        function removeLayer() {
+            var map = window._capMap;
+            if (particlesLayer && map) { map.removeLayer(particlesLayer); particlesLayer = null; }
+        }
+
+        function loadParticles() {
+            var map = window._capMap;
+            if (!map || !enabled) return;
+            setStatus('Loading…');
+            fetchParticles(source, level, function(err, data) {
+                if (err) { setStatus('Unavailable'); return; }
+                removeLayer();
+                particlesLayer = L.velocityLayer({
+                    displayValues: false,
+                    data: data,
+                    opacity: opacity,
+                    maxVelocity: level === 'DLM' || level === '200' ? 40 : 25,
+                    velocityScale: 0.012,
+                    colorScale: ['#6495ed', '#32cd32', '#ffd700', '#ff8c00', '#dc3232', '#b400b4'],
+                });
+                particlesLayer.addTo(map);
+                var hdr = (data[0] || {}).header || {};
+                setStatus(hdr.refTime ? hdr.refTime.slice(0,8) + ' ' + hdr.refTime.slice(9,14) + 'Z F+' +
+                    String(hdr.forecastTime).padStart(3,'0') : '');
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            var srcSel = document.getElementById('windParticlesSourceSelect');
+            if (srcSel) {
+                SOURCES.forEach(function(s) {
+                    var o = document.createElement('option');
+                    o.value = s.key; o.textContent = s.label;
+                    srcSel.appendChild(o);
+                });
+                srcSel.addEventListener('change', function() {
+                    source = this.value;
+                    if (enabled) loadParticles();
+                });
+            }
+            var sel = document.getElementById('windParticlesLevelSelect');
+            if (sel) {
+                LEVELS.forEach(function(lv) {
+                    var o = document.createElement('option');
+                    o.value = lv.key; o.textContent = lv.label;
+                    sel.appendChild(o);
+                });
+                sel.addEventListener('change', function() {
+                    level = this.value;
+                    if (enabled) loadParticles();
+                });
+            }
+            var tog = document.getElementById('windParticlesToggle');
+            if (tog) {
+                tog.addEventListener('change', function() {
+                    enabled = this.checked;
+                    document.getElementById('windParticlesSubOptions').style.display =
+                        enabled ? 'block' : 'none';
+                    if (enabled) loadParticles(); else { removeLayer(); setStatus(''); }
+                });
+            }
+            var op = document.getElementById('windParticlesOpacity');
+            if (op) {
+                op.addEventListener('input', function() {
+                    opacity = this.value / 100;
+                    document.getElementById('windParticlesOpacityVal').textContent = this.value + '%';
+                    if (enabled && particlesLayer) loadParticles();
+                });
+            }
+        });
+    })();
+    </script>
 
     <!-- NIDS single-site legend -->
     <div id="nidsLegend" style="display:none;">
