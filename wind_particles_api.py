@@ -26,7 +26,7 @@ wind_particles_api = Blueprint('wind_particles_api', __name__)
 
 OUTPUT_ROOT = '/LDM/models/wind_particles'
 
-VALID_SOURCES = {'gfs'}
+VALID_SOURCES = {'gfs', 'ecmwf-ifs', 'ecmwf-aifs'}
 
 VALID_LEVELS = {'SFC', '850', '700', '500', '200', 'DLM'}
 
