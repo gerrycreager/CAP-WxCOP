@@ -44,6 +44,13 @@
   .dot-yellow { background: #e6b800; }
   .dot-red    { background: #cc2200; }
   .dot-gray   { background: #555; }
+  .dot-sm     { width: 14px; height: 14px; }
+  .dot-aqi-good     { background: #00e400; }
+  .dot-aqi-moderate { background: #ffff00; }
+  .dot-aqi-usg      { background: #ff7e00; }
+  .dot-aqi-unhealthy{ background: #ff0000; }
+  .dot-aqi-veryun   { background: #8f3f97; }
+  .dot-aqi-hazardous{ background: #7e0023; }
 
   /* Site list */
   .site-item {
@@ -153,6 +160,19 @@
       <div style="font-size:0.72rem;color:#aac;line-height:1.7;">
         Heat &middot; Cold &middot; Lightning &middot; Wind &middot; Precip &middot; NWS Hazards &middot; Air Quality<br>
         <em>Site = worst single category</em>
+      </div>
+    </div>
+    <div class="sidebar-section">
+      <h3>PM2.5 Scale (EPA AQI)</h3>
+      <div class="legend-item"><div class="dot dot-sm dot-aqi-good"></div> 0&ndash;9.0 &mu;g/m&sup3; &mdash; Good</div>
+      <div class="legend-item"><div class="dot dot-sm dot-aqi-moderate"></div> 9.1&ndash;35.4 &mdash; Moderate</div>
+      <div class="legend-item"><div class="dot dot-sm dot-aqi-usg"></div> 35.5&ndash;55.4 &mdash; Unhealthy (Sensitive)</div>
+      <div class="legend-item"><div class="dot dot-sm dot-aqi-unhealthy"></div> 55.5&ndash;125.4 &mdash; Unhealthy</div>
+      <div class="legend-item"><div class="dot dot-sm dot-aqi-veryun"></div> 125.5&ndash;225.4 &mdash; Very Unhealthy</div>
+      <div class="legend-item"><div class="dot dot-sm dot-aqi-hazardous"></div> &gt;225.4 &mdash; Hazardous</div>
+      <div style="font-size:0.68rem;color:#889;margin-top:4px;">
+        EPA AQI breakpoints (rev. 2024-05-06). Stoplight: Good=GO,
+        Moderate/Sensitive=CAUTION, Unhealthy+=STOP.
       </div>
     </div>
     <div class="sidebar-section">
