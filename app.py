@@ -197,6 +197,14 @@ try:
 except Exception as e:
     print(f'⚠ Could not load TPW WMS API: {e}')
 
+# HRRR smoke (MASSDEN) WMS proxy — PM2.5-equivalent contours for Cadet Weather COP
+try:
+    from hrrr_smoke_wms_api import hrrr_smoke_wms_bp
+    app.register_blueprint(hrrr_smoke_wms_bp)
+    print('✓ HRRR Smoke WMS API registered at /CAP_WxCOP/api/hrrr-smoke')
+except Exception as e:
+    print(f'⚠ Could not load HRRR Smoke WMS API: {e}')
+
 try:
     from weather_impacts_api import weather_impacts_api
     app.register_blueprint(weather_impacts_api, url_prefix='/api/weather-impacts')
