@@ -31,6 +31,16 @@ import psycopg2
 import psycopg2.extras
 
 log = logging.getLogger(__name__)
+if not log.handlers:
+    _fh = logging.FileHandler('/var/log/cap_wxcop_cadet_api.log')
+    _fh.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(message)s'))
+    log.addHandler(_fh)
+    log.setLevel(logging.INFO)
+if not log.handlers:
+    _fh = logging.FileHandler('/var/log/cap_wxcop_cadet_api.log')
+    _fh.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(message)s'))
+    log.addHandler(_fh)
+    log.setLevel(logging.INFO)
 
 cadet_wx_bp = Blueprint('cadet_wx', __name__)
 
@@ -281,6 +291,34 @@ def precip_color(precip_rate_mmhr, precip_type=None):
     return 'GREEN'
 
 
+def air_quality_color(pm25_ugm3):
+    """
+    EPA PM2.5 AQI breakpoints, 24-hr NAAQS-linked table as revised effective
+    2024-05-06 (Good raised from the pre-2024 0-12.0 band to 0-9.0; added a
+    'Very Unhealthy' tier). https://www.airnow.gov/aqi/aqi-basics/
+    CDC's public health messaging for PM2.5 defers to this same EPA AQI
+    framework rather than a separate numeric scale.
+
+    Mapped conservatively for a stoplight driving outdoor-activity go/no-go
+    decisions for a largely-minor cadet population doing physical training:
+    Good -> GREEN; Moderate and Unhealthy-for-Sensitive-Groups -> YELLOW
+    (EPA's own guidance starts flagging sensitive-group risk here, and
+    cadets skew toward more sensitive/less acclimated than the general
+    adult population); Unhealthy and worse (where EPA's guidance shifts to
+    "everyone may begin to experience health effects") -> RED.
+    """
+    if pm25_ugm3 is None:
+        return 'UNKNOWN'
+    if pm25_ugm3 <= 9.0:
+        return 'GREEN'    # Good
+    elif pm25_ugm3 <= 35.4:
+        return 'YELLOW'   # Moderate
+    elif pm25_ugm3 <= 55.4:
+        return 'YELLOW'   # Unhealthy for Sensitive Groups
+    else:
+        return 'RED'      # Unhealthy / Very Unhealthy / Hazardous (>55.4)
+
+
 def wwa_color(wwa_phenoms):
     """
     NWS Watch/Warning/Advisory stoplight.
@@ -451,6 +489,8 @@ def get_glm_lightning(cur, lat, lon, warn_nm=None, watch_nm=None):
         WHERE flash_time >= %s
           AND lat BETWEEN %s AND %s
           AND lon BETWEEN %s AND %s
+          AND flash_quality_flag = 0
+          AND flash_energy >= 1e-14
         ORDER BY flash_time DESC
     """, (cutoff,
           lat - lat_deg, lat + lat_deg,
@@ -492,11 +532,72 @@ def glm_available(cur):
         cur.execute("""
             SELECT 1 FROM observations.glm_flashes
             WHERE flash_time > NOW() - INTERVAL '10 minutes'
+              AND flash_quality_flag = 0
             LIMIT 1
         """)
         return cur.fetchone() is not None
     except Exception:
         return False
+
+
+# ---------------------------------------------------------------------------
+# AirNow PM2.5 proximity -- ingested hourly by scripts/ingest_airnow.py
+# AirNow stations are far sparser than METAR/GLM, so this uses a wider
+# search radius (75 NM default) and returns the nearest station's latest
+# reading rather than requiring anything within a tight fixed radius.
+# ---------------------------------------------------------------------------
+
+AIRNOW_MAX_NM     = 75.0
+AIRNOW_MAX_AGE_HR = 3
+
+def get_nearest_airnow_pm25(cur, lat, lon, max_nm=None):
+    """
+    Return the nearest AirNow PM2.5 station's latest reading within max_nm,
+    or None if nothing recent enough is nearby.
+    """
+    if max_nm is None:
+        max_nm = AIRNOW_MAX_NM
+    lat_deg = max_nm * NM_TO_DEG
+    lon_deg = max_nm * NM_TO_DEG / max(math.cos(math.radians(lat)), 0.01)
+
+    cur.execute("""
+        SELECT DISTINCT ON (station_id)
+               station_id, station_name, lat, lon, pm25_ugm3, aqi_value, observation_time
+        FROM observations.airnow_pm25
+        WHERE observation_time > NOW() - INTERVAL '%s hours'
+          AND lat BETWEEN %%s AND %%s
+          AND lon BETWEEN %%s AND %%s
+        ORDER BY station_id, observation_time DESC
+    """ % AIRNOW_MAX_AGE_HR, (lat - lat_deg, lat + lat_deg, lon - lon_deg, lon + lon_deg))
+    rows = cur.fetchall()
+    if not rows:
+        return None
+
+    nearest = None
+    nearest_nm = None
+    for row in rows:
+        dlat = (row['lat'] - lat) * 60.0
+        dlon = (row['lon'] - lon) * 60.0 * math.cos(math.radians(lat))
+        dist_nm = math.sqrt(dlat**2 + dlon**2)
+        if dist_nm <= max_nm and (nearest_nm is None or dist_nm < nearest_nm):
+            nearest_nm = dist_nm
+            nearest = row
+
+    if nearest is None:
+        return None
+
+    obs_time = nearest['observation_time']
+    if obs_time.tzinfo is None:
+        obs_time = obs_time.replace(tzinfo=timezone.utc)
+
+    return {
+        'station_id':    nearest['station_id'],
+        'station_name':  nearest['station_name'],
+        'pm25_ugm3':     nearest['pm25_ugm3'],
+        'aqi_value':     nearest['aqi_value'],
+        'distance_nm':   round(nearest_nm, 1),
+        'observation_time': obs_time,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -630,6 +731,10 @@ def build_current_stoplight(cur, site):
             'nearest_nm': None, 'last_flash_time': None, 'flash_count_30min': 0,
         }
 
+    # --- Air quality (AirNow PM2.5, nearest station within 75 NM / 3h) ---
+    aq_data = get_nearest_airnow_pm25(cur, lat, lon)
+    aq_color = air_quality_color(aq_data['pm25_ugm3'] if aq_data else None)
+
     # --- Stoplight ---
     cats = {
         'heat_stress':   heat_stress_color(use_data.get('heat_index_c'), use_data.get('tmp_c')),
@@ -638,6 +743,7 @@ def build_current_stoplight(cur, site):
         'surface_wind':  surface_wind_color(use_data.get('wind_speed_kts'), use_data.get('wind_gust_kts')),
         'precipitation': precip_color(use_data.get('precip_rate_mmhr'), use_data.get('precip_type')),
         'severe_wx':     wwa_color(wwa_phenoms),
+        'air_quality':   aq_color,
     }
 
     return {
@@ -669,6 +775,13 @@ def build_current_stoplight(cur, site):
         },
         'wwa':       [{'phenom': p, 'significance': s} for p, s in wwa_phenoms],
         'lightning': glm_data,
+        'air_quality': {
+            'pm25_ugm3':        aq_data['pm25_ugm3'] if aq_data else None,
+            'aqi_value':        aq_data['aqi_value'] if aq_data else None,
+            'station_name':     aq_data['station_name'] if aq_data else None,
+            'distance_nm':      aq_data['distance_nm'] if aq_data else None,
+            'observation_time': aq_data['observation_time'].isoformat() if aq_data else None,
+        } if aq_data else None,
     }
 
 
@@ -683,6 +796,7 @@ def _no_data_result(site_id, site_name, lat=None, lon=None):
         'conditions':  {},
         'wwa':         [],
         'lightning':   None,
+        'air_quality': None,
         'lat':         lat,
         'lon':         lon,
     }

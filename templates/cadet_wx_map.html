@@ -322,6 +322,7 @@ function renderSidebarList() {
 var CAT_LABELS = {
   heat_stress: 'Heat Stress', cold_stress: 'Cold Stress', lightning: 'Lightning',
   surface_wind: 'Surface Wind', precipitation: 'Precip', severe_wx: 'NWS Hazards',
+  air_quality: 'Air Quality (PM2.5)',
 };
 
 function showDetail(site) {
@@ -354,6 +355,13 @@ function showDetail(site) {
   });
 
   var cond = site.conditions || {};
+  var aq   = site.air_quality;
+  var aqStr = '\u2014 (no AirNow station within 75 NM)';
+  if (aq && aq.pm25_ugm3 != null) {
+    aqStr = aq.pm25_ugm3.toFixed(1) + ' \u00b5g/m\u00b3' +
+      (aq.aqi_value != null ? ' \u00b7 AQI ' + aq.aqi_value : '') +
+      ' \u2014 ' + (aq.station_name || 'station') + ' (' + aq.distance_nm + ' NM)';
+  }
   var rows = [
     ['Temperature',   fmtTemp(cond.tmp_c)],
     ['Dewpoint',      fmtTemp(cond.dpt_c)],
@@ -362,6 +370,7 @@ function showDetail(site) {
     ['Wind',          fmtWind(cond.wind_speed_kts, cond.wind_gust_kts)],
     ['Precip Rate',   cond.precip_rate_mmhr != null ? (cond.precip_rate_mmhr/25.4).toFixed(2)+' in/hr' : '\u2014'],
     ['WBGT (Liljgr)', cond.wbgt_c != null ? fmtTemp(cond.wbgt_c) : '\u2014'],
+    ['PM2.5 (AirNow)', aqStr],
   ];
   document.getElementById('detail-conditions').innerHTML =
     rows.map(function(r) { return '<tr><td>' + r[0] + '</td><td>' + r[1] + '</td></tr>'; }).join('');
