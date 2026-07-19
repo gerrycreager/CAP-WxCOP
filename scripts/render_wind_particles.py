@@ -40,6 +40,7 @@ import os
 import sys
 import glob
 import json
+import fcntl
 import shutil
 import logging
 import argparse
@@ -54,6 +55,14 @@ GFS_BASE    = '/LDM/models/gfs/0p25'
 OUTPUT_BASE = '/LDM/models/wind_particles/gfs'
 MAX_CYCLES  = 3          # number of cycle dirs to keep on disk
 LOG_FILE    = '/home/ldm/var/logs/wind_particles_render.log'
+LOCK_FILE   = '/home/ldm/var/run/render_wind_particles.lock'
+
+# Forecast-depth cap, shared by all three sources -- 72h is the primary
+# target (aviation planning / TC steering flow don't need further out than
+# that from this pipeline); dial down to 48 here if render time/system load
+# proves too much in practice. Not adaptive -- a manual dial, not
+# auto-throttling.
+MAX_FHR = 72
 
 # Atlantic basin -- Cabo Verde genesis region through Caribbean/Gulf/US East Coast
 LAT_MIN, LAT_MAX = 0.0, 60.0
@@ -232,6 +241,18 @@ def _finite(x):
     return math.isfinite(x)
 
 
+def write_index_atomic(index, out_dir):
+    """Write index.json via temp+rename so a concurrent reader (the Flask
+    API, or an overlapping render run) never sees a partially-written or
+    interleaved file -- unlike the per-fhr particle files, this one wasn't
+    atomic before and got corrupted by exactly that race."""
+    index_file = out_dir / 'index.json'
+    tmp = out_dir / 'index.json.tmp'
+    with open(tmp, 'w') as f:
+        json.dump(index, f, indent=2)
+    tmp.rename(index_file)
+
+
 # ── File discovery ─────────────────────────────────────────────────────────
 def find_gfs_file(date, cycle, fhr):
     """Return path to global GFS 0.25deg grib2 or None."""
@@ -363,8 +384,8 @@ def render_cycle(date, cycle, force=False):
     out_dir = Path(OUTPUT_BASE) / date / cycle
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    fhrs = find_available_fhrs(date, cycle)
-    log.info(f'Rendering cycle {date} {cycle} -> {out_dir}  ({len(fhrs)} FHRs on disk: {fhrs})')
+    fhrs = [f for f in find_available_fhrs(date, cycle) if f <= MAX_FHR]
+    log.info(f'Rendering cycle {date} {cycle} -> {out_dir}  ({len(fhrs)} FHRs on disk, capped at F{MAX_FHR:03d}: {fhrs})')
 
     total_rendered = 0
     total_errors   = 0
@@ -386,8 +407,7 @@ def render_cycle(date, cycle, force=False):
         'fhrs':     [index_entries[k] for k in sorted(index_entries.keys())],
         'rendered': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
     }
-    with open(out_dir / 'index.json', 'w') as f:
-        json.dump(index, f, indent=2)
+    write_index_atomic(index, out_dir)
 
     latest_link = Path(OUTPUT_BASE) / 'latest'
     tmp_link    = Path(OUTPUT_BASE) / 'latest.tmp'
@@ -578,12 +598,14 @@ def render_ecmwf_cycle(model_key, force=False):
     out_dir  = Path(out_base) / date_str / cyc_str
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    log.info(f'Rendering {model_key} cycle {date_str} {cyc_str} -> {out_dir}  (steps: {ECMWF_STEPS})')
+    steps = [s for s in ECMWF_STEPS if s <= MAX_FHR]
+    log.info(f'Rendering {model_key} cycle {date_str} {cyc_str} -> {out_dir}  '
+             f'(steps, capped at F{MAX_FHR:03d}: {steps})')
 
     total_rendered, total_errors = 0, 0
     index_entries = {}
 
-    for fhr in ECMWF_STEPS:
+    for fhr in steps:
         fhr_result, idx_entry, rendered, errors = render_ecmwf_fhr(
             model_key, client, latest_dt, fhr, out_dir, force)
         total_rendered += rendered
@@ -600,8 +622,7 @@ def render_ecmwf_cycle(model_key, force=False):
         'fhrs':     [index_entries[k] for k in sorted(index_entries.keys())],
         'rendered': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
     }
-    with open(out_dir / 'index.json', 'w') as f:
-        json.dump(index, f, indent=2)
+    write_index_atomic(index, out_dir)
 
     latest_link = Path(out_base) / 'latest'
     tmp_link    = Path(out_base) / 'latest.tmp'
@@ -657,7 +678,28 @@ def scour_old_cycles():
 
 
 # ── Main ───────────────────────────────────────────────────────────────────
+def acquire_lock():
+    """Non-blocking single-instance guard. An overlapping run (manual +
+    cron, or two cron ticks if one runs long) previously corrupted the
+    shared cfgrib .idx cache and index.json -- refuse to run concurrently
+    rather than risk that again. Returns the open file handle (must stay
+    open for the lock to hold) or None if another instance already holds it."""
+    os.makedirs(os.path.dirname(LOCK_FILE), exist_ok=True)
+    fh = open(LOCK_FILE, 'w')
+    try:
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        fh.close()
+        return None
+    return fh
+
+
 def main():
+    lock_fh = acquire_lock()
+    if lock_fh is None:
+        log.info('Another render_wind_particles.py instance is already running -- exiting')
+        sys.exit(0)
+
     parser = argparse.ArgumentParser(description='Pre-render wind-js grids for animated wind (GFS / ECMWF IFS / ECMWF AIFS)')
     parser.add_argument('--source', type=str, default='gfs', choices=['gfs', 'ecmwf-ifs', 'ecmwf-aifs'],
                          help='Data source (default: gfs)')

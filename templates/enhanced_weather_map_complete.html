@@ -348,6 +348,25 @@
         body.radar-open #nidsLegend { bottom: 270px; }
         /* When not radar-open, fixedLegend is at bottom:10px (~210px tall) */
         #nidsLegend { bottom: 220px; }
+
+        /* Animated Wind speed legend — right side, above the HRRR-barb #windLegend
+           box (own ID -- windLegend is already used by the static barb layer) */
+        #windParticlesLegend {
+            position: fixed;
+            bottom: 190px;
+            right: 10px;
+            z-index: 1050;
+            background: rgba(255,255,255,0.95);
+            border-radius: 5px;
+            padding: 8px 10px;
+            box-shadow: 0 1px 6px rgba(0,0,0,0.3);
+            font-size: 11px;
+            min-width: 200px;
+            pointer-events: none;
+        }
+        #windParticlesLegendTitle { font-weight: 700; margin-bottom: 5px; }
+        #windLegendBar { height: 12px; border-radius: 2px; border: 1px solid #999; }
+        #windLegendTicks { display: flex; justify-content: space-between; font-size: 9px; color: #444; margin-top: 2px; }
         #mrmsColorbar .cb-labels {
             display: flex; justify-content: space-between; width: 160px; font-size: 9px; color: #444;
         }
@@ -674,6 +693,16 @@
                 </label>
             </div>
             <div id="windParticlesStatus" style="font-size:10px;color:#888;margin-top:3px;"></div>
+            <div style="margin-top:6px;display:flex;align-items:center;gap:2px;">
+                <button class="mpb" id="wpBtnFirst" title="First forecast hour" style="font-size:14px;">&#9198;</button>
+                <button class="mpb" id="wpBtnPrev"  title="Step back"           style="font-size:14px;">&#9664;</button>
+                <button class="mpb" id="wpBtnPlay"  title="Play/Pause"          style="font-size:14px;">&#9654;</button>
+                <button class="mpb" id="wpBtnNext"  title="Step forward"        style="font-size:14px;">&#9654;&#x7C;</button>
+                <button class="mpb" id="wpBtnLast"  title="Last forecast hour"  style="font-size:14px;">&#9197;</button>
+            </div>
+            <input type="range" id="windParticlesFhrSlider" min="0" max="0" value="0" step="1"
+                   style="width:100%;margin-top:2px;accent-color:#4a9c6f;cursor:pointer;">
+            <div id="windParticlesFrameLabel" style="font-size:10px;color:#ccc;text-align:center;margin-top:1px;"></div>
         </div>
     </div>
 
@@ -2684,23 +2713,33 @@
             { key:'200', label:'~39,000 ft MSL' },
             { key:'DLM', label:'Deep-Layer Mean (steering flow)' },
         ];
+        // earth.nullschool/Windy-style continuous rainbow ramp -- fully saturated
+        // throughout (no pastel/light stops) so it reads against both ocean blue
+        // and satellite-IR backgrounds, unlike the old cornflower-blue-anchored scale.
+        var COLOR_STOPS = ['#4B0082', '#0000FF', '#00BFFF', '#00FF7F', '#ADFF2F',
+                            '#FFFF00', '#FFA500', '#FF4500', '#FF00FF'];
+
         var particlesLayer = null;
         var source   = 'gfs';
         var level    = 'SFC';
-        var fhr      = 0;
+        var fhrs     = [0];   // available forecast hours for current source, from index.json
+        var fhrIndex = 0;
         var enabled  = false;
         var opacity  = 0.85;
         var _cache   = {};
+        var wpPlaying = false, wpTimer = null;
+
+        function maxVelocity() { return (level === 'DLM' || level === '200') ? 40 : 25; }
 
         function setStatus(msg) {
             var el = document.getElementById('windParticlesStatus');
             if (el) el.textContent = msg;
         }
 
-        function fetchParticles(src, lv, cb) {
-            var key = src + ':' + lv + ':' + fhr;
+        function fetchParticles(src, lv, fhrVal, cb) {
+            var key = src + ':' + lv + ':' + fhrVal;
             if (_cache[key]) { cb(null, _cache[key]); return; }
-            fetch(API + '?source=' + src + '&level=' + lv + '&fhr=' + fhr)
+            fetch(API + '?source=' + src + '&level=' + lv + '&fhr=' + fhrVal)
                 .then(function(r) { if (!r.ok) throw new Error(r.status); return r.json(); })
                 .then(function(d) { _cache[key] = d; cb(null, d); })
                 .catch(function(e) { cb(e); });
@@ -2709,27 +2748,125 @@
         function removeLayer() {
             var map = window._capMap;
             if (particlesLayer && map) { map.removeLayer(particlesLayer); particlesLayer = null; }
+            _lastConfigKey = null;
         }
+
+        // refTime is 'YYYYMMDDTHH:MM:SSZ' (not standard-dashed ISO) -- parse by
+        // substring + Date.UTC() numeric components rather than new Date(string),
+        // which doesn't reliably parse that format across engines.
+        function computeValidTime(refTime, fhrVal) {
+            if (!refTime) return '';
+            var y = +refTime.slice(0,4), mo = +refTime.slice(4,6), d = +refTime.slice(6,8);
+            var h = +refTime.slice(9,11);
+            var vd = new Date(Date.UTC(y, mo - 1, d, h) + fhrVal * 3600000);
+            var pad = function(n) { return String(n).padStart(2, '0'); };
+            return vd.getUTCFullYear() + '-' + pad(vd.getUTCMonth() + 1) + '-' + pad(vd.getUTCDate()) +
+                ' ' + pad(vd.getUTCHours()) + 'Z';
+        }
+
+        function buildLegend() {
+            var bar = document.getElementById('windLegendBar');
+            var ticks = document.getElementById('windLegendTicks');
+            if (!bar || !ticks) return;
+            bar.style.background = 'linear-gradient(to right, ' + COLOR_STOPS.join(',') + ')';
+            var mv = maxVelocity();
+            var n = 5;
+            var html = '';
+            for (var i = 0; i <= n; i++) {
+                html += '<span>' + Math.round(mv * i / n) + '</span>';
+            }
+            ticks.innerHTML = html + '<span style="margin-left:2px;">m/s</span>';
+        }
+
+        function updateFrameUi() {
+            var slider = document.getElementById('windParticlesFhrSlider');
+            if (slider) { slider.max = Math.max(0, fhrs.length - 1); slider.value = fhrIndex; }
+            var label = document.getElementById('windParticlesFrameLabel');
+            if (label) label.textContent = fhrs.length ?
+                ('F+' + String(fhrs[fhrIndex]).padStart(3, '0') + ' of ' + fhrs.length + ' frames') : '';
+        }
+
+        // Recreate the layer (new source/level/opacity -> different maxVelocity/
+        // colorScale/opacity config) vs. just swap data on the existing layer
+        // (frame stepping -- same config, only the grid changes). Reusing via
+        // setData() for frame steps avoids destroying a layer that still has a
+        // pending internal animation-frame callback, which throws
+        // "Cannot read properties of null (reading 'getSize')" if you
+        // remove+recreate on every step of a fast-playing loop.
+        var _lastConfigKey = null;
 
         function loadParticles() {
             var map = window._capMap;
             if (!map || !enabled) return;
             setStatus('Loading…');
-            fetchParticles(source, level, function(err, data) {
+            var fhrVal = fhrs[fhrIndex] || 0;
+            var configKey = source + ':' + level + ':' + opacity;
+            fetchParticles(source, level, fhrVal, function(err, data) {
                 if (err) { setStatus('Unavailable'); return; }
-                removeLayer();
-                particlesLayer = L.velocityLayer({
-                    displayValues: false,
-                    data: data,
-                    opacity: opacity,
-                    maxVelocity: level === 'DLM' || level === '200' ? 40 : 25,
-                    velocityScale: 0.012,
-                    colorScale: ['#6495ed', '#32cd32', '#ffd700', '#ff8c00', '#dc3232', '#b400b4'],
-                });
-                particlesLayer.addTo(map);
+                if (particlesLayer && configKey === _lastConfigKey) {
+                    particlesLayer.setData(data);
+                } else {
+                    removeLayer();
+                    particlesLayer = L.velocityLayer({
+                        displayValues: false,
+                        data: data,
+                        opacity: opacity,
+                        maxVelocity: maxVelocity(),
+                        velocityScale: 0.012,
+                        colorScale: COLOR_STOPS,
+                    });
+                    particlesLayer.addTo(map);
+                    _lastConfigKey = configKey;
+                }
                 var hdr = (data[0] || {}).header || {};
-                setStatus(hdr.refTime ? hdr.refTime.slice(0,8) + ' ' + hdr.refTime.slice(9,14) + 'Z F+' +
-                    String(hdr.forecastTime).padStart(3,'0') : '');
+                setStatus(hdr.refTime ? 'Valid ' + computeValidTime(hdr.refTime, hdr.forecastTime) +
+                    ' (F+' + String(hdr.forecastTime).padStart(3, '0') + ')' : '');
+                updateFrameUi();
+            });
+        }
+
+        function goFrame(idx) {
+            if (!fhrs.length) return;
+            fhrIndex = Math.max(0, Math.min(idx, fhrs.length - 1));
+            updateFrameUi();
+            if (enabled) loadParticles();
+        }
+
+        function wpPause() {
+            wpPlaying = false;
+            var btn = document.getElementById('wpBtnPlay');
+            if (btn) btn.innerHTML = '&#9654;';
+            if (wpTimer) { clearInterval(wpTimer); wpTimer = null; }
+        }
+
+        function wpPlay() {
+            if (wpPlaying || fhrs.length < 2) return;
+            wpPlaying = true;
+            var btn = document.getElementById('wpBtnPlay');
+            if (btn) btn.innerHTML = '&#9646;&#9646;';
+            wpTimer = setInterval(function() { goFrame((fhrIndex + 1) % fhrs.length); }, 800);
+        }
+
+        // Fetch the real available forecast hours for this source from index.json
+        // (backend already renders every fhr LDM/ECMWF delivers, capped at MAX_FHR --
+        // this was previously fetched and thrown away, fhr was hardcoded to 0).
+        function fetchIndex(src, cb) {
+            fetch(API + '/index?source=' + src)
+                .then(function(r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+                .then(function(d) {
+                    var list = (d.fhrs || []).map(function(f) { return f.fhr; }).sort(function(a, b) { return a - b; });
+                    cb(null, list.length ? list : [0]);
+                })
+                .catch(function() { cb(null, [0]); });
+        }
+
+        function refreshIndexAndLoad() {
+            wpPause();
+            fetchIndex(source, function(err, list) {
+                fhrs = list;
+                fhrIndex = 0;
+                updateFrameUi();
+                if (enabled) loadParticles();
             });
         }
 
@@ -2743,7 +2880,7 @@
                 });
                 srcSel.addEventListener('change', function() {
                     source = this.value;
-                    if (enabled) loadParticles();
+                    refreshIndexAndLoad();
                 });
             }
             var sel = document.getElementById('windParticlesLevelSelect');
@@ -2755,6 +2892,7 @@
                 });
                 sel.addEventListener('change', function() {
                     level = this.value;
+                    buildLegend();
                     if (enabled) loadParticles();
                 });
             }
@@ -2764,9 +2902,29 @@
                     enabled = this.checked;
                     document.getElementById('windParticlesSubOptions').style.display =
                         enabled ? 'block' : 'none';
-                    if (enabled) loadParticles(); else { removeLayer(); setStatus(''); }
+                    var legend = document.getElementById('windParticlesLegend');
+                    if (legend) legend.style.display = enabled ? 'block' : 'none';
+                    if (enabled) {
+                        buildLegend();
+                        refreshIndexAndLoad();
+                    } else {
+                        wpPause(); removeLayer(); setStatus('');
+                    }
                 });
             }
+            var wpFirst = document.getElementById('wpBtnFirst');
+            if (wpFirst) wpFirst.addEventListener('click', function() { wpPause(); goFrame(0); });
+            var wpPrev = document.getElementById('wpBtnPrev');
+            if (wpPrev) wpPrev.addEventListener('click', function() { wpPause(); goFrame(fhrIndex - 1); });
+            var wpPlayBtn = document.getElementById('wpBtnPlay');
+            if (wpPlayBtn) wpPlayBtn.addEventListener('click', function() { wpPlaying ? wpPause() : wpPlay(); });
+            var wpNext = document.getElementById('wpBtnNext');
+            if (wpNext) wpNext.addEventListener('click', function() { wpPause(); goFrame(fhrIndex + 1); });
+            var wpLast = document.getElementById('wpBtnLast');
+            if (wpLast) wpLast.addEventListener('click', function() { wpPause(); goFrame(fhrs.length - 1); });
+            var wpSlider = document.getElementById('windParticlesFhrSlider');
+            if (wpSlider) wpSlider.addEventListener('input', function() { wpPause(); goFrame(parseInt(this.value, 10)); });
+
             var op = document.getElementById('windParticlesOpacity');
             if (op) {
                 op.addEventListener('input', function() {
@@ -2819,6 +2977,13 @@
         </div>
         <div id="nidsLegendSite" style="margin-top:4px;font-size:10px;color:#666;">NEXRAD N0B</div>
         <!-- Animation controlled by bottom timeline bar when NIDS active -->
+    </div>
+
+    <!-- Animated Wind speed legend -->
+    <div id="windParticlesLegend" style="display:none;">
+        <div id="windParticlesLegendTitle">💨 Wind Speed (Animated)</div>
+        <div id="windLegendBar"></div>
+        <div id="windLegendTicks"></div>
     </div>
 
     <script>
