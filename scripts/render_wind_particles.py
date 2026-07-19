@@ -71,11 +71,11 @@ LON_MIN, LON_MAX = -100.0, 0.0     # -180..180 convention; converted to GFS's 0.
 DIRECT_LEVELS = ['SFC', '850', '700', '500', '200']
 LEVEL_LABELS = {
     'SFC': 'Surface (10m AGL)',
-    '850': '~5,000 ft MSL',
-    '700': '~10,000 ft MSL',
-    '500': '~18,000 ft MSL',
-    '200': '~39,000 ft MSL',
-    'DLM': 'Deep-Layer Mean (850-700-500mb steering flow)',
+    '850': '850 hPa',
+    '700': '700 hPa',
+    '500': '500 hPa',
+    '200': '200 hPa',
+    'DLM': 'Deep-Layer Mean (850-700-500 hPa steering flow)',
 }
 ALL_LEVELS = DIRECT_LEVELS + ['DLM']
 DLM_COMPONENTS = ['850', '700', '500']
