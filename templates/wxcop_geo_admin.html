@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Access & Threat Report — CAP WxCOP</title>
+  <style>
+    :root {
+      --navy:    #0a1628;
+      --navy2:   #0f2044;
+      --blue:    #1a3a6b;
+      --accent:  #4fc3f7;
+      --go:      #00b33c;
+      --caution: #e6b800;
+      --stop:    #cc2200;
+      --text:    #e0e8f0;
+      --muted:   #7a9abf;
+      --border:  rgba(79,195,247,0.15);
+    }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family:'Segoe UI',sans-serif; background:var(--navy); color:var(--text); min-height:100vh; }
+
+    header {
+      background:linear-gradient(180deg,#060e1c,var(--navy));
+      border-bottom:1px solid var(--border);
+      padding:1rem 2rem;
+      display:flex; align-items:center; justify-content:space-between;
+    }
+    header h1 { font-size:1.3rem; color:var(--accent); }
+    header .sub { font-size:0.82rem; color:var(--muted); margin-top:2px; }
+    .btn-home {
+      background:rgba(79,195,247,0.1); border:1px solid var(--border);
+      color:var(--accent); padding:0.4rem 1rem; border-radius:4px;
+      text-decoration:none; font-size:0.85rem;
+    }
+    .btn-home:hover { background:rgba(79,195,247,0.2); }
+
+    .container { max-width:1200px; margin:1.5rem auto; padding:0 1.5rem 3rem; }
+
+    .stale-banner {
+      background:rgba(230,184,0,0.12); border:1px solid rgba(230,184,0,0.4);
+      color:var(--caution); border-radius:6px; padding:0.75rem 1rem;
+      margin-bottom:1.25rem; font-size:0.85rem; display:none;
+    }
+    .stale-banner.show { display:block; }
+
+    .summary-strip {
+      display:flex; flex-wrap:wrap; gap:1.5rem;
+      background:rgba(79,195,247,0.05); border:1px solid var(--border);
+      border-radius:8px; padding:1rem 1.5rem; margin-bottom:1.5rem;
+    }
+    .stat { min-width:130px; }
+    .stat .num { font-size:1.6rem; font-weight:700; color:var(--accent); }
+    .stat .lbl { font-size:0.75rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.05em; }
+    .stat .num.threat { color:var(--stop); }
+    .as-of { margin-left:auto; align-self:center; font-size:0.78rem; color:var(--muted); }
+
+    .section { margin-bottom:1.75rem; }
+    .section-title {
+      font-size:0.9rem; font-weight:600; color:var(--accent);
+      text-transform:uppercase; letter-spacing:0.05em;
+      margin-bottom:0.75rem; padding-bottom:0.4rem; border-bottom:1px solid var(--border);
+    }
+    .section-title.threat { color:var(--stop); }
+
+    table { width:100%; border-collapse:collapse; font-size:0.85rem; }
+    th { text-align:left; color:var(--muted); font-weight:600; font-size:0.75rem;
+         text-transform:uppercase; letter-spacing:0.04em; padding:0.4rem 0.6rem;
+         border-bottom:1px solid var(--border); }
+    td { padding:0.4rem 0.6rem; border-bottom:1px solid rgba(79,195,247,0.06); }
+    tr:hover td { background:rgba(79,195,247,0.04); }
+    .ip { font-family:'Courier New',monospace; }
+    .hits { text-align:right; font-variant-numeric:tabular-nums; }
+    .muted { color:var(--muted); }
+    .badge { display:inline-block; padding:1px 7px; border-radius:3px; font-size:0.72rem;
+             font-weight:600; margin-left:6px; }
+    .badge-threat { background:rgba(204,34,0,0.18); color:#ff8866; border:1px solid rgba(204,34,0,0.4); }
+
+    .known-row { display:flex; justify-content:space-between; align-items:center;
+                 padding:0.5rem 0.8rem; background:rgba(79,195,247,0.04);
+                 border-radius:6px; margin-bottom:0.4rem; font-size:0.85rem; }
+    .known-row .label { color:var(--muted); }
+
+    .country-card {
+      background:rgba(255,255,255,0.02); border:1px solid var(--border);
+      border-radius:8px; padding:1rem 1.25rem; margin-bottom:0.9rem;
+    }
+    .country-head { display:flex; justify-content:space-between; align-items:baseline;
+                    margin-bottom:0.6rem; }
+    .country-name { font-weight:600; }
+    .country-meta { color:var(--muted); font-size:0.8rem; }
+
+    .empty-state { padding:2rem; text-align:center; color:var(--muted); font-size:0.88rem; }
+  </style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>🛡️ Access &amp; Threat Report</h1>
+    <div class="sub">CAP WxCOP web traffic — geolocation, RDAP org lookup, fail2ban cross-reference</div>
+  </div>
+  <a href="/CAP_WxCOP/" class="btn-home">← Home</a>
+</header>
+
+<div class="container">
+  <div class="stale-banner" id="staleBanner">
+    ⚠ This report is stale — the cache updater may not have run recently. Showing the last available data.
+  </div>
+
+  <div class="summary-strip" id="summaryStrip">
+    <div class="stat"><div class="num" id="statTotal">—</div><div class="lbl">Total hits</div></div>
+    <div class="stat"><div class="num" id="statUnique">—</div><div class="lbl">Unique external IPs</div></div>
+    <div class="stat"><div class="num" id="statCountries">—</div><div class="lbl">Countries</div></div>
+    <div class="stat"><div class="num threat" id="statThreats">—</div><div class="lbl">Fail2ban-flagged</div></div>
+    <div class="as-of" id="asOf"></div>
+  </div>
+
+  <div class="section" id="threatSection" style="display:none;">
+    <div class="section-title threat">⚠ Fail2ban-flagged hits</div>
+    <table>
+      <thead><tr><th>IP</th><th>Org / Location</th><th>Fail2ban source</th><th class="hits">Hits</th></tr></thead>
+      <tbody id="threatBody"></tbody>
+    </table>
+  </div>
+
+  <div class="section" id="knownSection" style="display:none;">
+    <div class="section-title">Known / Internal</div>
+    <div id="knownBody"></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">By Country</div>
+    <div id="countryBody"><div class="empty-state">Loading…</div></div>
+  </div>
+</div>
+
+<script>
+const API_URL = "{{ request.script_root }}/admin/geo-access/api/report";
+
+function escapeHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s == null ? '' : s;
+  return d.innerHTML;
+}
+
+function orgLocation(entry) {
+  let bits = [];
+  if (entry.org) bits.push(escapeHtml(entry.org));
+  if (entry.location) bits.push(escapeHtml(entry.location));
+  return bits.length ? bits.join(' — ') : '<span class="muted">unknown</span>';
+}
+
+function render(data) {
+  document.getElementById('staleBanner').classList.toggle('show', !!data.stale);
+  document.getElementById('statTotal').textContent = data.total_hits.toLocaleString();
+  document.getElementById('statUnique').textContent = data.unique_ips.toLocaleString();
+  document.getElementById('statCountries').textContent = data.countries.length;
+  document.getElementById('statThreats').textContent = data.threats.length;
+  document.getElementById('asOf').textContent =
+    'as of ' + new Date(data.generated_at).toLocaleString() + ' · last ' + data.hours + 'h';
+
+  const threatSection = document.getElementById('threatSection');
+  if (data.threats.length) {
+    threatSection.style.display = '';
+    document.getElementById('threatBody').innerHTML = data.threats.map(t => `
+      <tr>
+        <td class="ip">${escapeHtml(t.ip)}</td>
+        <td>${orgLocation(t)}</td>
+        <td>${(t.fail2ban || []).map(s => `<span class="badge badge-threat">${escapeHtml(s)}</span>`).join('')}</td>
+        <td class="hits">${t.hits.toLocaleString()}</td>
+      </tr>`).join('');
+  } else {
+    threatSection.style.display = 'none';
+  }
+
+  const knownSection = document.getElementById('knownSection');
+  if (data.known.length) {
+    knownSection.style.display = '';
+    document.getElementById('knownBody').innerHTML = data.known.map(k => `
+      <div class="known-row">
+        <span><span class="ip">${escapeHtml(k.ip)}</span> <span class="label">${escapeHtml(k.label)}</span></span>
+        <span class="hits">${k.hits.toLocaleString()} hits</span>
+      </div>`).join('');
+  } else {
+    knownSection.style.display = 'none';
+  }
+
+  const countryBody = document.getElementById('countryBody');
+  if (!data.countries.length) {
+    countryBody.innerHTML = '<div class="empty-state">No external hits in this window.</div>';
+    return;
+  }
+  countryBody.innerHTML = data.countries.map(c => `
+    <div class="country-card">
+      <div class="country-head">
+        <span class="country-name">${escapeHtml(c.name)} (${escapeHtml(c.code)})</span>
+        <span class="country-meta">${c.hits.toLocaleString()} hits (${c.pct}%) · ${c.unique_ips} IP(s)</span>
+      </div>
+      <table>
+        <thead><tr><th>IP</th><th>Org / Location</th><th class="hits">Hits</th></tr></thead>
+        <tbody>
+          ${c.top_ips.map(entry => `
+            <tr>
+              <td class="ip">${escapeHtml(entry.ip)}</td>
+              <td>${orgLocation(entry)}</td>
+              <td class="hits">${entry.hits.toLocaleString()}
+                ${(entry.fail2ban || []).length ? '<span class="badge badge-threat">⚠</span>' : ''}
+              </td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`).join('');
+}
+
+async function load() {
+  try {
+    const resp = await fetch(API_URL);
+    if (resp.status === 401) {
+      window.location = "{{ request.script_root }}/auth/login?next=" + encodeURIComponent(window.location.href);
+      return;
+    }
+    const data = await resp.json();
+    if (!resp.ok) {
+      document.getElementById('countryBody').innerHTML =
+        `<div class="empty-state">⚠ ${escapeHtml(data.error || 'Failed to load report')}</div>`;
+      return;
+    }
+    render(data);
+  } catch (e) {
+    document.getElementById('countryBody').innerHTML =
+      `<div class="empty-state">⚠ Network error: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+load();
+setInterval(load, 60000);
+</script>
+</body>
+</html>

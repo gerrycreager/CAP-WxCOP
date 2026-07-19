@@ -219,6 +219,13 @@ try:
 except Exception as e:
     print(f"⚠ Could not load Wing ICL admin: {e}")
 
+try:
+    from wxcop_geo_admin import wxcop_geo_admin
+    app.register_blueprint(wxcop_geo_admin)
+    print("✓ Access & Threat Report admin registered at /CAP_WxCOP/admin/geo-access")
+except Exception as e:
+    print(f"⚠ Could not load Access & Threat Report admin: {e}")
+
 print("CAP Weather COP initialization complete.\n")
 
 try:
