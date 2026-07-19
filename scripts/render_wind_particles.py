@@ -369,8 +369,17 @@ def render_fhr(fhr, date, cycle, out_dir, force):
         except Exception:
             pass
 
+    # Whether this fhr belongs in index.json depends on whether complete,
+    # valid output files exist on disk right now -- NOT on whether anything
+    # was newly *written this run*. Using `rendered` here was a real bug:
+    # a cron run that finds files already rendered by a previous run
+    # (out_file.exists() -> skip, correctly not re-rendering) had rendered=0
+    # for that fhr, so it silently dropped an already-valid fhr from the
+    # index every time -- wiping out previously-available forecast hours
+    # on every subsequent run instead of just adding to them.
+    all_present = all((out_dir / f'particles_{lv}_f{fhr:03d}.json').exists() for lv in ALL_LEVELS)
     index_entry = None
-    if fhr_ok and rendered > 0:
+    if all_present:
         index_entry = {
             'fhr':   fhr,
             'files': {lv: f'particles_{lv}_f{fhr:03d}.json' for lv in ALL_LEVELS}
@@ -581,8 +590,12 @@ def render_ecmwf_fhr(model_key, client, latest_dt, fhr, out_dir, force):
     elif dlm_parts:
         log.warning(f'  {model_key} F{fhr:03d}: DLM skipped, only got {list(dlm_parts.keys())}')
 
+    # See the matching comment in render_fhr() -- index eligibility must be
+    # based on files actually present on disk, not on what was freshly
+    # written this specific run.
+    all_present = all((out_dir / f'particles_{lv}_f{fhr:03d}.json').exists() for lv in ALL_LEVELS)
     index_entry = None
-    if fhr_ok and rendered > 0:
+    if all_present:
         index_entry = {'fhr': fhr, 'files': {lv: f'particles_{lv}_f{fhr:03d}.json' for lv in ALL_LEVELS}}
     return fhr, index_entry, rendered, errors
 

@@ -272,6 +272,12 @@
         }
         .mpb:hover { background: rgba(255,255,255,0.15); }
         .mpb:disabled { opacity: 0.35; cursor: not-allowed; }
+        /* .mpb defaults to white icons for the dark floating radar bar --
+           override for use inside the light sidebar panel (was invisible:
+           white-on-white made the wind-particles play/step controls
+           functionally undiscoverable even though they worked). */
+        .wpb-light { color: #333; }
+        .wpb-light:hover { background: rgba(0,0,0,0.08); }
         #mrmsFrameDisplay { font-family: monospace; font-size: 12px; color: #ccc; min-width: 60px; }
         #mrmsTimeDisplay  { font-family: monospace; font-size: 12px; color: #8bc4a8; flex: 1; }
         .mspeed-label { font-size: 11px; color: #aaa; white-space: nowrap; }
@@ -694,11 +700,11 @@
             </div>
             <div id="windParticlesStatus" style="font-size:10px;color:#888;margin-top:3px;"></div>
             <div style="margin-top:6px;display:flex;align-items:center;gap:2px;">
-                <button class="mpb" id="wpBtnFirst" title="First forecast hour" style="font-size:14px;">&#9198;</button>
-                <button class="mpb" id="wpBtnPrev"  title="Step back"           style="font-size:14px;">&#9664;</button>
-                <button class="mpb" id="wpBtnPlay"  title="Play/Pause"          style="font-size:14px;">&#9654;</button>
-                <button class="mpb" id="wpBtnNext"  title="Step forward"        style="font-size:14px;">&#9654;&#x7C;</button>
-                <button class="mpb" id="wpBtnLast"  title="Last forecast hour"  style="font-size:14px;">&#9197;</button>
+                <button class="mpb wpb-light" id="wpBtnFirst" title="First forecast hour" style="font-size:14px;">&#9198;</button>
+                <button class="mpb wpb-light" id="wpBtnPrev"  title="Step back"           style="font-size:14px;">&#9664;</button>
+                <button class="mpb wpb-light" id="wpBtnPlay"  title="Play/Pause"          style="font-size:14px;">&#9654;</button>
+                <button class="mpb wpb-light" id="wpBtnNext"  title="Step forward"        style="font-size:14px;">&#9654;&#x7C;</button>
+                <button class="mpb wpb-light" id="wpBtnLast"  title="Last forecast hour"  style="font-size:14px;">&#9197;</button>
             </div>
             <input type="range" id="windParticlesFhrSlider" min="0" max="0" value="0" step="1"
                    style="width:100%;margin-top:2px;accent-color:#4a9c6f;cursor:pointer;">
@@ -2844,7 +2850,7 @@
             wpPlaying = true;
             var btn = document.getElementById('wpBtnPlay');
             if (btn) btn.innerHTML = '&#9646;&#9646;';
-            wpTimer = setInterval(function() { goFrame((fhrIndex + 1) % fhrs.length); }, 800);
+            wpTimer = setInterval(function() { goFrame((fhrIndex + 1) % fhrs.length); }, 500);
         }
 
         // Fetch the real available forecast hours for this source from index.json
