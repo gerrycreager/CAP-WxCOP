@@ -654,7 +654,7 @@
             <div style="margin-top:5px;">
                 <label style="font-size:10px;color:#ccc;display:flex;align-items:center;gap:6px;cursor:pointer;">
                     <input type="checkbox" id="satAnimToggle" style="accent-color:#4a9c6f;">
-                    Animate (last ~60 min)
+                    Animate (uses radar loop's duration control)
                 </label>
             </div>
             <div id="satStatus" style="font-size:10px;color:#888;margin-top:3px;"></div>
@@ -865,6 +865,19 @@
             map = L.map('map', { zoomControl: true, worldCopyJump: true });
             window._capMap = map;  // expose for GLM/MRMS local scope
             map.setView([38.5, -96.5], 4);
+
+            // Dedicated pane for wind streamlines (static barbs + animated
+            // particles), stacked between radar (satellite 395 < MRMS 410 <
+            // NIDS 420, all in the default overlayPane, z-index 400) and GLM
+            // lightning (real Leaflet markers, markerPane, z-index 600).
+            // Established ordering: satellite -> radar -> streamlines (either
+            // form) -> lightning. WindCanvas and leaflet-velocity's
+            // CanvasLayer both otherwise default to plain overlayPane with no
+            // explicit z-index, which put them below the z-indexed radar/
+            // satellite tile layers unpredictably depending on DOM order.
+            var windPane = map.createPane('windPane');
+            windPane.style.zIndex = 430;
+            windPane.style.pointerEvents = 'none';
 
 
             baseLayers = {
@@ -2010,7 +2023,10 @@
                 timeline.addEventListener('click', timeline._mrmsHandler);
             }
             document.getElementById('mrmsLocalDuration').addEventListener('change',function(){
-                if(document.getElementById('mrmsLocalToggle').checked) {
+                if (typeof window.isSatActive === 'function' && window.isSatActive()) {
+                    /* Reload satellite animation with the new duration */
+                    window.loadSatAnimation();
+                } else if(document.getElementById('mrmsLocalToggle').checked) {
                     if (nidsActive && currentSite) {
                         /* Reload NIDS history with new duration */
                         loadNidsHistory({site_id: currentSite}, currentProd);
@@ -2409,13 +2425,14 @@
         </div>
         <div id="mrmsFrameDisplay" style="font-family:monospace;font-size:12px;color:#ccc;min-width:55px;">— / —</div>
         <div id="mrmsTimeDisplay"  style="font-family:monospace;font-size:13px;color:#8bc4a8;flex:1;">Enable Radar Composite above</div>
-        <select id="mrmsLocalDuration" title="Loop duration"
+        <select id="mrmsLocalDuration" title="Loop duration (radar, NIDS, and satellite animation)"
                 style="background:#1a1a2e;border:1px solid #444;color:#ccc;
                        font-size:11px;padding:2px 4px;border-radius:3px;cursor:pointer;">
             <option value="60">1 hr</option>
             <option value="120" selected>2 hr</option>
             <option value="180">3 hr</option>
             <option value="240">4 hr</option>
+            <option value="360">6 hr</option>
         </select>
         <select id="mrmsPlaySpeed" title="Playback speed"
                 style="background:#1a1a2e;border:1px solid #444;color:#ccc;
@@ -2568,7 +2585,11 @@
                 this._map    = map;
                 this._canvas = document.createElement('canvas');
                 this._canvas.style.cssText = 'position:absolute;pointer-events:none;opacity:0.82;';
-                map.getPane('overlayPane').appendChild(this._canvas);
+                // windPane (z-index 430, created in initMap()) -- keeps this
+                // above satellite/radar and below GLM lightning, per the
+                // established layer ordering, rather than the plain
+                // overlayPane default which has no z-index of its own.
+                (map.getPane('windPane') || map.getPane('overlayPane')).appendChild(this._canvas);
                 this._ctx = this._canvas.getContext('2d');
                 map.on('moveend zoomend resize', this._draw, this);
                 this._resize(); if (this._data) this._draw();
@@ -2820,6 +2841,11 @@
                         maxVelocity: maxVelocity(),
                         velocityScale: 0.012,
                         colorScale: COLOR_STOPS,
+                        // windPane (z-index 430, initMap()) -- leaflet-velocity
+                        // has no zIndex option, only paneName; without this it
+                        // falls back to plain overlayPane with no z-index,
+                        // same issue as WindCanvas above.
+                        paneName: 'windPane',
                     });
                     particlesLayer.addTo(map);
                     _lastConfigKey = configKey;
@@ -3555,7 +3581,12 @@
         /* ── Constants ─────────────────────────────────────────────────────── */
         var NOWCOAST_WMS   = 'https://nowcoast.noaa.gov/geoserver/satellite/wms';
         var SAT_CAPS_URL   = NOWCOAST_WMS + '?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetCapabilities';
-        var SAT_FRAMES_MAX = 12;   /* up to 12 frames (~60 min at 5-min intervals) */
+        // Hard cap on preloaded frames regardless of duration selected (shared
+        // #mrmsLocalDuration control, up to 6h) -- at native 5-min cadence 6h
+        // would be ~72 tile layers; instead cap the count and subsample evenly
+        // (see capFrames()) so longer windows trade time-resolution for a
+        // bounded, predictable load.
+        var SAT_FRAMES_MAX = 28;
         var SAT_ZINDEX     = 395;
         var SATELLITE_FRAMES_API = '/CAP_WxCOP/api/satellite/frames';
 
@@ -3602,6 +3633,38 @@
         function getKey()  {
             var p = document.querySelector('input[name="satProduct"]:checked');
             return p ? p.value : 'ir';
+        }
+        // Shared with the radar/NIDS loop duration control (#mrmsLocalDuration,
+        // value in minutes) -- one duration setting governs whichever
+        // loop-capable layer is currently animating, rather than a separate
+        // per-layer control.
+        function getAnimHours() {
+            var sel = document.getElementById('mrmsLocalDuration');
+            var minutes = sel ? (parseInt(sel.value, 10) || 120) : 120;
+            return minutes / 60;
+        }
+        // Keep only frames within `hours` of the most recent one (anchored to
+        // the latest actual frame, not wall-clock "now", since satellite
+        // delivery can lag) -- needed for the nowCOAST/VIS path, which has no
+        // hours param of its own to request narrower.
+        function filterByHours(times, hours) {
+            if (!times.length) return times;
+            var last = parseFrameDate(times[times.length - 1]).getTime();
+            var cutoff = last - hours * 3600000;
+            return times.filter(function(t) { return parseFrameDate(t).getTime() >= cutoff; });
+        }
+        // Evenly subsample down to maxFrames, always keeping the most recent
+        // frame, so longer durations trade time-resolution for a bounded count.
+        function capFrames(times, maxFrames) {
+            if (times.length <= maxFrames) return times;
+            var step = (times.length - 1) / (maxFrames - 1);
+            var picked = [];
+            for (var i = 0; i < maxFrames; i++) {
+                picked.push(times[Math.round(i * step)]);
+            }
+            var seen = {}, out = [];
+            picked.forEach(function(t) { if (!seen[t]) { seen[t] = true; out.push(t); } });
+            return out;
         }
         function getOpacity() {
             return (window._satOpacity !== undefined) ? window._satOpacity : 0.75;
@@ -3651,8 +3714,8 @@
         }
 
         /* ── Our own frames API — real frame timestamps for IR/WV ───────────── */
-        function fetchOwnSatTimes(product, callback) {
-            fetch(SATELLITE_FRAMES_API + '?product=' + product + '&hours=1')
+        function fetchOwnSatTimes(product, hours, callback) {
+            fetch(SATELLITE_FRAMES_API + '?product=' + product + '&hours=' + hours)
                 .then(function(r){ return r.json(); })
                 .then(function(data){
                     var frames = data.frames || [];
@@ -3709,7 +3772,7 @@
                 // MapCache's "current" dimension default is disk-cached for
                 // up to 4h keyed by the literal string "current", which
                 // would go stale; an explicit ts is a fresh cache key each time.
-                fetchOwnSatTimes(OWN_SAT_PRODUCTS[key], function(times) {
+                fetchOwnSatTimes(OWN_SAT_PRODUCTS[key], 1, function(times) {
                     if (getKey() !== key) return; // user switched product mid-fetch
                     var last = (times && times.length) ? times[times.length-1] : null;
                     satLayer = makeSatLayer(key, last, getOpacity());
@@ -3903,6 +3966,7 @@
         function loadSatAnimation() {
             var map = getMap(); if (!map) return;
             var key       = getKey();
+            var hours     = getAnimHours();
             var statusEl  = document.getElementById('satStatus');
             if (statusEl) statusEl.textContent = 'Fetching frames\u2026';
 
@@ -3916,8 +3980,13 @@
                     return;
                 }
 
-                /* Take last SAT_FRAMES_MAX frames */
-                var frames = times.slice(-SAT_FRAMES_MAX);
+                // nowCOAST (VIS) has no hours param of its own -- filter its
+                // full time list down to the selected window first. Our own
+                // pipeline already only returned `hours` worth, so this is a
+                // no-op there. Then cap+subsample either path to a bounded
+                // frame count regardless of how wide the window is.
+                var windowed = filterByHours(times, hours);
+                var frames = capFrames(windowed, SAT_FRAMES_MAX);
 
                 /* Remove any existing frame layers */
                 satFrameLayers.forEach(function(l) { map.removeLayer(l); });
@@ -3931,12 +4000,12 @@
                     satFrameLayers.push(l);
                 });
 
-                if (statusEl) statusEl.textContent = SAT_LABELS[key] + ' \u00b7 ' + frames.length + ' frames';
+                if (statusEl) statusEl.textContent = SAT_LABELS[key] + ' \u00b7 ' + frames.length + ' frames (' + hours + 'h)';
                 hijackSatTimeline();
             }
 
             if (isOwnProduct(key)) {
-                fetchOwnSatTimes(OWN_SAT_PRODUCTS[key], onTimes);
+                fetchOwnSatTimes(OWN_SAT_PRODUCTS[key], hours, onTimes);
             } else {
                 fetchSatTimes(SAT_LAYERS[key], onTimes);
             }
@@ -4106,6 +4175,11 @@
 
         /* Expose restore for NIDS to call when it hijacks */
         window.restoreSatTimeline = restoreSatTimeline;
+        /* Expose for the shared mrmsLocalDuration control (defined in a
+           different <script> block) to reload satellite animation when the
+           user changes the loop duration while satellite is the active layer */
+        window.isSatActive     = function() { return satActive; };
+        window.loadSatAnimation = loadSatAnimation;
 
     })();
     </script>
