@@ -2297,18 +2297,26 @@
     </div>
 
     <script>
-    // ── Colorbar column auto-layout ─────────────────────────────────────────
-    // mrmsColorbar/tpwColorbar/satColorbar each had a hardcoded `left` in CSS
-    // assuming all three are always shown together in a horizontal row. That
-    // put satellite's legend out to the right, over the map -- blocking
-    // imagery instead of sitting out of the way. Stack whichever are
-    // actually visible in a single column along the left edge instead, radar
-    // at the bottom (closest to the player bar when it's open) and
-    // satellite on top, repacking on any visibility change regardless of
-    // which of the many toggle call sites caused it.
+    // ── Unified left-side legend stack ──────────────────────────────────────
+    // Every legend/colorbar box (flight category, NIDS site info, radar/TPW/
+    // satellite colorbars, wind speed x2, TRW probability, GLM lightning) used
+    // to be positioned independently, several with hardcoded pixel offsets
+    // that only worked when a specific OTHER subset was also visible (a web
+    // of "body.X-open #y { bottom: Zpx }" pairwise rules), and two (the wind
+    // legends) anchored to the right, opposite the map layer menu and every
+    // other legend. That's how satellite's colorbar ended up floating out
+    // over map imagery, and why the wind legend now sits alone on the right.
+    // Replace all of that with one function that stacks whichever of these
+    // are actually visible, bottom-to-top, flush on the left edge, and
+    // repacks on any visibility change regardless of which toggle caused it
+    // -- so no combination of layers can make two legends overlap or strand
+    // one out of place.
     (function() {
-        var IDS = ['mrmsColorbar', 'tpwColorbar', 'satColorbar']; // bottom-to-top
-        function layoutColorbarRow() {
+        var IDS = [   // bottom-to-top
+            'fixedLegend', 'nidsLegend', 'mrmsColorbar', 'tpwColorbar', 'satColorbar',
+            'windLegend', 'windParticlesLegend', 'tstmLegend', 'glmLegend'
+        ];
+        function layoutLeftLegends() {
             var barOpen = document.body.classList.contains('radar-open') ||
                           document.body.classList.contains('sat-active');
             var y = barOpen ? 60 : 10, gap = 8;
@@ -2316,20 +2324,27 @@
                 var el = document.getElementById(id);
                 if (!el || getComputedStyle(el).display === 'none') return;
                 el.style.left = '10px';
+                el.style.right = 'auto';
                 el.style.bottom = y + 'px';
                 y += el.offsetHeight + gap;
             });
         }
-        window.layoutColorbarRow = layoutColorbarRow;
-        IDS.forEach(function(id) {
-            var el = document.getElementById(id);
-            if (!el) return;
-            new MutationObserver(layoutColorbarRow)
-                .observe(el, { attributes: true, attributeFilter: ['style', 'class'] });
+        window.layoutLeftLegends = layoutLeftLegends;
+        // Elements further down the page (windLegend, nidsLegend, etc.)
+        // don't exist yet at this point in parsing -- defer element lookup
+        // and observer setup to DOMContentLoaded.
+        document.addEventListener('DOMContentLoaded', function() {
+            IDS.forEach(function(id) {
+                var el = document.getElementById(id);
+                if (!el) return;
+                new MutationObserver(layoutLeftLegends)
+                    .observe(el, { attributes: true, attributeFilter: ['style', 'class'] });
+            });
+            new MutationObserver(layoutLeftLegends)
+                .observe(document.body, { attributes: true, attributeFilter: ['class'] });
+            window.addEventListener('resize', layoutLeftLegends);
+            layoutLeftLegends();
         });
-        new MutationObserver(layoutColorbarRow)
-            .observe(document.body, { attributes: true, attributeFilter: ['class'] });
-        document.addEventListener('DOMContentLoaded', layoutColorbarRow);
     })();
     </script>
 
