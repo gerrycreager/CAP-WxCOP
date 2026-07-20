@@ -504,9 +504,9 @@ def main():
     cutoff = datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - datetime.timedelta(hours=RETAIN_HOURS)
     bad_files = load_bad_files()
 
-    for product, cfg in PRODUCTS.items():
+    def run_product(product):
         try:
-            update_product(product, cfg, cutoff, bad_files)
+            update_product(product, PRODUCTS[product], cutoff, bad_files)
         except Exception as e:
             log.error(f'{product}: unhandled exception: {e}', exc_info=True)
         # Save after every product, not just at the end -- a long-running
@@ -514,13 +514,27 @@ def main():
         # run before it ever reaches a final save, losing everything learned
         save_bad_files(bad_files, cutoff)
 
-    # East+West CONUS mosaics -- run after base products so fresh source
-    # GeoTIFFs are available to merge
+    # CONUS east/west first: the mosaics below (what EWMC actually displays
+    # by default) depend only on these two, and they're fast (~seconds each
+    # in steady state). Full-disk products are the slow ones -- Full Disk
+    # C13 reprojection alone can eat most of TimeoutStartSec when backlogged
+    # -- so run them *after* the mosaic instead of before it. Previously the
+    # mosaic ran last and got starved out of the run's time budget on every
+    # cycle a full-disk product ran long, silently leaving the mosaic stale
+    # for 2+ days despite the raw east/west products staying current.
+    conus_ew = ['wv_conus_east', 'wv_conus_west', 'ir_conus_east', 'ir_conus_west']
+    for product in conus_ew:
+        run_product(product)
+
     for mosaic_name, cfg in MOSAIC_PRODUCTS.items():
         try:
             mosaic_conus_product(mosaic_name, cfg['east'], cfg['west'], cutoff)
         except Exception as e:
             log.error(f'{mosaic_name}: unhandled exception: {e}', exc_info=True)
+
+    for product in PRODUCTS:
+        if product not in conus_ew:
+            run_product(product)
 
 
 if __name__ == '__main__':

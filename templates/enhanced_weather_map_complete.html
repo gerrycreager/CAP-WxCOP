@@ -2251,6 +2251,37 @@
     </div>
 
     <script>
+    // ── Colorbar row auto-layout ────────────────────────────────────────────
+    // mrmsColorbar/tpwColorbar/satColorbar each had a hardcoded `left` in CSS
+    // assuming all three are always shown together in one row. In practice
+    // any subset can be visible (e.g. satellite alone), which left dead gaps
+    // and made the visible one(s) look stranded/misaligned. This watches all
+    // three for display changes (regardless of which of the many toggle call
+    // sites caused it) and repacks whichever are actually visible left-to-right
+    // with no gaps.
+    (function() {
+        var IDS = ['mrmsColorbar', 'tpwColorbar', 'satColorbar'];
+        function layoutColorbarRow() {
+            var x = 10, gap = 10;
+            IDS.forEach(function(id) {
+                var el = document.getElementById(id);
+                if (!el || getComputedStyle(el).display === 'none') return;
+                el.style.left = x + 'px';
+                x += el.offsetWidth + gap;
+            });
+        }
+        window.layoutColorbarRow = layoutColorbarRow;
+        IDS.forEach(function(id) {
+            var el = document.getElementById(id);
+            if (!el) return;
+            new MutationObserver(layoutColorbarRow)
+                .observe(el, { attributes: true, attributeFilter: ['style', 'class'] });
+        });
+        document.addEventListener('DOMContentLoaded', layoutColorbarRow);
+    })();
+    </script>
+
+    <script>
     // ── GOES ABI L2 TPW (background) — outside all IIFEs ──────────────────
     // This page is CONUS-only (no OCONUS sector logic anywhere), so unlike
     // radar_map.html's satBg there's no sector routing needed -- always the
