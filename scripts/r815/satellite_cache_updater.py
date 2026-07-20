@@ -415,7 +415,17 @@ def five_min_bucket(ts: datetime.datetime) -> datetime.datetime:
     return ts.replace(second=0, microsecond=0, minute=ts.minute - (ts.minute % 5))
 
 
-def mosaic_conus_product(mosaic_name: str, east_product: str, west_product: str, cutoff: datetime.datetime):
+def mosaic_conus_product(mosaic_name: str, east_product: str, west_product: str,
+                          cutoff: datetime.datetime, limit: int | None = None):
+    """
+    Returns the number of new mosaic frames written.
+
+    `limit` caps how many buckets get built in this call -- used by main()
+    to round-robin between wv_conus and ir_conus so a large backlog in one
+    (e.g. after this step was starved, see main()) can't monopolize the run
+    and starve the other exactly the way the mosaic step itself used to get
+    starved by the full-disk products.
+    """
     import rasterio
 
     east_dir = CACHE_DIR / east_product
@@ -436,7 +446,13 @@ def mosaic_conus_product(mosaic_name: str, east_product: str, west_product: str,
             west_files[five_min_bucket(ts)] = f
 
     added = 0
-    for bucket in sorted(set(east_files) | set(west_files)):
+    # Newest-first: when catching up a large backlog (e.g. after this step
+    # was starved for a while), animation/live display only cares about the
+    # most recent hours, so produce those before spending run time on
+    # older history nobody's asking for yet.
+    for bucket in sorted(set(east_files) | set(west_files), reverse=True):
+        if limit is not None and added >= limit:
+            break
         ts_str = bucket.strftime('%Y%m%d-%H%M%S')
         dest = out_dir / f'{mosaic_name}_{ts_str}.tif'
         if dest.exists():
@@ -469,7 +485,7 @@ def mosaic_conus_product(mosaic_name: str, east_product: str, west_product: str,
 
     cached = sorted(out_dir.glob(f'{mosaic_name}_*.tif'))
     if not cached:
-        return
+        return added
 
     latest = cached[-1]
     current_link = CACHE_DIR / f'{mosaic_name}_current.tif'
@@ -497,6 +513,7 @@ def mosaic_conus_product(mosaic_name: str, east_product: str, west_product: str,
 
     remaining = len(list(out_dir.glob(f'{mosaic_name}_*.tif')))
     log.info(f'{mosaic_name}: cache has {remaining} frames, latest={latest.name}')
+    return added
 
 
 def main():
@@ -526,11 +543,24 @@ def main():
     for product in conus_ew:
         run_product(product)
 
-    for mosaic_name, cfg in MOSAIC_PRODUCTS.items():
-        try:
-            mosaic_conus_product(mosaic_name, cfg['east'], cfg['west'], cutoff)
-        except Exception as e:
-            log.error(f'{mosaic_name}: unhandled exception: {e}', exc_info=True)
+    # Round-robin the two mosaics in small batches rather than running each
+    # to completion in turn -- otherwise a large backlog in whichever mosaic
+    # goes first (e.g. wv_conus, dict order) monopolizes the run and starves
+    # the other exactly the way the mosaic step itself used to get starved
+    # by the full-disk products above.
+    MOSAIC_BATCH = 15
+    pending = list(MOSAIC_PRODUCTS.items())
+    while pending:
+        still_pending = []
+        for mosaic_name, cfg in pending:
+            try:
+                added = mosaic_conus_product(mosaic_name, cfg['east'], cfg['west'], cutoff, limit=MOSAIC_BATCH)
+            except Exception as e:
+                log.error(f'{mosaic_name}: unhandled exception: {e}', exc_info=True)
+                added = 0
+            if added == MOSAIC_BATCH:
+                still_pending.append((mosaic_name, cfg))
+        pending = still_pending
 
     for product in PRODUCTS:
         if product not in conus_ew:

@@ -272,6 +272,33 @@
         }
         .mpb:hover { background: rgba(255,255,255,0.15); }
         .mpb:disabled { opacity: 0.35; cursor: not-allowed; }
+        /* Radar/satellite quick-picker -- reachable at all times (not nested
+           in the player bar, which is display:none until a layer is already
+           animating -- this button IS how the first layer gets switched on),
+           holds the relocated #radarControlGroup/#satControlGroup (see
+           script near </body>). Sits bottom-right; shifts up out of the
+           player bar's way once it appears. */
+        #layerPickerBtn {
+            position: fixed; bottom: 10px; right: 10px; z-index: 1101;
+            background: #1a1a2e; color: white; border: 1px solid #444;
+            border-radius: 6px; padding: 6px 12px; font-size: 12px;
+            cursor: pointer; box-shadow: 0 1px 6px rgba(0,0,0,0.3);
+        }
+        #layerPickerBtn:hover { background: #2a2a3e; }
+        body.radar-open #layerPickerBtn, body.sat-active #layerPickerBtn { bottom: 60px; }
+        #layerPickerPopover {
+            display: none; position: fixed; bottom: 46px; right: 10px;
+            width: 250px; max-height: 70vh; overflow-y: auto;
+            background: #1a1a2e; border: 1px solid #444; border-radius: 6px;
+            padding: 10px 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+            color: #ccc; font-size: 12px; z-index: 1101;
+        }
+        body.radar-open #layerPickerPopover, body.sat-active #layerPickerPopover { bottom: 96px; }
+        #layerPickerPopover.open { display: block; }
+        #layerPickerPopover h3 { color: #ddd; font-size: 12px; margin: 8px 0 4px; }
+        #layerPickerPopover h3:first-child { margin-top: 0; }
+        #layerPickerPopover .checkbox-label { color: #ccc; }
+        #layerPickerPopover .divider { border-top: 1px solid #3a3a4e; margin: 8px 0; }
         /* .mpb defaults to white icons for the dark floating radar bar --
            override for use inside the light sidebar panel (was invisible:
            white-on-white made the wind-particles play/step controls
@@ -570,7 +597,8 @@
         <div class="divider"></div>
         <label class="checkbox-label"><input type="checkbox" id="showNoMetar"> No-METAR Airfields</label>
 
-        <div class="divider"></div>
+        <div class="divider" id="radarControlGroupDivider"></div>
+        <div id="radarControlGroup">
         <h3>Radar</h3>
         <!-- Single radar toggle — auto-selects MRMS/WSR-88D/TDWR by zoom+proximity -->
         <label class="checkbox-label">
@@ -625,7 +653,9 @@
         <label class="checkbox-label">
             <input type="checkbox" id="tstmToggle"> TRW Probability (LAMP)
         </label>
-        <div class="divider"></div>
+        </div>
+        <div class="divider" id="satControlGroupDivider"></div>
+        <div id="satControlGroup">
         <h3>Satellite</h3>
         <label class="checkbox-label">
             <input type="checkbox" id="satToggle"> GOES Satellite
@@ -658,6 +688,7 @@
                 </label>
             </div>
             <div id="satStatus" style="font-size:10px;color:#888;margin-top:3px;"></div>
+        </div>
         </div>
         <div class="divider"></div>
         <h3>Precipitable Water</h3>
@@ -1928,6 +1959,14 @@
                 var thumb=document.getElementById('mrmsThumb');
                 if(fill) fill.style.width=pct+'%';
                 if(thumb) thumb.style.left=pct+'%';
+                // Nudge satellite to follow along, if it's also on -- see
+                // window.satSyncTo (defined near the bottom of the page).
+                // window._syncGuard prevents satGoFrame's own reverse hook
+                // from ping-ponging back into this one.
+                if (!window._syncGuard && typeof window.isSatActive === 'function' &&
+                    window.isSatActive() && typeof window.satSyncTo === 'function') {
+                    window.satSyncTo(ts);
+                }
             }
 
             function mlPlay(){
@@ -2064,6 +2103,13 @@
             window.mlStop       = mlStop;
             window.mlFrames     = mlFrames;
             window.mlCurrent    = mlCurrent;
+            /* Stable handle to the real MRMS frame-setter, and a live
+               accessor for its current frame list -- unlike window.mlGoFrame
+               (reassigned whenever NIDS/satellite hijacks the shared player
+               bar) these always point at MRMS's own data, for the radar/sat
+               sync engine (window.satSyncTo/radarSyncTo) to call directly. */
+            window.mlGoFrameBase = mlGoFrame;
+            window.mlGetFrames   = function() { return mlFrames; };
             window.mlIsActive   = function() {
                 return document.getElementById('mrmsLocalToggle') &&
                        document.getElementById('mrmsLocalToggle').checked;
@@ -2435,6 +2481,12 @@
         });
     })();
     </script>
+
+    <!-- Radar/satellite quick picker -- always visible (unlike the player
+         bar below, which only appears once a layer is already animating),
+         since it's how the first layer gets turned on. -->
+    <button id="layerPickerBtn" title="Radar / Satellite layers">&#9776; Layers</button>
+    <div id="layerPickerPopover"></div>
 
     <!-- NEXRAD radar player bar -->
     <div id="mrmsPlayerBar">
@@ -3853,8 +3905,13 @@
             var fd = document.getElementById('mrmsFrameDisplay');
             if (fd) fd.textContent = (idx + 1) + ' / ' + satFrameLayers.length;
             var pct = satFrameLayers.length > 1 ? (idx / (satFrameLayers.length - 1)) * 100 : 100;
-            var prog = document.getElementById('mrmsProgress');
-            if (prog) prog.style.width = pct + '%';
+            // mrmsFill/mrmsThumb, not mrmsProgress (no such element -- that
+            // was a dead reference, the scrubber never actually moved during
+            // standalone satellite animation).
+            var fill = document.getElementById('mrmsFill');
+            var thumb = document.getElementById('mrmsThumb');
+            if (fill) fill.style.width = pct + '%';
+            if (thumb) thumb.style.left = pct + '%';
 
             /* Update status with frame timestamp */
             var ts = satFrameTimes[idx] || '';
@@ -3869,6 +3926,12 @@
                 var d2 = parseFrameDate(ts);
                 var hhmmZ = ('0'+d2.getUTCHours()).slice(-2) + ':' + ('0'+d2.getUTCMinutes()).slice(-2) + 'Z';
                 lbl.textContent = SAT_LABELS[getKey()] + ' \u00b7 ' + hhmmZ;
+            }
+            // Nudge radar to follow along, if it's also on -- mirror of the
+            // hook in mlGoFrame. window._syncGuard prevents ping-pong.
+            if (!window._syncGuard && typeof window.mlIsActive === 'function' &&
+                window.mlIsActive() && typeof window.radarSyncTo === 'function' && ts) {
+                window.radarSyncTo(ts);
             }
         }
 
@@ -3949,6 +4012,12 @@
             document.body.classList.remove('mrms-colorbar-open','nids-active');
             document.body.classList.add('sat-active');
 
+            /* Reveal the shared player bar -- only the MRMS radar toggle did
+               this before, so standalone satellite animation (radar off) ran
+               with no visible play/scrub controls at all. */
+            var bar = document.getElementById('mrmsPlayerBar');
+            if (bar) bar.classList.add('active');
+
             /* Show latest frame and autoplay */
             satGoFrame(satFrameLayers.length - 1);
             satAnimPlay();
@@ -3987,6 +4056,13 @@
             }
 
             document.body.classList.remove('sat-active');
+
+            /* Hide the shared player bar again, unless radar is still using
+               it -- mirrors the reveal in hijackSatTimeline(). */
+            if (!(typeof window.mlIsActive === 'function' && window.mlIsActive())) {
+                var bar = document.getElementById('mrmsPlayerBar');
+                if (bar) bar.classList.remove('active');
+            }
 
             /* Reload single live frame */
             var tog = document.getElementById('satToggle');
@@ -4211,6 +4287,95 @@
            user changes the loop duration while satellite is the active layer */
         window.isSatActive     = function() { return satActive; };
         window.loadSatAnimation = loadSatAnimation;
+        window.satAnimPause    = satAnimPause;
+        /* Stable handle + live accessor for the radar/sat sync engine
+           (window.satSyncTo/radarSyncTo), same reasoning as
+           window.mlGoFrameBase/mlGetFrames on the radar side. */
+        window.satGoFrameBase    = satGoFrame;
+        window.satGetFrameTimes  = function() { return satFrameTimes; };
+
+    })();
+    </script>
+
+    <script>
+    // ── Radar + satellite: synced playback, quick-access layer picker ───────
+    (function() {
+
+        /* ── Nearest-frame sync ────────────────────────────────────────────
+           Whichever layer currently owns the shared player bar (as before --
+           this doesn't change who owns play/scrub/buttons) keeps driving
+           exactly as it always has. The only new behavior: if the OTHER
+           layer is also switched on, each step additionally nudges it to
+           show whichever of ITS OWN frames is nearest in time to the frame
+           that just got shown. Radar (~2min cadence) and the satellite
+           mosaic (~5-10min cadence) don't share a native cadence, so "nearest
+           frame" rather than a literal shared index is the only sane
+           definition of "synced" here. window._syncGuard stops the two
+           hooks (added at the end of mlGoFrame and satGoFrame) from
+           ping-ponging into each other. */
+        window._syncGuard = false;
+
+        function tsToMs(ts) {
+            var m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})$/.exec(ts);
+            if (!m) return NaN;
+            return Date.UTC(+m[1], +m[2]-1, +m[3], +m[4], +m[5], +m[6]);
+        }
+        function nearestIdx(targetMs, msArr) {
+            if (!msArr.length || isNaN(targetMs)) return -1;
+            var best = 0, bestDiff = Infinity;
+            for (var i = 0; i < msArr.length; i++) {
+                var d = Math.abs(msArr[i] - targetMs);
+                if (d < bestDiff) { bestDiff = d; best = i; }
+            }
+            return best;
+        }
+
+        window.satSyncTo = function(radarTs) {
+            if (typeof window.satGetFrameTimes !== 'function' || typeof window.satGoFrameBase !== 'function') return;
+            var times = window.satGetFrameTimes();
+            if (!times || !times.length) return;
+            var idx = nearestIdx(tsToMs(radarTs), times.map(tsToMs));
+            if (idx < 0) return;
+            window._syncGuard = true;
+            try { window.satGoFrameBase(idx); } finally { window._syncGuard = false; }
+        };
+
+        window.radarSyncTo = function(satTs) {
+            if (typeof window.mlGetFrames !== 'function' || typeof window.mlGoFrameBase !== 'function') return;
+            var frames = window.mlGetFrames();
+            if (!frames || !frames.length) return;
+            var idx = nearestIdx(tsToMs(satTs), frames.map(function(f) { return tsToMs(f.timestamp); }));
+            if (idx < 0) return;
+            window._syncGuard = true;
+            try { window.mlGoFrameBase(idx); } finally { window._syncGuard = false; }
+        };
+
+        /* ── Quick-access layer picker ─────────────────────────────────────
+           Relocates the existing Radar/Satellite sidebar sections (same
+           elements, same IDs -- every listener wired to them elsewhere in
+           the page keeps working untouched) into a popover opened from the
+           player bar, so switching layers/products doesn't require leaving
+           the animation view. */
+        document.addEventListener('DOMContentLoaded', function() {
+            var pop = document.getElementById('layerPickerPopover');
+            var btn = document.getElementById('layerPickerBtn');
+            var radarGroup = document.getElementById('radarControlGroup');
+            var satGroup   = document.getElementById('satControlGroup');
+            if (!pop || !btn || !radarGroup || !satGroup) return;
+
+            pop.appendChild(radarGroup);
+            pop.appendChild(satGroup);
+
+            btn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                pop.classList.toggle('open');
+            });
+            document.addEventListener('click', function(e) {
+                if (pop.classList.contains('open') && !pop.contains(e.target) && e.target !== btn) {
+                    pop.classList.remove('open');
+                }
+            });
+        });
 
     })();
     </script>
