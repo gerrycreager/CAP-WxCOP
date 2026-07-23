@@ -16,11 +16,12 @@ Purpose:
                        watches in 3 hours" is normal, but "ingest script
                        hasn't logged a successful run in 3 hours" is not)
 
-Alerting:
-    - Alerts once when a check transitions OK -> STALE (not on every poll)
-    - Re-alerts on an escalation interval while still STALE (default 4h)
-    - Sends a single RECOVERED notice on STALE -> OK
-    - State persisted to a JSON file so this is safe to run frequently
+Reporting:
+    - State persisted to a JSON file (STATE_FILE) so this is safe to run
+      frequently; the homepage's status widget reads it via
+      /api/pipeline-status (see app.py) -- no email/push, just an
+      at-a-glance display. Each check's status, detail, and how long it's
+      held that status are recorded, not just OK/STALE.
 
 Deploy:
     Runs standalone with psycopg2 + stdlib only. Intended for the host with
@@ -37,11 +38,9 @@ import glob
 import json
 import logging
 import os
-import subprocess
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from email.mime.text import MIMEText
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -52,23 +51,9 @@ from typing import Callable, Optional
 STATE_FILE = Path("/var/lib/wxcop_monitor/state.json")
 LOG_FILE = Path("/var/log/cap_wxcop/freshness_monitor.log")
 
-# How long a check must remain STALE before we re-send the alert (avoid
-# spamming every 5 minutes while an outage is already known/being worked)
-ESCALATION_INTERVAL = timedelta(hours=4)
-
-# Email alerting via msmtp (/etc/msmtprc, relays through Gmail SMTP as
-# capwxcop.alerts@gmail.com) -- there's no local MTA on this box, so
-# smtplib-to-localhost silently failed on every alert until this was
-# found. msmtprc is 600 root:www-data; this script runs as ldm (systemd
-# User=ldm), so it needs a POSIX ACL for read access:
-#   setfacl -m u:ldm:r /etc/msmtprc
-# From address must match the authenticated msmtp account -- Gmail
-# rejects/rewrites an arbitrary From header otherwise. Swap ALERT_TO for
-# an SMS gateway address (e.g. 1234567890@vtext.com) to also text
-# yourself, same pattern planned for cadet lightning alerts.
-ALERT_FROM = "capwxcop.alerts@gmail.com"
-ALERT_TO = ["gcreager@capnhq.gov"]
-MSMTP_BIN = "/usr/bin/msmtp"
+# Reporting is via the homepage status widget (reads STATE_FILE directly,
+# see /api/pipeline-status in app.py), not email -- moved off msmtp
+# 2026-07-23 since a status you have to look at beats an inbox you don't.
 
 
 @dataclass
@@ -204,23 +189,6 @@ def save_state(state: dict) -> None:
     tmp.replace(STATE_FILE)
 
 
-def send_alert(subject: str, body: str) -> None:
-    msg = MIMEText(body)
-    msg["Subject"] = subject
-    msg["From"] = ALERT_FROM
-    msg["To"] = ", ".join(ALERT_TO)
-    try:
-        subprocess.run(
-            [MSMTP_BIN] + ALERT_TO,
-            input=msg.as_bytes(),
-            check=True,
-            timeout=20,
-        )
-        log.info(f"Alert sent: {subject}")
-    except Exception as e:
-        log.error(f"msmtp send failed: {e}")
-
-
 def check_db_max(check: Check) -> Optional[datetime]:
     """Opens and closes its own short-lived connection so a slow/stuck
     query, or a run with several db_max checks, never leaves a connection
@@ -329,37 +297,24 @@ def main():
             ok, detail = False, f"Check raised exception: {e}"
 
         prev = state.get(check.name, {})
-        was_stale = prev.get("status") == "STALE"
-        last_alert_str = prev.get("last_alert_at")
-        last_alert_at = (
-            datetime.fromisoformat(last_alert_str) if last_alert_str else None
-        )
+        status = "OK" if ok else "STALE"
+        # `since` tracks when the CURRENT status began, so the homepage can
+        # show "STALE for 3h22m" rather than just a bare status pill.
+        since = prev.get("since") if prev.get("status") == status else None
+        if not since:
+            since = now.isoformat()
 
         if ok:
             log.info(f"[OK]    {check.name}: {detail}")
-            if was_stale:
-                send_alert(
-                    subject=f"[WxCOP] RECOVERED: {check.name}",
-                    body=f"{check.name} is healthy again.\n\n{detail}",
-                )
-            state[check.name] = {"status": "OK", "last_alert_at": None}
         else:
             log.warning(f"[STALE] {check.name}: {detail}")
-            should_alert = (not was_stale) or (
-                last_alert_at is not None
-                and now - last_alert_at >= ESCALATION_INTERVAL
-            )
-            if should_alert:
-                send_alert(
-                    subject=f"[WxCOP] STALE: {check.name}",
-                    body=f"{check.name} appears to have stopped updating.\n\n{detail}",
-                )
-                state[check.name] = {
-                    "status": "STALE",
-                    "last_alert_at": now.isoformat(),
-                }
-            else:
-                state[check.name] = prev  # keep existing alert timestamp
+
+        state[check.name] = {
+            "status": status,
+            "detail": detail,
+            "since": since,
+            "checked_at": now.isoformat(),
+        }
 
     save_state(state)
 

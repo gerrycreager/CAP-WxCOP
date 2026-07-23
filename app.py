@@ -400,6 +400,34 @@ def system_status():
             'timestamp': datetime.utcnow().isoformat(),
         }), 500
 
+@app.route('/api/pipeline-status')
+def pipeline_status():
+    """
+    Data pipeline freshness, for the homepage status widget.
+    Reads the state file wxcop_freshness_monitor.py (wxcop-monitor.timer,
+    every 5 min on r815) already maintains -- no email/push, this endpoint
+    is the sole consumer now that alerting moved to on-page display only
+    (2026-07-23, was msmtp email before).
+    """
+    import json as _json
+    state_path = '/var/lib/wxcop_monitor/state.json'
+    try:
+        with open(state_path) as f:
+            state = _json.load(f)
+    except (OSError, ValueError) as e:
+        return jsonify({'error': str(e), 'checks': []}), 500
+
+    checks = [
+        {'name': name, **info}
+        for name, info in sorted(state.items())
+    ]
+    stale = [c['name'] for c in checks if c.get('status') == 'STALE']
+    return jsonify({
+        'checks': checks,
+        'stale_count': len(stale),
+        'generated_at': datetime.utcnow().isoformat() + 'Z',
+    })
+
 @app.route('/health')
 def health_check():
     try:

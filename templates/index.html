@@ -109,6 +109,31 @@
     }
     .card-arrow { color: #c8a951; font-weight: 700; }
 
+    /* ── Pipeline status ── */
+    .status-strip {
+      display: flex; flex-wrap: wrap; gap: 8px 18px;
+      background: #fff; border: 1px solid #d4dce8; border-radius: 6px;
+      padding: 0.9rem 1.1rem;
+    }
+    .status-strip.all-ok { border-left: 3px solid #2e7d4a; }
+    .status-strip.has-stale { border-left: 3px solid #c62828; }
+    .status-strip .status-empty { font-size: 0.8rem; color: #7a8898; }
+    .status-item {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 0.76rem; color: #3a4658; white-space: nowrap;
+    }
+    .status-dot {
+      width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0;
+    }
+    .status-dot.ok    { background: #2e7d4a; }
+    .status-dot.stale { background: #c62828; }
+    .status-item .status-name { font-weight: 600; }
+    .status-item .status-age  { color: #8493a6; }
+    .status-summary {
+      font-size: 0.68rem; color: #8493a6; margin-left: auto;
+      white-space: nowrap;
+    }
+
     /* ── Footer ── */
     footer {
       background: #1a2744; color: #8898aa;
@@ -135,6 +160,11 @@
 </header>
 
 <main>
+
+  <div class="section-heading">Pipeline Status</div>
+  <div class="status-strip all-ok" id="pipelineStatus">
+    <span class="status-empty">Checking data pipeline status&hellip;</span>
+  </div>
 
   <div class="section-heading">Flight Operations</div>
   <div class="card-grid">
@@ -492,6 +522,48 @@ function updateClock() {
 }
 updateClock();
 setInterval(updateClock, 1000);
+
+function fmtAge(iso) {
+  const ms = Date.now() - new Date(iso).getTime();
+  const mins = Math.max(0, Math.round(ms / 60000));
+  if (mins < 60) return mins + 'm';
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return hrs + 'h ' + (mins % 60) + 'm';
+  return Math.floor(hrs / 24) + 'd ' + (hrs % 24) + 'h';
+}
+
+function loadPipelineStatus() {
+  fetch('/CAP_WxCOP/api/pipeline-status')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      var el = document.getElementById('pipelineStatus');
+      var checks = data.checks || [];
+      if (!checks.length) {
+        el.innerHTML = '<span class="status-empty">No status data available</span>';
+        return;
+      }
+      el.classList.toggle('has-stale', data.stale_count > 0);
+      el.classList.toggle('all-ok', data.stale_count === 0);
+      el.innerHTML = checks.map(function(c) {
+        var isOk = c.status === 'OK';
+        var age = c.since ? fmtAge(c.since) : '';
+        var label = isOk ? c.name : (c.name + ' — STALE ' + age);
+        return '<div class="status-item" title="' + (c.detail || '').replace(/"/g,'&quot;') + '">' +
+          '<span class="status-dot ' + (isOk ? 'ok' : 'stale') + '"></span>' +
+          '<span class="status-name">' + label + '</span>' +
+          '</div>';
+      }).join('') +
+      '<span class="status-summary">' +
+        (data.stale_count > 0 ? data.stale_count + ' of ' + checks.length + ' need attention' : 'All ' + checks.length + ' pipelines nominal') +
+      '</span>';
+    })
+    .catch(function() {
+      var el = document.getElementById('pipelineStatus');
+      el.innerHTML = '<span class="status-empty">Status unavailable</span>';
+    });
+}
+loadPipelineStatus();
+setInterval(loadPipelineStatus, 60000);
 </script>
 
 </body>
