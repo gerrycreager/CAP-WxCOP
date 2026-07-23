@@ -137,17 +137,22 @@ CHECKS = [
         file_glob="/LDM/satellite/GLM/WEST/*.nc",
     ),
     Check(
-        # ingest_wwa_vtec.py logs "Done: N op(s)" on every pqact invocation,
-        # ops=0 included -- this is a heartbeat that the pipe is alive, not
-        # a claim that a hazard is active. WWA/VTEC products are issued
-        # as-needed, and calm/stagnant weather can mean multiple days with
-        # nothing matching nationwide, so the threshold has to be generous
-        # enough to not false-alarm on genuinely quiet weather.
+        # DB-based, not a log-file heartbeat -- ingest_wwa_vtec.py runs on
+        # BOTH r815 (SPC watch archive only, as of 2026-07-23) and data1
+        # (the bulk of it: SVR/TOR/FFW warnings + WOU watch-outline
+        # updates), writing to the same shared observations.wwa table.
+        # A log-heartbeat check on r815's local log file was blind to
+        # data1's far higher-volume activity; MAX(ingested_at) reflects
+        # the true pipeline state regardless of which host processed the
+        # message. Threshold is a first guess (SVR/TOR/FFW/WOU nationwide
+        # should be frequent most of the year) -- revisit once real
+        # cadence has been observed for a few days, same as LAMP/GLMP/GFS.
         name="VTEC/WWA ingest heartbeat",
-        kind="log_heartbeat",
-        max_age=timedelta(hours=36),
-        log_path="/var/log/cap_wxcop/wwa_vtec_ingest.log",
-        success_pattern="Done:",
+        kind="db_max",
+        max_age=timedelta(hours=6),
+        db_query="""
+            SELECT MAX(ingested_at) FROM observations.wwa
+        """,
     ),
     Check(
         name="AF Weather email parser heartbeat",
