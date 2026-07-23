@@ -12,6 +12,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Weather COP</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: Arial, sans-serif; overflow: hidden; }
@@ -745,6 +747,7 @@
 
     <link rel="stylesheet" href="https://unpkg.com/leaflet-velocity@2.1.4/dist/leaflet-velocity.min.css">
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
     <script src="https://unpkg.com/leaflet-velocity@2.1.4/dist/leaflet-velocity.min.js"></script>
     <script>
         // ── Panel toggle ──────────────────────────────────────────
@@ -2120,6 +2123,28 @@
 
             function glmColor(a){return a<5?'#ff2200':a<15?'#ffee00':'#00ff44';}
             function glmSize(a){return a<5?14:a<15?10:8;}
+            // 2=red(most urgent) 1=yellow 0=green -- used to color clusters by
+            // their most urgent member, not an average/blend
+            function glmAgeRank(a){return a<5?2:a<15?1:0;}
+
+            // Clustered so a busy storm (hundreds of flashes in one area) reads as
+            // a single sized/colored count badge instead of a field of individually
+            // glowing bolts ("christmas tree" effect) -- spiderfies into the real
+            // bolt icons on click/zoom-in so per-flash timing is still available.
+            function glmClusterIcon(cluster){
+                var children=cluster.getAllChildMarkers();
+                var maxRank=0;
+                children.forEach(function(c){ if(c._glmAgeRank>maxRank) maxRank=c._glmAgeRank; });
+                var col = maxRank===2?'#ff2200':maxRank===1?'#ffee00':'#00ff44';
+                var textCol = maxRank===1?'#222':'#fff';
+                var count=cluster.getChildCount();
+                var sz=Math.min(56, 26+Math.sqrt(count)*4);
+                return L.divIcon({
+                    className:'',
+                    html:'<div style="width:'+sz+'px;height:'+sz+'px;border-radius:50%;background:'+col+';display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:'+(sz*0.38)+'px;color:'+textCol+';border:2px solid rgba(255,255,255,0.75);filter:drop-shadow(0 0 5px '+col+');">'+count+'</div>',
+                    iconSize:[sz,sz]
+                });
+            }
 
             function loadGLM(){
                 var m=getMap(); if(!m) return;
@@ -2130,7 +2155,12 @@
                     .then(function(r){return r.json();})
                     .then(function(data){
                         if(glmLayer){m.removeLayer(glmLayer);glmLayer=null;}
-                        glmLayer=L.layerGroup();
+                        glmLayer=L.markerClusterGroup({
+                            maxClusterRadius:45,
+                            spiderfyOnMaxZoom:true,
+                            showCoverageOnHover:false,
+                            iconCreateFunction:glmClusterIcon
+                        });
                         var now=Date.now(), count=0;
                         // Sort oldest first so newest (red) renders on top
                     var sorted=(data.features||[]).slice().sort(function(a,b){
@@ -2144,13 +2174,14 @@
                             if(age<0||age>minutes) return;
                             var sz=glmSize(age);
                             var zOff=age<5?2000:age<15?1000:500;
-                            L.marker([lat,lon],{
+                            var marker=L.marker([lat,lon],{
                                 icon:L.divIcon({className:'',
                                     html:'<div style="width:'+sz+'px;height:'+(sz*1.5)+'px;background:'+glmColor(age)+';clip-path:polygon(50% 0%,100% 38%,65% 38%,95% 100%,5% 100%,35% 38%,0% 38%);filter:drop-shadow(0 0 4px '+glmColor(age)+') drop-shadow(0 0 2px rgba(0,0,0,1));"></div>',
                                     iconSize:[sz+6,sz+6],iconAnchor:[(sz+6)/2,(sz+6)/2]}),
-                                interactive:false,
                                 zIndexOffset:zOff
-                            }).addTo(glmLayer);
+                            });
+                            marker._glmAgeRank=glmAgeRank(age);
+                            glmLayer.addLayer(marker);
                             count++;
                         });
                         if(document.getElementById('glmToggle').checked) glmLayer.addTo(m);
