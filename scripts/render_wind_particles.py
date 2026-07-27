@@ -64,9 +64,13 @@ LOCK_FILE   = '/home/ldm/var/run/render_wind_particles.lock'
 # auto-throttling.
 MAX_FHR = 72
 
-# Atlantic basin -- Cabo Verde genesis region through Caribbean/Gulf/US East Coast
+# Atlantic basin + full CONUS -- Cabo Verde genesis region through Caribbean/
+# Gulf/US coasts (both). Widened westward from -100 to -130 on 2026-07-27 to
+# stop clipping the West Coast/Interior West; only ~30% wider (lon span
+# 100->130deg) since lat bounds are unchanged, so render time/payload size
+# shouldn't move much.
 LAT_MIN, LAT_MAX = 0.0, 60.0
-LON_MIN, LON_MAX = -100.0, 0.0     # -180..180 convention; converted to GFS's 0..360 at read time
+LON_MIN, LON_MAX = -130.0, 0.0     # -180..180 convention; converted to GFS's 0..360 at read time
 
 DIRECT_LEVELS = ['SFC', '850', '700', '500', '200']
 LEVEL_LABELS = {
