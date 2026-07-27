@@ -272,6 +272,21 @@
           <span id="smokeOpacityVal" style="min-width:28px;">80%</span>
         </label>
       </div>
+      <div id="smokeAnimRow" style="display:none;margin-top:4px;">
+        <label style="font-size:0.72rem;color:#8bc4a8;cursor:pointer;">
+          <input type="checkbox" id="smokeAnimToggle" style="margin-right:4px;">
+          Animate (rolling history)
+        </label>
+        <div id="smokePlayerBar" style="display:none;align-items:center;gap:4px;margin-top:4px;">
+          <button id="smokeBtnFirst" style="background:#1a2540;border:1px solid #334;color:#ccd;padding:1px 5px;cursor:pointer;font-size:0.7rem;">&#9198;</button>
+          <button id="smokeBtnPrev" style="background:#1a2540;border:1px solid #334;color:#ccd;padding:1px 5px;cursor:pointer;font-size:0.7rem;">&#9664;</button>
+          <button id="smokeBtnPlay" style="background:#1a2540;border:1px solid #334;color:#ccd;padding:1px 5px;cursor:pointer;font-size:0.7rem;">&#9654;</button>
+          <button id="smokeBtnNext" style="background:#1a2540;border:1px solid #334;color:#ccd;padding:1px 5px;cursor:pointer;font-size:0.7rem;">&#9654;&#9654;</button>
+          <button id="smokeBtnLast" style="background:#1a2540;border:1px solid #334;color:#ccd;padding:1px 5px;cursor:pointer;font-size:0.7rem;">&#9197;</button>
+          <input type="range" id="smokeFrameSlider" min="0" max="0" value="0" step="1" style="flex:1;accent-color:#4a9c6f;">
+        </div>
+        <div id="smokeFrameLabel" style="font-size:0.68rem;color:#8bc4a8;text-align:center;margin-top:2px;"></div>
+      </div>
       <div style="margin-top:5px;font-size:0.68rem;color:#889;">
         Uses the same EPA AQI breakpoints/colors as the PM2.5 scale above
         (Good untinted). HRRR F00&ndash;F03, updated hourly.
@@ -952,8 +967,23 @@ document.querySelectorAll('input[name="localRadarProduct"]').forEach(function(ra
 var smokeLayer = null, smokeTimer = null;
 var SMOKE_FRAMES_API = '/CAP_WxCOP/api/hrrr-smoke/frames';
 
+// Animation state -- same preload-at-opacity-0-then-toggle pattern as the
+// GLM/satellite/radar animations elsewhere in this app, so frame stepping
+// is instant (no re-fetch) rather than reloading a tile layer per step.
+var smokeFrameLayers = [];
+var smokeFrameTimes  = [];
+var smokeCurrent     = -1;
+var smokeAnimating   = false;   // true once frames are preloaded (animate mode)
+var smokePlaying     = false;
+var smokePlayTimer   = null;
+
 function smokeEnabled() {
   return document.getElementById('smokeToggle').checked;
+}
+
+function smokeAnimEnabled() {
+  var el = document.getElementById('smokeAnimToggle');
+  return !!(el && el.checked);
 }
 
 function smokeOpacity() {
@@ -965,13 +995,21 @@ function removeSmokeLayer() {
   if (smokeLayer) { map.removeLayer(smokeLayer); smokeLayer = null; }
 }
 
+function removeSmokeFrames() {
+  smokeFrameLayers.forEach(function(l) { map.removeLayer(l); });
+  smokeFrameLayers = [];
+  smokeFrameTimes = [];
+  smokeCurrent = -1;
+}
+
 function loadSmoke() {
   if (!smokeEnabled()) return;
+  if (smokeAnimEnabled()) { loadSmokeAnimation(); return; }
   var statusEl = document.getElementById('smokeStatus');
   fetch(SMOKE_FRAMES_API + '?hours=6')
     .then(function(r) { return r.json(); })
     .then(function(data) {
-      if (!smokeEnabled()) return; // stale by the time this resolved
+      if (!smokeEnabled() || smokeAnimEnabled()) return; // stale/mode changed by the time this resolved
       var frames = data.frames || [];
       var last = frames.length ? frames[frames.length - 1] : null;
       var url = mapcacheTileUrl('hrrr_smoke', last ? last.ts : null);
@@ -989,26 +1027,133 @@ function loadSmoke() {
     });
 }
 
+function loadSmokeAnimation() {
+  var statusEl = document.getElementById('smokeStatus');
+  if (statusEl) statusEl.textContent = 'Fetching frames…';
+  fetch(SMOKE_FRAMES_API + '?hours=6')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (!smokeEnabled() || !smokeAnimEnabled()) return; // mode changed by the time this resolved
+      removeSmokeLayer();
+      removeSmokeFrames();
+      var frames = data.frames || [];
+      if (!frames.length) {
+        if (statusEl) statusEl.textContent = 'No smoke frames available';
+        return;
+      }
+      frames.forEach(function(f) {
+        var l = L.tileLayer(mapcacheTileUrl('hrrr_smoke', f.ts), {
+          opacity: 0, zIndex: 405,
+          attribution: 'HRRR smoke &copy; NOAA/NCEP',
+          errorTileUrl: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
+        });
+        l.addTo(map);
+        smokeFrameLayers.push(l);
+        smokeFrameTimes.push(f.ts);
+      });
+      smokeAnimating = true;
+      var slider = document.getElementById('smokeFrameSlider');
+      if (slider) slider.max = smokeFrameLayers.length - 1;
+      smokeGoFrame(smokeFrameLayers.length - 1);
+      smokeAnimPlay();
+    })
+    .catch(function(e) {
+      console.warn('Smoke frames fetch failed:', e);
+      if (statusEl) statusEl.textContent = 'Smoke layer unavailable';
+    });
+}
+
+function smokeGoFrame(idx) {
+  if (!smokeFrameLayers.length) return;
+  idx = Math.max(0, Math.min(idx, smokeFrameLayers.length - 1));
+  if (smokeCurrent >= 0 && smokeFrameLayers[smokeCurrent]) {
+    smokeFrameLayers[smokeCurrent].setOpacity(0);
+  }
+  smokeFrameLayers[idx].setOpacity(smokeOpacity());
+  smokeCurrent = idx;
+  var slider = document.getElementById('smokeFrameSlider');
+  if (slider) slider.value = idx;
+  var label = document.getElementById('smokeFrameLabel');
+  var statusEl = document.getElementById('smokeStatus');
+  var ts = smokeFrameTimes[idx];
+  var hhZ = ts ? ts.slice(9, 11) + 'Z' : '';
+  if (label) label.textContent = hhZ ? (hhZ + '  ·  ' + (idx + 1) + ' / ' + smokeFrameLayers.length) : '';
+  if (statusEl) statusEl.textContent = hhZ ? ('HRRR ' + hhZ) : '';
+}
+
+function smokeAnimPause() {
+  smokePlaying = false;
+  var btn = document.getElementById('smokeBtnPlay');
+  if (btn) btn.innerHTML = '&#9654;';
+  if (smokePlayTimer) { clearInterval(smokePlayTimer); smokePlayTimer = null; }
+}
+
+function smokeAnimPlay() {
+  smokePlaying = true;
+  var btn = document.getElementById('smokeBtnPlay');
+  if (btn) btn.innerHTML = '&#9646;&#9646;';
+  smokePlayTimer = setInterval(function() {
+    smokeGoFrame((smokeCurrent + 1) % smokeFrameLayers.length);
+  }, 700);
+}
+
 document.getElementById('smokeToggle').addEventListener('change', function() {
   var statusEl = document.getElementById('smokeStatus');
   var opacityRow = document.getElementById('smokeOpacityRow');
+  var animRow = document.getElementById('smokeAnimRow');
   if (this.checked) {
     if (opacityRow) opacityRow.style.display = 'block';
+    if (animRow) animRow.style.display = 'block';
     if (statusEl) statusEl.style.display = 'block';
     loadSmoke();
     smokeTimer = setInterval(loadSmoke, 300000);
   } else {
     if (opacityRow) opacityRow.style.display = 'none';
+    if (animRow) animRow.style.display = 'none';
+    smokeAnimPause();
+    smokeAnimating = false;
     removeSmokeLayer();
+    removeSmokeFrames();
+    var playerBar = document.getElementById('smokePlayerBar');
+    if (playerBar) playerBar.style.display = 'none';
     if (smokeTimer) { clearInterval(smokeTimer); smokeTimer = null; }
     if (statusEl) statusEl.textContent = '';
   }
 });
 
+document.getElementById('smokeAnimToggle').addEventListener('change', function() {
+  var playerBar = document.getElementById('smokePlayerBar');
+  smokeAnimPause();
+  if (this.checked) {
+    if (playerBar) playerBar.style.display = 'flex';
+    removeSmokeLayer();
+    loadSmokeAnimation();
+  } else {
+    if (playerBar) playerBar.style.display = 'none';
+    smokeAnimating = false;
+    removeSmokeFrames();
+    loadSmoke();
+  }
+});
+
+document.getElementById('smokeBtnFirst').addEventListener('click', function() { smokeAnimPause(); smokeGoFrame(0); });
+document.getElementById('smokeBtnPrev').addEventListener('click', function() { smokeAnimPause(); smokeGoFrame(smokeCurrent - 1); });
+document.getElementById('smokeBtnPlay').addEventListener('click', function() { smokePlaying ? smokeAnimPause() : smokeAnimPlay(); });
+document.getElementById('smokeBtnNext').addEventListener('click', function() { smokeAnimPause(); smokeGoFrame(smokeCurrent + 1); });
+document.getElementById('smokeBtnLast').addEventListener('click', function() { smokeAnimPause(); smokeGoFrame(smokeFrameLayers.length - 1); });
+document.getElementById('smokeFrameSlider').addEventListener('input', function() {
+  smokeAnimPause();
+  smokeGoFrame(parseInt(this.value, 10));
+});
+
 document.getElementById('smokeOpacity').addEventListener('input', function() {
   var pct = parseInt(this.value);
   document.getElementById('smokeOpacityVal').textContent = pct + '%';
-  if (smokeLayer) smokeLayer.setOpacity(pct / 100);
+  if (smokeAnimating && smokeCurrent >= 0 && smokeFrameLayers[smokeCurrent]) {
+    smokeFrameLayers[smokeCurrent].setOpacity(pct / 100);
+  } else if (smokeLayer) {
+    smokeLayer.setOpacity(pct / 100);
+  }
 });
 
 map.on('zoomend', function() {
