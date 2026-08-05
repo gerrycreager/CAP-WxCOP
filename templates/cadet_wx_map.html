@@ -294,6 +294,28 @@
       <div id="smokeStatus" style="font-size:0.7rem;color:#778;margin-top:3px;"></div>
     </div>
     <div class="sidebar-section">
+      <h3>&#127777; Air Quality (Observed)</h3>
+      <label style="font-size:0.8rem;cursor:pointer;">
+        <input type="checkbox" id="airnowToggle" style="margin-right:4px;">
+        Show AirNow PM2.5 contour (IDW)
+      </label>
+      <div id="airnowOpacityRow" style="display:none;margin-top:4px;">
+        <label style="font-size:0.72rem;color:#8bc4a8;display:flex;align-items:center;gap:6px;">
+          Opacity
+          <input type="range" id="airnowOpacity" min="0" max="100" value="65"
+                 style="flex:1;accent-color:#4a9c6f;cursor:pointer;">
+          <span id="airnowOpacityVal" style="min-width:28px;">65%</span>
+        </label>
+      </div>
+      <div style="margin-top:5px;font-size:0.68rem;color:#889;">
+        Prototype: inverse-distance-weighted contour built from live AirNow
+        station readings (ground obs, not modeled). Sparse away from
+        monitors -- compare against HRRR smoke above rather than trusting
+        either alone. Dots are the actual stations used.
+      </div>
+      <div id="airnowStatus" style="font-size:0.7rem;color:#778;margin-top:3px;"></div>
+    </div>
+    <div class="sidebar-section">
       <h3>&#9678; Range Rings</h3>
       <label style="font-size:0.8rem;cursor:pointer;">
         <input type="checkbox" id="ringsToggle" style="margin-right:4px;">
@@ -1164,6 +1186,153 @@ map.on('zoomend', function() {
 map.on('moveend', function() {
   // Re-pick nearest site when panning around at NIDS zoom
   if (radarEnabled() && map.getZoom() > RADAR_ZOOM_THRESHOLD) refreshRadar();
+});
+
+
+// ===========================================================================
+// AirNow PM2.5 IDW contour -- ground-observation alternative/companion to
+// HRRR smoke above, built client-side from /api/cadet_wx/airnow_grid (see
+// cadet_wx_api.py: idw_pm25_grid()). The server returns a numeric grid, not
+// tiles, so it's rasterized to a small canvas here and dropped in as an
+// imageOverlay -- same bounded-image pattern the NIDS radar layer uses.
+// Bbox-driven (not a fixed tileset), so it refetches on moveend/zoomend.
+// ===========================================================================
+var airnowLayer = null, airnowStationLayer = null, airnowTimer = null;
+var AIRNOW_GRID_API = '/CAP_WxCOP/api/cadet_wx/airnow_grid';
+
+// Standard EPA AirNow AQI category colors, same breakpoints as
+// air_quality_color()/idw_pm25_grid() server-side.
+var AQI_BANDS = [
+  { max: 9.0,      color: [0,   228, 0]   },  // Good
+  { max: 35.4,     color: [255, 255, 0]   },  // Moderate
+  { max: 55.4,     color: [255, 126, 0]   },  // Unhealthy for Sensitive Groups
+  { max: 125.4,    color: [255, 0,   0]   },  // Unhealthy
+  { max: 225.4,    color: [143, 63,  151] },  // Very Unhealthy
+  { max: Infinity, color: [126, 0,   35]  }   // Hazardous
+];
+function pm25ToColor(v) {
+  for (var i = 0; i < AQI_BANDS.length; i++) {
+    if (v <= AQI_BANDS[i].max) return AQI_BANDS[i].color;
+  }
+  return AQI_BANDS[AQI_BANDS.length - 1].color;
+}
+
+function airnowEnabled() {
+  return document.getElementById('airnowToggle').checked;
+}
+function airnowOpacity() {
+  var el = document.getElementById('airnowOpacity');
+  return el ? parseInt(el.value) / 100 : 0.65;
+}
+function removeAirnowLayer() {
+  if (airnowLayer) { map.removeLayer(airnowLayer); airnowLayer = null; }
+  if (airnowStationLayer) { map.removeLayer(airnowStationLayer); airnowStationLayer = null; }
+}
+
+// Rasterize the grid.values matrix (row 0 = south, per the server's
+// south->north linspace) into a small ImageData canvas, north at the top,
+// then hand back a data: URL for L.imageOverlay. Leaflet's own image
+// scaling smooths the upscale from grid_resolution -> screen pixels, which
+// softens the AQI band edges into a contour-like gradient for free.
+function gridToImageOverlay(grid) {
+  var nLat = grid.lats.length, nLon = grid.lons.length;
+  var canvas = document.createElement('canvas');
+  canvas.width = nLon; canvas.height = nLat;
+  var ctx = canvas.getContext('2d');
+  var img = ctx.createImageData(nLon, nLat);
+  for (var i = 0; i < nLat; i++) {
+    var row = grid.values[i];
+    var outRow = nLat - 1 - i;
+    for (var j = 0; j < nLon; j++) {
+      var v = row[j];
+      var idx = (outRow * nLon + j) * 4;
+      if (v == null) {
+        // Beyond max_dist_nm of any station -- leave transparent rather
+        // than paint a color we don't actually have data for.
+        img.data[idx+3] = 0;
+        continue;
+      }
+      var c = pm25ToColor(v);
+      img.data[idx]   = c[0];
+      img.data[idx+1] = c[1];
+      img.data[idx+2] = c[2];
+      img.data[idx+3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return canvas.toDataURL('image/png');
+}
+
+function loadAirnowGrid() {
+  if (!airnowEnabled()) return;
+  var statusEl = document.getElementById('airnowStatus');
+  var b = map.getBounds();
+  var url = AIRNOW_GRID_API + '?west=' + b.getWest() + '&south=' + b.getSouth()
+          + '&east=' + b.getEast() + '&north=' + b.getNorth() + '&resolution=50';
+  if (statusEl) statusEl.textContent = 'Loading AirNow stations…';
+  fetch(url)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (!airnowEnabled()) return; // toggled off while in flight
+      removeAirnowLayer();
+      if (!data.grid || data.count < 2) {
+        if (statusEl) statusEl.textContent = 'Too few AirNow stations in view (' + (data.count || 0) + ')';
+        return;
+      }
+      var grid = data.grid;
+      var bounds = L.latLngBounds(
+        [grid.lats[0], grid.lons[0]],
+        [grid.lats[grid.lats.length - 1], grid.lons[grid.lons.length - 1]]
+      );
+      airnowLayer = L.imageOverlay(gridToImageOverlay(grid), bounds, {
+        opacity: airnowOpacity(), zIndex: 404, interactive: false
+      }).addTo(map);
+
+      airnowStationLayer = L.layerGroup();
+      data.stations.forEach(function(s) {
+        if (s.pm25_ugm3 == null) return;
+        var c = pm25ToColor(s.pm25_ugm3);
+        L.circleMarker([s.lat, s.lon], {
+          radius: 4, weight: 1, color: '#111',
+          fillColor: 'rgb(' + c[0] + ',' + c[1] + ',' + c[2] + ')', fillOpacity: 1
+        }).bindPopup(
+          '<b>' + s.station_name + '</b><br>' +
+          s.pm25_ugm3.toFixed(1) + ' µg/m³' +
+          (s.aqi_value != null ? (' (AQI ' + s.aqi_value + ')') : '')
+        ).addTo(airnowStationLayer);
+      });
+      airnowStationLayer.addTo(map);
+
+      if (statusEl) statusEl.textContent = data.count + ' AirNow stations in view';
+    })
+    .catch(function(e) {
+      console.warn('AirNow grid fetch failed:', e);
+      if (statusEl) statusEl.textContent = 'AirNow layer unavailable';
+    });
+}
+
+document.getElementById('airnowToggle').addEventListener('change', function() {
+  var opacityRow = document.getElementById('airnowOpacityRow');
+  var statusEl = document.getElementById('airnowStatus');
+  if (this.checked) {
+    if (opacityRow) opacityRow.style.display = 'block';
+    if (statusEl) statusEl.style.display = 'block';
+    loadAirnowGrid();
+    airnowTimer = setInterval(loadAirnowGrid, 300000);
+    map.on('moveend', loadAirnowGrid);
+  } else {
+    if (opacityRow) opacityRow.style.display = 'none';
+    removeAirnowLayer();
+    if (airnowTimer) { clearInterval(airnowTimer); airnowTimer = null; }
+    map.off('moveend', loadAirnowGrid);
+    if (statusEl) statusEl.textContent = '';
+  }
+});
+
+document.getElementById('airnowOpacity').addEventListener('input', function() {
+  var pct = parseInt(this.value);
+  document.getElementById('airnowOpacityVal').textContent = pct + '%';
+  if (airnowLayer) airnowLayer.setOpacity(pct / 100);
 });
 
 

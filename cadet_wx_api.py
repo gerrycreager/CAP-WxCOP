@@ -601,6 +601,163 @@ def get_nearest_airnow_pm25(cur, lat, lon, max_nm=None):
 
 
 # ---------------------------------------------------------------------------
+# AirNow PM2.5 IDW grid -- prototype alternative to the HRRR MASSDEN smoke
+# WMS layer for the Cadet Weather COP air-quality overlay. Contours built
+# from actual station observations (inverse-distance weighting) rather than
+# model smoke output. Sibling of wind_forecast_api.py:generate_wind_grid(),
+# which uses griddata/Delaunay for wind instead -- IDW here since PM2.5
+# fields are spatially smoother than wind and don't need cubic's sharper
+# local gradient fit (which can overshoot into negative concentrations).
+# ---------------------------------------------------------------------------
+
+def get_airnow_stations_in_bounds(cur, west, south, east, north, max_age_hr=None):
+    """Latest reading per station within a lat/lon bbox."""
+    if max_age_hr is None:
+        max_age_hr = AIRNOW_MAX_AGE_HR
+    cur.execute("""
+        SELECT DISTINCT ON (station_id)
+               station_id, station_name, lat, lon, pm25_ugm3, aqi_value, observation_time
+        FROM observations.airnow_pm25
+        WHERE observation_time > NOW() - INTERVAL '%s hours'
+          AND lat BETWEEN %%s AND %%s
+          AND lon BETWEEN %%s AND %%s
+          AND pm25_ugm3 IS NOT NULL
+        ORDER BY station_id, observation_time DESC
+    """ % max_age_hr, (south, north, west, east))
+    return cur.fetchall()
+
+
+def idw_pm25_grid(stations, bounds, grid_resolution=60, power=2.0, max_dist_nm=None):
+    """
+    Inverse-distance-weighted PM2.5 grid from AirNow station points.
+
+    Distance is approximated in nautical miles the same way
+    get_nearest_airnow_pm25() does (equirectangular, cos(lat) scaled) --
+    fine at CONUS-region scale, not meant for polar regions.
+
+    power=2 is the usual IDW default. Lower it (~1-1.5) for a flatter,
+    more plateau-like field between stations; raise it to make the field
+    fall off faster and hug station values more tightly.
+
+    max_dist_nm masks out any grid cell farther than that from its nearest
+    station (default AIRNOW_MAX_NM, same radius get_nearest_airnow_pm25()
+    already trusts). Plain IDW paints a value everywhere in the bbox no
+    matter how far the nearest station is, which reads as false confidence
+    over AirNow's real coverage gaps (e.g. much of rural NM/AZ) -- masking
+    those cells to null keeps the map honest about what's actually observed
+    vs. extrapolated, similar to AirNow's own contour map leaving gaps
+    where its station triangulation gets too sparse to trust.
+    """
+    import numpy as np
+
+    if len(stations) < 2:
+        return None
+
+    if max_dist_nm is None:
+        max_dist_nm = AIRNOW_MAX_NM
+
+    lons = np.array([s['lon'] for s in stations])
+    lats = np.array([s['lat'] for s in stations])
+    vals = np.array([float(s['pm25_ugm3']) for s in stations])
+
+    lon_range = np.linspace(bounds['west'], bounds['east'], grid_resolution)
+    lat_range = np.linspace(bounds['south'], bounds['north'], grid_resolution)
+    grid_lon, grid_lat = np.meshgrid(lon_range, lat_range)
+
+    gx = grid_lon.ravel()
+    gy = grid_lat.ravel()
+
+    dlat_nm = (gy[None, :] - lats[:, None]) * 60.0
+    dlon_nm = (gx[None, :] - lons[:, None]) * 60.0 * np.cos(np.radians(lats[:, None]))
+    dist_nm = np.sqrt(dlat_nm**2 + dlon_nm**2)
+
+    # Nearest-station distance per grid point, captured before the
+    # on-station divide-by-zero guard below mutates dist_nm.
+    nearest_dist_nm = dist_nm.min(axis=0)
+    out_of_range = nearest_dist_nm > max_dist_nm
+
+    # A grid point landing on top of a station would otherwise divide by
+    # zero -- route those through an exact-value override instead.
+    on_station = dist_nm < 0.1
+    dist_nm[on_station] = np.inf
+    weights = 1.0 / (dist_nm ** power)
+
+    grid_vals = (weights.T @ vals) / weights.sum(axis=0)
+
+    hit_stations, hit_grid_pts = np.where(on_station)
+    grid_vals[hit_grid_pts] = vals[hit_stations]
+
+    valid_vals = grid_vals[~out_of_range]
+
+    values_list = []
+    for i in range(grid_resolution):
+        row = []
+        for j in range(grid_resolution):
+            flat_idx = i * grid_resolution + j
+            row.append(None if out_of_range[flat_idx] else float(grid_vals[flat_idx]))
+        values_list.append(row)
+
+    return {
+        'lons':       lon_range.tolist(),
+        'lats':       lat_range.tolist(),
+        'values':     values_list,
+        'levels':     [9.0, 35.4, 55.4, 125.4, 225.4],  # EPA PM2.5 AQI breakpoints, see air_quality_color()
+        'min_pm25':   float(valid_vals.min()) if valid_vals.size else None,
+        'max_pm25':   float(valid_vals.max()) if valid_vals.size else None,
+        'power':      power,
+        'max_dist_nm': max_dist_nm,
+        'n_stations': len(stations),
+    }
+
+
+@cadet_wx_bp.route('/api/cadet_wx/airnow_grid')
+def airnow_grid():
+    """
+    Prototype: IDW-interpolated PM2.5 grid from AirNow stations, as an
+    alternative to the HRRR smoke WMS layer for the air-quality overlay.
+    """
+    try:
+        west       = float(request.args.get('west', -125))
+        south      = float(request.args.get('south', 24))
+        east       = float(request.args.get('east', -66))
+        north      = float(request.args.get('north', 50))
+        resolution = min(max(int(request.args.get('resolution', 60)), 10), 100)
+        power      = min(max(float(request.args.get('power', 2.0)), 0.5), 4.0)
+        max_nm     = min(max(float(request.args.get('max_nm', AIRNOW_MAX_NM)), 10.0), 300.0)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Invalid west/south/east/north/resolution/power/max_nm parameters'}), 400
+
+    bounds = {'west': west, 'south': south, 'east': east, 'north': north}
+
+    try:
+        conn = _open_db()
+        with _cursor(conn) as cur:
+            stations = get_airnow_stations_in_bounds(cur, west, south, east, north)
+        conn.close()
+    except Exception as e:
+        log.error(f"GET /api/cadet_wx/airnow_grid: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+    grid = idw_pm25_grid(stations, bounds, grid_resolution=resolution, power=power, max_dist_nm=max_nm)
+
+    return jsonify({
+        'bounds': bounds,
+        'grid': grid,
+        'stations': [
+            {
+                'station_id':   s['station_id'],
+                'station_name': s['station_name'],
+                'lat':          s['lat'],
+                'lon':          s['lon'],
+                'pm25_ugm3':    s['pm25_ugm3'],
+                'aqi_value':    s['aqi_value'],
+            } for s in stations
+        ],
+        'count': len(stations),
+    })
+
+
+# ---------------------------------------------------------------------------
 # Current conditions — METAR vs model F00 recency logic
 # ---------------------------------------------------------------------------
 
