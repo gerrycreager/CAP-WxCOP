@@ -2863,7 +2863,6 @@
         'use strict';
         var API = '/CAP_WxCOP/api/wind-particles';
         var SOURCES = [
-            { key:'gfs',        label:'GFS' },
             { key:'ecmwf-ifs',  label:'ECMWF IFS' },
             { key:'ecmwf-aifs', label:'ECMWF AIFS (AI)' },
         ];
@@ -2882,7 +2881,7 @@
                             '#FFFF00', '#FFA500', '#FF4500', '#FF00FF'];
 
         var particlesLayer = null;
-        var source   = 'gfs';
+        var source   = 'ecmwf-ifs';
         var level    = 'SFC';
         var fhrs     = [0];   // available forecast hours for current source, from index.json
         var fhrIndex = 0;

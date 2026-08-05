@@ -6,14 +6,14 @@ wind_particles_api.py — Serve pre-rendered animated wind-particle grids
 Files are pre-rendered by scripts/render_wind_particles.py (cron, no WSGI).
 This module just reads and returns the JSON from disk — no cfgrib, no numpy.
 
-The `source` param exists from day one even though only `gfs` is wired up
-in Phase 1 -- Phase 2 (ECMWF IFS/AIFS) adds output dirs under the same
-/LDM/models/wind_particles/{source}/ layout without a route redesign.
+GFS was dropped as a source (too CPU-heavy to regenerate every 20 min for
+the load it put on r815) -- ECMWF IFS/AIFS remain, rendered a few times a
+day under the same /LDM/models/wind_particles/{source}/ layout.
 
 Endpoints:
-  GET /api/wind-particles?source=gfs&level=SFC&fhr=0  — wind-js grid for level/fhr
-  GET /api/wind-particles/index?source=gfs             — available cycle/levels/fhrs
-  GET /api/wind-particles/levels?source=gfs             — level definitions
+  GET /api/wind-particles?source=ecmwf-ifs&level=SFC&fhr=0  — wind-js grid for level/fhr
+  GET /api/wind-particles/index?source=ecmwf-ifs             — available cycle/levels/fhrs
+  GET /api/wind-particles/levels?source=ecmwf-ifs             — level definitions
 """
 import os
 import glob
@@ -26,7 +26,7 @@ wind_particles_api = Blueprint('wind_particles_api', __name__)
 
 OUTPUT_ROOT = '/LDM/models/wind_particles'
 
-VALID_SOURCES = {'gfs', 'ecmwf-ifs', 'ecmwf-aifs'}
+VALID_SOURCES = {'ecmwf-ifs', 'ecmwf-aifs'}
 
 VALID_LEVELS = {'SFC', '850', '700', '500', '200', 'DLM'}
 
@@ -64,7 +64,7 @@ def find_particle_file(source, level, fhr):
 
 
 def _validated_source():
-    source = request.args.get('source', 'gfs').lower()
+    source = request.args.get('source', 'ecmwf-ifs').lower()
     if source not in VALID_SOURCES:
         return None, jsonify({'error': f'Unknown source: {source}. '
                                         f'Use: {", ".join(sorted(VALID_SOURCES))}'}), 400
