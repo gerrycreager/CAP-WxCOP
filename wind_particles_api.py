@@ -7,8 +7,13 @@ Files are pre-rendered by scripts/render_wind_particles.py (cron, no WSGI).
 This module just reads and returns the JSON from disk — no cfgrib, no numpy.
 
 GFS was dropped as a source (too CPU-heavy to regenerate every 20 min for
-the load it put on r815) -- ECMWF IFS/AIFS remain, rendered a few times a
-day under the same /LDM/models/wind_particles/{source}/ layout.
+the load it put on r815) -- ECMWF IFS/AIFS/HRRR remain, rendered under the
+same /LDM/models/wind_particles/{source}/ layout. HRRR is rendered by
+scripts/render_hrrr_particles.py (nearest-neighbor regridded from its native
+curvilinear grid -- "best effort", not a precision product; see that
+script's docstring) and only ever has SFC/850/700/500/DLM -- HRRR has no
+native 200 hPa level, so source=hrrr&level=200 404s like any other
+not-yet-rendered combo.
 
 Endpoints:
   GET /api/wind-particles?source=ecmwf-ifs&level=SFC&fhr=0  — wind-js grid for level/fhr
@@ -26,7 +31,7 @@ wind_particles_api = Blueprint('wind_particles_api', __name__)
 
 OUTPUT_ROOT = '/LDM/models/wind_particles'
 
-VALID_SOURCES = {'ecmwf-ifs', 'ecmwf-aifs'}
+VALID_SOURCES = {'ecmwf-ifs', 'ecmwf-aifs', 'hrrr'}
 
 VALID_LEVELS = {'SFC', '850', '700', '500', '200', 'DLM'}
 
