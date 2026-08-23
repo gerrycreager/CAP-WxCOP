@@ -1,9 +1,15 @@
 #!/var/www/cap_winds_app/venv/bin/python3
 """
 render_hrrr_winds.py — Pre-render HRRR wind vectors to static GeoJSON files.
+Feeds the Flight Ops Impacts wind-barb layer (hrrr_winds_api.py, /api/winds/hrrr)
+-- NOT the Enhanced Weather Map's animated wind particles, which is a separate
+source (render_hrrr_particles.py) as of 2026-08-12.
 
-Runs hourly via cron on r815. Reads HRRR GRIB2 from /LDM/models/hrrr/,
-writes compact GeoJSON to /LDM/models/hrrr_winds/{date}/{cycle}z/
+Runs hourly via cron on r815. Reads HRRR GRIB2 from
+/var/www/cap_winds_app/model_data/ (fetch_models.sh's AWS S3 pull -- NOT
+/LDM/models/hrrr, which nothing actually writes to; this path was wrong until
+2026-08-12, silently failing every run with "No complete HRRR cycle found").
+Writes compact GeoJSON to /LDM/models/hrrr_winds/{date}/{cycle}z/
 
 Output files:
   winds_{LEVEL}_f{FHR}.json   per level/fhr
@@ -11,7 +17,7 @@ Output files:
   latest -> symlink to newest cycle dir
 
 Levels: SFC 925 850 700 600 500
-FHR:    000-018
+FHR:    000-012 (fetch_models.sh's S3 pull only goes to F12)
 
 Usage:
   render_hrrr_winds.py              # auto-detect and render latest cycle
@@ -19,7 +25,7 @@ Usage:
   render_hrrr_winds.py --cycle 15z  # render a specific cycle
 
 Parallelization: each forecast hour is rendered in its own thread.
-19 FHRs run concurrently (I/O-bound, cfgrib reads dominate).
+13 FHRs run concurrently (I/O-bound, cfgrib reads dominate).
 Expected wall time: ~2-3 min vs ~10 min sequential.
 """
 import os
@@ -39,7 +45,7 @@ from pathlib import Path
 warnings.filterwarnings('ignore')
 
 # ── Config ─────────────────────────────────────────────────────────────────
-HRRR_BASE   = '/LDM/models/hrrr'
+HRRR_BASE   = '/var/www/cap_winds_app/model_data'   # fetch_models.sh (AWS S3), not LDM
 OUTPUT_BASE = '/LDM/models/hrrr_winds'
 GRID_STEP   = 14        # subsample step — ~42km, ~700 pts CONUS
 MAX_CYCLES  = 3         # number of cycle dirs to keep on disk
@@ -75,12 +81,17 @@ log = logging.getLogger(__name__)
 
 
 # ── GRIB2 extraction ───────────────────────────────────────────────────────
+# heightAboveGround/isobaricInhPa coords aren't reliably 0-d scalars -- some
+# HRRR surface datasets bundle multiple heights (e.g. 10m + 80m) in one
+# dataset, same issue render_wind_particles.py hit for GFS. np.atleast_1d
+# handles both the scalar-coord and array-coord cases uniformly.
 def get_sfc_winds(datasets, np):
     """Extract 10m U/V from open datasets list."""
     for ds in datasets:
         if 'heightAboveGround' not in ds.coords:
             continue
-        if abs(float(ds.coords['heightAboveGround'].values) - 10.0) > 1:
+        heights = np.atleast_1d(ds.coords['heightAboveGround'].values)
+        if not np.any(np.abs(heights - 10.0) <= 1):
             continue
         if 'u10' in ds.data_vars and 'v10' in ds.data_vars:
             lons = np.where(ds.longitude.values > 180,
@@ -97,14 +108,16 @@ def get_pressure_winds(datasets, hpa, np):
             continue
         if 'u' not in ds.data_vars or 'v' not in ds.data_vars:
             continue
-        levels = ds.isobaricInhPa.values
+        levels = np.atleast_1d(ds.isobaricInhPa.values)
+        is_multi = np.ndim(ds.isobaricInhPa.values) > 0
         for i, lv in enumerate(levels):
             if abs(float(lv) - float(hpa)) < 1:
                 lons = np.where(ds.longitude.values > 180,
                                 ds.longitude.values - 360,
                                 ds.longitude.values)
-                return ds['u'].values[i], ds['v'].values[i], \
-                       ds.latitude.values, lons
+                u = ds['u'].values[i] if is_multi else ds['u'].values
+                v = ds['v'].values[i] if is_multi else ds['v'].values
+                return u, v, ds.latitude.values, lons
     raise ValueError(f'No {hpa} hPa wind dataset found')
 
 
@@ -157,7 +170,7 @@ def build_geojson(u, v, lats, lons):
 # ── File discovery ─────────────────────────────────────────────────────────
 def find_hrrr_file(date, cycle, fhr):
     """Return path to HRRR wrfsfc file or None."""
-    fhr_str = f'{int(fhr):03d}'
+    fhr_str = f'{int(fhr):02d}'   # S3 HRRR files use 2-digit FHR (wrfsfcf00, not wrfsfcf000)
     cyc_str = cycle.replace('z', '')
     pattern = os.path.join(HRRR_BASE, f'hrrr.{date}', f'{cyc_str}z',
                            f'hrrr.t{cyc_str}z.wrfsfcf{fhr_str}.grib2')
@@ -166,7 +179,9 @@ def find_hrrr_file(date, cycle, fhr):
 
 
 def find_latest_cycle():
-    """Find the most recent complete HRRR cycle (F000+F018 present)."""
+    """Find the most recent complete HRRR cycle (F000+F012 present -- F012 is
+    as far as fetch_models.sh's S3 pull goes; F018 never exists from this
+    source, so requiring it (the original check) meant this never matched)."""
     today     = datetime.now(timezone.utc).strftime('%Y%m%d')
     yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime('%Y%m%d')
     for date in [today, yesterday]:
@@ -179,8 +194,8 @@ def find_latest_cycle():
                 continue
             cyc = cycle_dir[:-1]  # strip trailing z
             f000 = find_hrrr_file(date, f'{cyc}z', 0)
-            f018 = find_hrrr_file(date, f'{cyc}z', 18)
-            if f000 and f018:
+            f012 = find_hrrr_file(date, f'{cyc}z', 12)
+            if f000 and f012:
                 return date, f'{cyc}z'
     return None, None
 
@@ -201,7 +216,10 @@ def render_fhr(fhr, date, cycle, out_dir, force):
         return fhr, None, 0, 1
 
     try:
-        datasets = cfgrib.open_datasets(grib_file)
+        # indexpath='' -- model_data/ is www-data-owned (fetch_models.sh),
+        # ldm can't write a .idx sidecar there; skip the persistent index
+        # rather than let cfgrib fail-and-retry in-memory on every open.
+        datasets = cfgrib.open_datasets(grib_file, backend_kwargs={'indexpath': ''})
     except Exception as e:
         log.error(f'  F{fhr:03d}: open_datasets failed: {e}')
         return fhr, None, 0, 1
@@ -270,7 +288,7 @@ def render_cycle(date, cycle, force=False):
     total_errors   = 0
     index_entries  = {}   # fhr → entry (dict for thread-safe insertion by key)
 
-    fhrs = list(range(0, 19))
+    fhrs = list(range(0, 13))   # fetch_models.sh only pulls F00-F12 from S3
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = {
