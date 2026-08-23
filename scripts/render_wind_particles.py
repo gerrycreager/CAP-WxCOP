@@ -57,12 +57,12 @@ MAX_CYCLES  = 3          # number of cycle dirs to keep on disk
 LOG_FILE    = '/home/ldm/var/logs/wind_particles_render.log'
 LOCK_FILE   = '/home/ldm/var/run/render_wind_particles.lock'
 
-# Forecast-depth cap, shared by all three sources -- 72h is the primary
-# target (aviation planning / TC steering flow don't need further out than
-# that from this pipeline); dial down to 48 here if render time/system load
-# proves too much in practice. Not adaptive -- a manual dial, not
-# auto-throttling.
-MAX_FHR = 72
+# Forecast-depth cap, shared by all three sources (GFS's code path is dormant
+# since b5b7ef0 dropped it from cron -- this now only gates IFS/AIFS). 120h
+# to give visibility into tropical Atlantic development over ~5 days; dial
+# down if render time/system load proves too much in practice. Not adaptive
+# -- a manual dial, not auto-throttling.
+MAX_FHR = 120
 
 # Atlantic basin + full CONUS -- Cabo Verde genesis region through Caribbean/
 # Gulf/US coasts (both). Widened westward from -100 to -130 on 2026-07-27 to
@@ -456,9 +456,12 @@ ECMWF_MODEL_LABELS = {
     'ecmwf-aifs': 'ECMWF AIFS (AI)',
 }
 ECMWF_CACHE_BASE = '/LDM/models/ecmwf'     # raw downloaded grib2, per model/cycle/step
-ECMWF_STEPS      = [0, 12, 24, 36, 48, 60, 72, 84, 96, 108, 120]
+# 6h steps to 120h: IFS actually publishes 3h out to 144h (see comment above),
+# but AIFS-single only ever publishes 6h steps (out to 360h) -- there is no
+# 3h AIFS product to request. 6h is the finest cadence both models share.
+ECMWF_STEPS      = [0, 6, 12, 18, 24, 30, 36, 42, 48, 54, 60, 66, 72, 78, 84, 90, 96, 102, 108, 114, 120]
 ECMWF_PL_LEVELS  = [850, 700, 500, 200]
-ECMWF_MAX_CYCLES = 2   # fewer than GFS's 3 -- each cycle here always carries up to 11 steps
+ECMWF_MAX_CYCLES = 2   # fewer than GFS's 3 -- each cycle here always carries up to 21 steps
 
 
 def ecmwf_client(model_key):
