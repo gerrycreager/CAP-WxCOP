@@ -105,17 +105,17 @@ download_hrrr() {
         
         # Skip if already exists and is non-zero size
         if [ -s "$DEST" ]; then
-            ((skipped++))
+            skipped=$((skipped+1))
             continue
         fi
         
         # Download with timeout and retries
         if timeout 300 curl -sS --fail --retry 3 --max-time 180 -o "$DEST.part" "$URL" 2>/dev/null; then
             mv "$DEST.part" "$DEST"
-            ((downloaded++))
+            downloaded=$((downloaded+1))
             log "HRRR: Downloaded f${FH} ($(du -h "$DEST" | cut -f1))"
         else
-            ((failed++))
+            failed=$((failed+1))
             log "HRRR: FAILED f${FH} - ${URL}"
             rm -f "$DEST.part"
         fi
@@ -160,17 +160,17 @@ download_gfs() {
         
         # Skip if already exists and is non-zero size
         if [ -s "$DEST" ]; then
-            ((skipped++))
+            skipped=$((skipped+1))
             continue
         fi
         
         # Download with timeout and retries
         if timeout 300 curl -sS --fail --retry 3 --max-time 180 -o "$DEST.part" "$URL" 2>/dev/null; then
             mv "$DEST.part" "$DEST"
-            ((downloaded++))
+            downloaded=$((downloaded+1))
             log "GFS: Downloaded f${FH} ($(du -h "$DEST" | cut -f1))"
         else
-            ((failed++))
+            failed=$((failed+1))
             log "GFS: FAILED f${FH} - ${URL}"
             rm -f "$DEST.part"
             
@@ -180,8 +180,8 @@ download_gfs() {
             
             if timeout 300 curl -sS --fail --retry 2 --max-time 180 -o "$DEST.part" "$NOMADS_URL" 2>/dev/null; then
                 mv "$DEST.part" "$DEST"
-                ((downloaded++))
-                ((failed--))
+                downloaded=$((downloaded+1))
+                failed=$((failed-1))
                 log "GFS: Downloaded f${FH} from NOMADS fallback ($(du -h "$DEST" | cut -f1))"
             else
                 log "GFS: NOMADS fallback also failed for f${FH}"
