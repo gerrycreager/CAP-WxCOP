@@ -6,7 +6,13 @@
 |-------|---------------|-----------------|------|
 | r815  | 192.168.0.200 | 209.248.90.253  | LDM relay + Apache web serving |
 | data1 | 192.168.0.61  | none            | LDM full ingest + NFS export |
-| data2 | 192.168.0.60  | 209.248.90.252  | PostgreSQL 18/PostGIS 3.6 + ingest + map generation |
+| data2 | 192.168.0.60  | none            | PostgreSQL 18/PostGIS 3.6 + ingest + map generation |
+
+> **2026-09-01 correction:** data2 has no external interface — it was carrying a stale `209.248.90.252`
+> entry here. Verified via `ip -4 addr show scope global` on data2: only `192.168.0.60` is present.
+> r815 is the only host with a routed external IP. All three hosts run `ufw` (default deny incoming);
+> data2 additionally has no public-facing NIC at all, so its inbound exposure is LAN-only regardless
+> of firewall rules. See ufw rule sets in the LDM/systemd infra notes for what's opened where.
 
 ## Data Flow
 ```
