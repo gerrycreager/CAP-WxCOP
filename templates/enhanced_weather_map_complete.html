@@ -726,16 +726,7 @@
                 </label>
             </div>
             <div id="windParticlesStatus" style="font-size:10px;color:#888;margin-top:3px;"></div>
-            <div style="margin-top:6px;display:flex;align-items:center;gap:2px;">
-                <button class="mpb wpb-light" id="wpBtnFirst" title="First forecast hour" style="font-size:14px;">&#9198;</button>
-                <button class="mpb wpb-light" id="wpBtnPrev"  title="Step back"           style="font-size:14px;">&#9664;</button>
-                <button class="mpb wpb-light" id="wpBtnPlay"  title="Play/Pause"          style="font-size:14px;">&#9654;</button>
-                <button class="mpb wpb-light" id="wpBtnNext"  title="Step forward"        style="font-size:14px;">&#9654;&#x7C;</button>
-                <button class="mpb wpb-light" id="wpBtnLast"  title="Last forecast hour"  style="font-size:14px;">&#9197;</button>
-            </div>
-            <input type="range" id="windParticlesFhrSlider" min="0" max="0" value="0" step="1"
-                   style="width:100%;margin-top:2px;accent-color:#4a9c6f;cursor:pointer;">
-            <div id="windParticlesFrameLabel" style="font-size:10px;color:#ccc;text-align:center;margin-top:1px;"></div>
+            <div style="font-size:10px;color:#888;margin-top:4px;line-height:1.3;">Forecast-hour playback uses the same play/step/scrub controls as the radar timeline bar below, once enabled.</div>
         </div>
     </div>
 
@@ -2780,11 +2771,13 @@
         }
 
         function updateFrameUi() {
-            var slider = document.getElementById('windParticlesFhrSlider');
-            if (slider) { slider.max = Math.max(0, fhrs.length - 1); slider.value = fhrIndex; }
-            var label = document.getElementById('windParticlesFrameLabel');
-            if (label) label.textContent = fhrs.length ?
-                ('F+' + String(fhrs[fhrIndex]).padStart(3, '0') + ' of ' + fhrs.length + ' frames') : '';
+            // Frame count/position is shown in the shared #mrmsFrameDisplay
+            // (the radar timeline bar) while wind particles are the active
+            // driver of that bar -- see hijackWindTimeline().
+            if (!window.windActive) return;
+            var fd = document.getElementById('mrmsFrameDisplay');
+            if (fd) fd.textContent = fhrs.length ?
+                ('F+' + String(fhrs[fhrIndex]).padStart(3, '0') + ' / ' + fhrs.length) : '— / —';
         }
 
         // Recreate the layer (new source/level/opacity -> different maxVelocity/
@@ -2825,8 +2818,13 @@
                     _lastConfigKey = configKey;
                 }
                 var hdr = (data[0] || {}).header || {};
-                setStatus(hdr.refTime ? 'Valid ' + computeValidTime(hdr.refTime, hdr.forecastTime) +
-                    ' (F+' + String(hdr.forecastTime).padStart(3, '0') + ')' : '');
+                var validText = hdr.refTime ? 'Valid ' + computeValidTime(hdr.refTime, hdr.forecastTime) +
+                    ' (F+' + String(hdr.forecastTime).padStart(3, '0') + ')' : '';
+                setStatus('');
+                if (window.windActive) {
+                    var td = document.getElementById('mrmsTimeDisplay');
+                    if (td) td.textContent = validText;
+                }
                 updateFrameUi();
             });
         }
@@ -2840,18 +2838,116 @@
 
         function wpPause() {
             wpPlaying = false;
-            var btn = document.getElementById('wpBtnPlay');
-            if (btn) btn.innerHTML = '&#9654;';
+            var btn = document.getElementById('mBtnPlay');
+            if (btn && window.windActive) btn.innerHTML = '&#9654;';
             if (wpTimer) { clearInterval(wpTimer); wpTimer = null; }
         }
 
         function wpPlay() {
             if (wpPlaying || fhrs.length < 2) return;
             wpPlaying = true;
-            var btn = document.getElementById('wpBtnPlay');
-            if (btn) btn.innerHTML = '&#9646;&#9646;';
-            wpTimer = setInterval(function() { goFrame((fhrIndex + 1) % fhrs.length); }, 500);
+            var btn = document.getElementById('mBtnPlay');
+            if (btn && window.windActive) btn.innerHTML = '&#9646;&#9646;';
+            // Shared with the radar/NIDS/satellite #mrmsPlaySpeed control.
+            var spd = parseInt((document.getElementById('mrmsPlaySpeed') || {}).value, 10) || 500;
+            wpTimer = setInterval(function() { goFrame((fhrIndex + 1) % fhrs.length); }, spd);
         }
+
+        // ── Hijack the shared radar timeline bar for wind-particle forecast-hour
+        // playback ─────────────────────────────────────────────────────────────
+        // Same pattern as NIDS's hijackTimeline()/restoreTimeline() and
+        // satellite's hijackSatTimeline()/restoreSatTimeline() -- only one
+        // layer drives the shared #mrmsPlayerBar's buttons/scrubber at a time.
+        // Cross-module coordination goes through window.* (NIDS/MRMS live
+        // outside any IIFE so their state is already global; satellite and
+        // this module are each their own IIFE and explicitly expose what the
+        // others need) and the body class 'wind-active' (mirroring
+        // 'nids-active'/'sat-active') so other layers can detect this one
+        // without reaching into this closure.
+        window.windActive = false;
+
+        function hijackWindTimeline() {
+            if (typeof window.restoreTimeline === 'function' && window.nidsActive) {
+                window.restoreTimeline();
+            }
+            if (typeof window.restoreSatTimeline === 'function' &&
+                document.body.classList.contains('sat-active')) {
+                window.restoreSatTimeline();
+            }
+            if (typeof window.mlPause === 'function') window.mlPause();
+
+            document.body.classList.add('wind-active');
+            window.windActive = true;
+
+            var playBtn = document.getElementById('mBtnPlay');
+            if (playBtn) {
+                if (playBtn._mrmsHandler) playBtn.removeEventListener('click', playBtn._mrmsHandler);
+                if (playBtn._nidsHandler) playBtn.removeEventListener('click', playBtn._nidsHandler);
+                if (playBtn._satHandler)  playBtn.removeEventListener('click', playBtn._satHandler);
+                playBtn._windHandler = function() { wpPlaying ? wpPause() : wpPlay(); };
+                playBtn.addEventListener('click', playBtn._windHandler);
+            }
+            var btnFirst = document.getElementById('mBtnFirst');
+            var btnPrev  = document.getElementById('mBtnPrev');
+            var btnNext  = document.getElementById('mBtnNext');
+            var btnLast  = document.getElementById('mBtnLast');
+            if (btnFirst) { btnFirst._wind = function() { wpPause(); goFrame(0); }; btnFirst.addEventListener('click', btnFirst._wind); }
+            if (btnPrev)  { btnPrev._wind  = function() { wpPause(); goFrame(fhrIndex - 1); }; btnPrev.addEventListener('click', btnPrev._wind); }
+            if (btnNext)  { btnNext._wind  = function() { wpPause(); goFrame(fhrIndex + 1); }; btnNext.addEventListener('click', btnNext._wind); }
+            if (btnLast)  { btnLast._wind  = function() { wpPause(); goFrame(fhrs.length - 1); }; btnLast.addEventListener('click', btnLast._wind); }
+
+            var tl = document.getElementById('mrmsTimeline');
+            if (tl) {
+                tl._windHandler = function(e) {
+                    if (!fhrs.length) return;
+                    var rect = this.getBoundingClientRect();
+                    var pct  = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+                    wpPause();
+                    goFrame(Math.round(pct * (fhrs.length - 1)));
+                };
+                tl.addEventListener('click', tl._windHandler);
+            }
+
+            var bar = document.getElementById('mrmsPlayerBar');
+            if (bar) bar.classList.add('active');
+
+            updateFrameUi();
+        }
+
+        function restoreWindTimeline() {
+            if (!window.windActive) return;
+            wpPause();
+            window.windActive = false;
+            document.body.classList.remove('wind-active');
+
+            var playBtn = document.getElementById('mBtnPlay');
+            if (playBtn) {
+                if (playBtn._windHandler) { playBtn.removeEventListener('click', playBtn._windHandler); playBtn._windHandler = null; }
+                playBtn.innerHTML = '&#9654;';
+                if (playBtn._mrmsHandler) playBtn.addEventListener('click', playBtn._mrmsHandler);
+            }
+            ['mBtnFirst', 'mBtnPrev', 'mBtnNext', 'mBtnLast'].forEach(function(id) {
+                var b = document.getElementById(id);
+                if (!b) return;
+                if (b._wind) { b.removeEventListener('click', b._wind); b._wind = null; }
+                if (b._mrmsHandler) b.addEventListener('click', b._mrmsHandler);
+            });
+            var tl = document.getElementById('mrmsTimeline');
+            if (tl) {
+                if (tl._windHandler) { tl.removeEventListener('click', tl._windHandler); tl._windHandler = null; }
+                if (tl._mrmsHandler) tl.addEventListener('click', tl._mrmsHandler);
+            }
+
+            if (!(typeof window.mlIsActive === 'function' && window.mlIsActive())) {
+                var bar = document.getElementById('mrmsPlayerBar');
+                if (bar) bar.classList.remove('active');
+                var fd = document.getElementById('mrmsFrameDisplay');
+                if (fd) fd.textContent = '— / —';
+                var td = document.getElementById('mrmsTimeDisplay');
+                if (td) td.textContent = 'Enable Radar Composite above';
+            }
+        }
+        window.restoreWindTimeline = restoreWindTimeline;
 
         // Fetch the real available forecast hours for this source from index.json
         // (backend already renders every fhr LDM/ECMWF delivers, capped at MAX_FHR --
@@ -2926,23 +3022,13 @@
                     if (enabled) {
                         buildLegend();
                         refreshIndexAndLoad();
+                        hijackWindTimeline();
                     } else {
                         wpPause(); removeLayer(); setStatus('');
+                        restoreWindTimeline();
                     }
                 });
             }
-            var wpFirst = document.getElementById('wpBtnFirst');
-            if (wpFirst) wpFirst.addEventListener('click', function() { wpPause(); goFrame(0); });
-            var wpPrev = document.getElementById('wpBtnPrev');
-            if (wpPrev) wpPrev.addEventListener('click', function() { wpPause(); goFrame(fhrIndex - 1); });
-            var wpPlayBtn = document.getElementById('wpBtnPlay');
-            if (wpPlayBtn) wpPlayBtn.addEventListener('click', function() { wpPlaying ? wpPause() : wpPlay(); });
-            var wpNext = document.getElementById('wpBtnNext');
-            if (wpNext) wpNext.addEventListener('click', function() { wpPause(); goFrame(fhrIndex + 1); });
-            var wpLast = document.getElementById('wpBtnLast');
-            if (wpLast) wpLast.addEventListener('click', function() { wpPause(); goFrame(fhrs.length - 1); });
-            var wpSlider = document.getElementById('windParticlesFhrSlider');
-            if (wpSlider) wpSlider.addEventListener('input', function() { wpPause(); goFrame(parseInt(this.value, 10)); });
 
             var op = document.getElementById('windParticlesOpacity');
             if (op) {
@@ -3181,10 +3267,13 @@
         }
 
         function hijackTimeline(frames) {
-            /* If satellite animation has the timeline, release it first */
+            /* If satellite or wind-particle animation has the timeline, release it first */
             if (typeof window.restoreSatTimeline === 'function' &&
                 document.body.classList.contains('sat-active')) {
                 window.restoreSatTimeline();
+            }
+            if (typeof window.restoreWindTimeline === 'function' && window.windActive) {
+                window.restoreWindTimeline();
             }
             window._nidsFrames = frames;
             if (!_origGoFrame && typeof window.mlGoFrame === 'function') {
@@ -3866,9 +3955,12 @@
         function hijackSatTimeline() {
             satActive = true;
 
-            /* If NIDS has the timeline, restore it first */
+            /* If NIDS or wind-particle animation has the timeline, restore it first */
             if (typeof window.restoreTimeline === 'function' && window.nidsActive) {
                 window.restoreTimeline();
+            }
+            if (typeof window.restoreWindTimeline === 'function' && window.windActive) {
+                window.restoreWindTimeline();
             }
             /* Pause MRMS */
             if (typeof window.mlPause === 'function') window.mlPause();
