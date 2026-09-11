@@ -37,6 +37,7 @@ for anything that should be supervised and logged consistently.
 import glob
 import json
 import logging
+import multiprocessing
 import os
 import sys
 from dataclasses import dataclass, field
@@ -217,7 +218,20 @@ def check_db_max(check: Check) -> Optional[datetime]:
     return ts
 
 
-def check_file_mtime(check: Check) -> Optional[datetime]:
+def _file_mtime_worker(file_glob: str, q: "multiprocessing.Queue") -> None:
+    matches = glob.glob(file_glob)
+    newest_mtime = None
+    for f in matches:
+        try:
+            mtime = os.path.getmtime(f)
+        except OSError:
+            continue
+        if newest_mtime is None or mtime > newest_mtime:
+            newest_mtime = mtime
+    q.put(newest_mtime)
+
+
+def check_file_mtime(check: Check, timeout: float = 30.0) -> Optional[datetime]:
     """
     Newest mtime among files matching check.file_glob, skipping any that
     vanish between glob() and stat() rather than treating that race as a
@@ -228,18 +242,36 @@ def check_file_mtime(check: Check) -> Optional[datetime]:
     false "STALE" alert (100% of TDWR poller alerts traced back to this,
     none were genuine sustained staleness). Only returns None if every
     matched file vanished or nothing matched at all.
+
+    Runs the glob/stat in a subprocess with a hard wall-clock timeout.
+    file_mtime checks read NFS-mounted paths (TDWR poller reads
+    /LDM/radar, sourced from data1) and a `hard` NFS mount blocks
+    glob()/stat() indefinitely -- not just slowly -- if the remote
+    server stalls. Confirmed in production 2026-08-24: data1's ongoing
+    hardware degradation (see memory) made its NFS server unresponsive,
+    and the in-process glob() call wedged this check -- and with it the
+    whole oneshot run, since main() only calls save_state() once at the
+    end -- so every OTHER check's result (already collected) was lost
+    too, and the systemd timer couldn't re-arm because its oneshot
+    service never exited. Running this in a subprocess means a stuck
+    glob() only blocks the subprocess; the parent gives up after
+    `timeout` seconds, reports this one check as failed, and keeps going.
     """
-    matches = glob.glob(check.file_glob)
-    if not matches:
-        return None
-    newest_mtime = None
-    for f in matches:
-        try:
-            mtime = os.path.getmtime(f)
-        except OSError:
-            continue
-        if newest_mtime is None or mtime > newest_mtime:
-            newest_mtime = mtime
+    q: "multiprocessing.Queue" = multiprocessing.Queue()
+    p = multiprocessing.Process(target=_file_mtime_worker, args=(check.file_glob, q))
+    p.start()
+    p.join(timeout)
+    if p.is_alive():
+        p.terminate()
+        p.join(2)
+        if p.is_alive():
+            p.kill()
+            p.join(2)
+        raise TimeoutError(
+            f"glob/stat of {check.file_glob!r} did not return within {timeout}s "
+            f"(likely an NFS hang on the source host)"
+        )
+    newest_mtime = q.get() if not q.empty() else None
     if newest_mtime is None:
         return None
     return datetime.fromtimestamp(newest_mtime, tz=timezone.utc)
