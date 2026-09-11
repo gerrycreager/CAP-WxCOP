@@ -342,10 +342,29 @@ def delete_station(station_id):
         conn = get_connection()
         cur  = conn.cursor()
 
+        # Must run before sync_station_to_airports('delete'): airport_wx_impacts.airport_id
+        # is NOT NULL but has an ON DELETE SET NULL FK to airports(id) -- deleting the
+        # airports row while impact rows still reference it always fails (confirmed via
+        # KQC3, which had 50 airport_wx_impacts rows and errored on delete).
+        cur.execute("""
+            DELETE FROM observations.airport_wx_impacts
+            WHERE station_id = %s
+        """, (station_id,))
+
         sync_station_to_airports(cur, station_id, 'delete')
 
         cur.execute("""
             DELETE FROM observations.model_wind_forecasts
+            WHERE station_id = %s
+        """, (station_id,))
+
+        cur.execute("""
+            DELETE FROM observations.kq_associations
+            WHERE kq_station = %s OR host_station = %s
+        """, (station_id, station_id))
+
+        cur.execute("""
+            DELETE FROM observations.kq_stations
             WHERE station_id = %s
         """, (station_id,))
 

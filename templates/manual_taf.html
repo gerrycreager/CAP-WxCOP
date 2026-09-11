@@ -227,10 +227,10 @@ RMK NXT FCST BY 172100Z="></textarea>
         <div id="status"></div>
     </div>
 
-    <!-- Available KQ Stations -->
+    <!-- Known KQ / AF Weather Stations (reference only -- entry below accepts any airport already in the system) -->
     <div class="form-section">
-        <div class="section-title">Available KQ Stations ({{ kq_stations|length }})</div>
-        
+        <div class="section-title">Known KQ &amp; AF Weather Airfields ({{ kq_stations|length }})</div>
+
         {% if kq_stations %}
         <div class="stations-list">
             {% for station in kq_stations %}
@@ -243,10 +243,14 @@ RMK NXT FCST BY 172100Z="></textarea>
         </div>
         {% else %}
         <p style="color: #888; font-style: italic;">
-            No KQ stations found in database. 
-            <a href="/CAP_WxCOP/admin/kq-stations" style="color: #3498db;">Add KQ stations first</a>.
+            No KQ or configured AF Weather stations found.
+            <a href="/CAP_WxCOP/admin/kq-stations" style="color: #3498db;">Add a KQ station</a>.
         </p>
         {% endif %}
+        <p style="color: #888; font-size: 11px; margin-top: 8px;">
+            This list is just a quick reference -- the form above accepts a TAF for
+            any station already known to the airports database, not only these.
+        </p>
     </div>
 
     <div class="nav-links">

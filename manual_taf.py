@@ -5,6 +5,7 @@ Allows manual input of TAF text for USAF weather sites not in LDM feed.
 
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for
 from datetime import datetime
+import configparser
 import re
 import sys
 import os
@@ -13,6 +14,23 @@ sys.path.insert(0, '/var/www/cap_winds_app')
 from db_config import get_connection
 
 manual_taf = Blueprint('manual_taf', __name__)
+
+# Same source of truth as scripts/ingest_afwx_email.py: civil ICAO fields AF
+# Weather issues TAFs for directly (e.g. KBAK), in addition to KQ placeholders.
+AFWX_SITES_CONF = '/etc/cap_wxcop_afwx_sites.conf'
+
+
+def load_airfield_stations():
+    cfg = configparser.ConfigParser()
+    cfg.read(AFWX_SITES_CONF)
+    stations = set()
+    if 'airfields' in cfg:
+        for val in cfg['airfields'].values():
+            station_id = val.split(';')[0].strip().upper()
+            if station_id:
+                stations.add(station_id)
+    return stations
+
 
 def parse_taf_header(taf_text):
     """
@@ -67,16 +85,17 @@ def parse_taf_header(taf_text):
 def manual_taf_form():
     """Display the manual TAF entry form."""
     
-    # Get list of KQ stations from database
+    # Get list of KQ stations plus AF Weather-mapped civil airfields (e.g. KBAK)
+    airfield_stations = load_airfield_stations()
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("""
-        SELECT station_id, name, 
+        SELECT station_id, name,
                ST_Y(location) as lat, ST_X(location) as lon
-        FROM observations.airports 
-        WHERE station_id LIKE 'KQ%' 
+        FROM observations.airports
+        WHERE station_id LIKE 'KQ%%' OR station_id = ANY(%s)
         ORDER BY station_id
-    """)
+    """, (list(airfield_stations),))
     kq_stations = cur.fetchall()
     cur.close()
     conn.close()
@@ -95,11 +114,14 @@ def submit_manual_taf():
         
         # Parse the TAF
         station_id, issue_time, valid_from, valid_to = parse_taf_header(taf_text)
-        
-        # Validate station is KQ
-        if not station_id.startswith('KQ'):
-            return jsonify({'error': f'Station {station_id} is not a KQ station'}), 400
-        
+
+        # Any station already known to observations.airports is eligible -- not
+        # restricted to KQ/AF Weather-mapped codes. AF Weather has already shown
+        # it can switch which ICAO it issues under (KQC3 -> KBAK) without notice;
+        # gating this on a maintained list just means a manual entry breaks the
+        # next time that happens. The airports-table lookup below is the real
+        # safety net (rejects typos/unknown codes).
+
         # Check if station exists in database
         conn = get_connection()
         cur = conn.cursor()
@@ -158,18 +180,19 @@ def submit_manual_taf():
 def recent_manual_tafs():
     """Show recently entered manual TAFs."""
     
+    airfield_stations = load_airfield_stations()
     conn = get_connection()
     cur = conn.cursor()
-    
+
     cur.execute("""
-        SELECT t.station_id, a.name, t.issue_time, t.valid_from, t.valid_to, 
+        SELECT t.station_id, a.name, t.issue_time, t.valid_from, t.valid_to,
                LEFT(t.raw_text, 100) as preview
         FROM observations.taf t
         JOIN observations.airports a ON t.station_id = a.station_id
-        WHERE t.station_id LIKE 'KQ%'
+        WHERE t.station_id LIKE 'KQ%%' OR t.station_id = ANY(%s)
         ORDER BY t.issue_time DESC
         LIMIT 20
-    """)
+    """, (list(airfield_stations),))
     
     recent_tafs = cur.fetchall()
     cur.close()

@@ -285,7 +285,22 @@ def get_station_detail(station_id):
                 'notes':        assoc_notes
             }
             metar_station = host_station_id   # always get METAR from host
-            taf_station   = kq_station_id     # always get TAF from KQ
+
+            # Prefer the queried station's OWN current TAF; only borrow the
+            # associated station's TAF if it doesn't have one. This used to be
+            # an unconditional "always use the KQ station's TAF", which made
+            # sense while the KQ placeholder was the only one AF Weather
+            # issued under -- but once a host airfield gets its own TAF (e.g.
+            # AF Weather switching from KQC3 to issuing directly under KBAK),
+            # that hardcoded preference kept serving the now-stale/absent KQ
+            # TAF instead of the host's real one.
+            other_station = kq_station_id if station_id == host_station_id else host_station_id
+            cur.execute("""
+                SELECT 1 FROM observations.taf
+                WHERE station_id = %s AND valid_to >= NOW()
+                LIMIT 1
+            """, (station_id,))
+            taf_station = station_id if cur.fetchone() else other_station
 
         # Get recent METARs for this station (last 6 hours)
         cur.execute("""

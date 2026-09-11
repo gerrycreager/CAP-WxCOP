@@ -166,7 +166,7 @@ def is_trusted_sender(from_hdr):
 
 
 # -- TAF extraction ------------------------------------------------------------
-def extract_taf(body):
+def extract_taf(body, allowed_stations=frozenset()):
     """
     Extract a TAF block from an email body.
 
@@ -175,7 +175,10 @@ def extract_taf(body):
       2. Embedded TAF in conversational email prose
 
     Returns the raw TAF string (normalized whitespace) or None.
-    Only extracts KQ station TAFs (station_id starts with 'KQ').
+    Extracts KQ station TAFs (station_id starts with 'KQ') and any station
+    in allowed_stations -- the [airfields] map from SITES_CONF, for civil
+    ICAO fields AF Weather has started issuing TAFs for directly (e.g. KBAK,
+    once it stopped issuing under the KQC3 placeholder code).
     """
     # Normalize line endings
     body = body.replace('\r\n', '\n').replace('\r', '\n')
@@ -186,8 +189,8 @@ def extract_taf(body):
         return None
 
     station_id = m.group(1).upper()
-    if not station_id.startswith('KQ'):
-        log.debug("TAF found for non-KQ station %s -- skipping", station_id)
+    if not (station_id.startswith('KQ') or station_id in allowed_stations):
+        log.debug("TAF found for untracked station %s -- skipping", station_id)
         return None
 
     # Extract from the TAF start position forward
@@ -513,7 +516,7 @@ def main():
             handled = False
 
             # ── Path 1: TAF extraction (body-driven, any trusted sender) ──
-            raw_taf = extract_taf(body)
+            raw_taf = extract_taf(body, allowed_stations=set(airfield_map.values()))
             if raw_taf:
                 try:
                     station_id, issue_time, valid_from, valid_to = parse_taf_times(raw_taf)

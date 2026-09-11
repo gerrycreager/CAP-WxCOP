@@ -720,9 +720,9 @@
             <div style="margin-top:4px;">
                 <label style="font-size:10px;color:#ccc;display:flex;align-items:center;gap:6px;">
                     Opacity
-                    <input type="range" id="windParticlesOpacity" min="0" max="100" value="85"
+                    <input type="range" id="windParticlesOpacity" min="0" max="100" value="100"
                            style="flex:1;accent-color:#4a9c6f;cursor:pointer;">
-                    <span id="windParticlesOpacityVal" style="font-size:10px;color:#888;min-width:28px;">85%</span>
+                    <span id="windParticlesOpacityVal" style="font-size:10px;color:#888;min-width:28px;">100%</span>
                 </label>
             </div>
             <div id="windParticlesStatus" style="font-size:10px;color:#888;margin-top:3px;"></div>
@@ -2717,7 +2717,9 @@
         var fhrs     = [0];   // available forecast hours for current source, from index.json
         var fhrIndex = 0;
         var enabled  = false;
-        var opacity  = 0.85;
+        var opacity  = 1.0;   // fully opaque -- COLOR_STOPS are already fully-saturated
+                              // hex values, but blending them at <100% against the
+                              // basemap underneath washed out their visible vividness
         var _cache   = {};
         var wpPlaying = false, wpTimer = null;
 
