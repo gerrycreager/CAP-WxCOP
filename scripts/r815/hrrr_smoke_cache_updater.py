@@ -22,12 +22,31 @@ is needed -- same "copy pixel values verbatim" approach as
 mrms_cache_updater.py; the mapfile's CLASS/EXPRESSION thresholds are
 defined directly in the native kg/m3 units, no rescaling.
 
-Runs hourly via cron, matching HRRR's own cycle cadence. F00's smoke
-field isn't a cold-started guess -- it's informed by RAVE, which fuses
-GOES ABI + VIIRS satellite fire-radiative-power detections into hourly
-emissions feeding each new HRRR cycle (see cadet_wx_api.py's
-air_quality_color() docstring for the parallel reasoning re: AirNow).
-Fetches F00-F03 of the latest available cycle for light animation.
+Runs every 15 min via systemd timer (hrrr-smoke-cache.timer), well inside
+HRRR's own hourly cycle cadence -- most ticks are near-instant no-ops
+(see cycle_manifest below), only doing real fetch/convert work once an
+hour when a new cycle actually publishes. F00's smoke field isn't a
+cold-started guess -- it's informed by RAVE, which fuses GOES ABI + VIIRS
+satellite fire-radiative-power detections into hourly emissions feeding
+each new HRRR cycle (see cadet_wx_api.py's air_quality_color() docstring
+for the parallel reasoning re: AirNow).
+
+Fetches F00-F18 of the latest available cycle -- the full HRRR short-range
+forecast length, matching the HRRR wind-streamlines layer's own F18 cap
+elsewhere in this app -- so the smoke/PM2.5 overlay can advance across the
+whole CAPR 70-1 Forecast Hour timeline, not just a few near-term frames.
+
+Cycle-aware refresh: a frame's filename is keyed by *valid time*
+(cycle_start + fhr), so two different cycles can predict the same valid
+hour under the same filename. cycle_manifest.json records which cycle
+last produced each valid-hour file; a tick only skips a valid hour when
+the *current* latest cycle already produced it, so a fresher cycle's
+forecast for a given hour always supersedes an older cycle's forecast for
+that same hour (rather than the first-seen cycle winning forever, which
+is backwards -- newer NWP runs are generally more accurate, especially
+farther out). latest_cycle.json exposes the current cycle's start time so
+the frames API can compute exact F-hour labels instead of guessing from
+list position.
 
 Each conversion runs in its own subprocess -- same crash-isolation
 rationale as tpw_cache_updater.py/mrms_cache_updater.py: a malformed
@@ -47,16 +66,18 @@ import urllib.error
 from pathlib import Path
 
 # ── Config ───────────────────────────────────────────────────────────────────
-CACHE_DIR       = Path('/var/www/mapserver/cache/hrrr_smoke')
-PRODUCT         = 'hrrr_smoke'
-LOG_FILE        = '/var/log/hrrr_smoke_cache_updater.log'
-RETAIN_HOURS    = 6              # a few recent frames for light animation, not a full archive
-FORECAST_HOURS  = [0, 1, 2, 3]   # near-term "what's happening now/soon", not a multi-day archive
-CHILD_TIMEOUT   = 90
-CYCLE_LOOKBACK  = 6              # how many hours back to search for the latest published cycle
+CACHE_DIR        = Path('/var/www/mapserver/cache/hrrr_smoke')
+PRODUCT          = 'hrrr_smoke'
+LOG_FILE         = '/var/log/hrrr_smoke_cache_updater.log'
+RETAIN_HOURS     = 6                  # prune frames whose VALID time is more than this far in the PAST
+FORECAST_HOURS   = list(range(0, 19)) # F00-F18 -- full HRRR short-range length, matches Wind Flow's F18 cap
+CHILD_TIMEOUT    = 90
+CYCLE_LOOKBACK   = 6                   # how many hours back to search for the latest published cycle
 
 S3_BASE = 'https://noaa-hrrr-bdp-pds.s3.amazonaws.com'
-MAPCACHE_DIMS_DB = Path('/var/cache/mapcache/dims.sqlite')
+MAPCACHE_DIMS_DB   = Path('/var/cache/mapcache/dims.sqlite')
+MANIFEST_PATH      = CACHE_DIR / 'cycle_manifest.json'   # {ts_str: "YYYYMMDDHH" of cycle that produced it}
+LATEST_CYCLE_PATH  = CACHE_DIR / 'latest_cycle.json'     # {"cycle_start": "YYYYMMDDHHMMSS"} for the frames API
 
 # ── Logging ────────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -202,6 +223,21 @@ def convert_one(grib2_path: Path, tif_path: Path) -> tuple[bool, str]:
     return False, msg
 
 
+# ── Cycle manifest (which cycle produced each valid-hour file) ───────────────
+def load_manifest() -> dict:
+    try:
+        return json.loads(MANIFEST_PATH.read_text())
+    except Exception:
+        return {}
+
+
+def save_manifest(manifest: dict):
+    try:
+        MANIFEST_PATH.write_text(json.dumps(manifest))
+    except Exception as e:
+        log.warning(f'manifest save failed: {e}')
+
+
 # ── Post-processing (prune / current symlink / mapcache sync) ───────────────
 def sync_mapcache_dims(tif_files: list[Path]):
     if not MAPCACHE_DIMS_DB.exists():
@@ -240,17 +276,28 @@ def main():
         sys.exit(1)
     log.info(f'Latest cycle: {date_str} {cyc_str}z')
 
+    cycle_key   = f'{date_str}{cyc_str}'
+    cycle_start = datetime.datetime.strptime(cycle_key, '%Y%m%d%H')
+    try:
+        LATEST_CYCLE_PATH.write_text(json.dumps({
+            'cycle_start': cycle_start.strftime('%Y%m%d%H%M%S'),
+            'cycle_key':   cycle_key,
+        }))
+    except Exception as e:
+        log.warning(f'latest_cycle write failed: {e}')
+
+    manifest = load_manifest()
     added = 0
     for fhr in FORECAST_HOURS:
+        ts_str   = (cycle_start + datetime.timedelta(hours=fhr)).strftime('%Y%m%d-%H%M%S')
+        tif_path = CACHE_DIR / f'{PRODUCT}_{ts_str}.tif'
+
+        if manifest.get(ts_str) == cycle_key and tif_path.exists():
+            continue  # this exact cycle already produced this valid hour
+
         grib2_bytes = fetch_massden(date_str, cyc_str, fhr)
         if grib2_bytes is None:
             continue
-
-        ts_str = (datetime.datetime.strptime(f'{date_str}{cyc_str}', '%Y%m%d%H')
-                  + datetime.timedelta(hours=fhr)).strftime('%Y%m%d-%H%M%S')
-        tif_path = CACHE_DIR / f'{PRODUCT}_{ts_str}.tif'
-        if tif_path.exists():
-            continue  # already have this frame
 
         grib2_path = CACHE_DIR / f'.tmp_{PRODUCT}_{ts_str}.grib2'
         grib2_path.write_bytes(grib2_bytes)
@@ -258,16 +305,22 @@ def main():
             ok, info = convert_one(grib2_path, tif_path)
             if ok:
                 added += 1
-                log.info(f'F{fhr:02d} ({ts_str}): converted OK')
+                manifest[ts_str] = cycle_key
+                log.info(f'F{fhr:02d} ({ts_str}): converted OK (cycle {cycle_key})')
             else:
                 log.error(f'F{fhr:02d} ({ts_str}): {info}')
         finally:
             grib2_path.unlink(missing_ok=True)
 
-    log.info(f'Added {added} new frames')
+    save_manifest(manifest)
+    log.info(f'Added/refreshed {added} frames')
 
     cutoff = datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - datetime.timedelta(hours=RETAIN_HOURS)
-    cached = sorted(CACHE_DIR.glob(f'{PRODUCT}_*.tif'))
+    ts_only_re = re.compile(rf'{re.escape(PRODUCT)}_\d{{8}}-\d{{6}}\.tif$')
+    # Exclude the current.tif symlink itself -- glob would otherwise pick it up,
+    # and alphabetically "current" sorts after every numeric timestamp, so it
+    # would always look like "latest" and end up pointing at itself.
+    cached = sorted(f for f in CACHE_DIR.glob(f'{PRODUCT}_*.tif') if ts_only_re.match(f.name))
     if cached:
         latest = cached[-1]
         current_link = CACHE_DIR / f'{PRODUCT}_current.tif'
@@ -281,18 +334,22 @@ def main():
 
         ts_re = re.compile(rf'{re.escape(PRODUCT)}_(\d{{8}}-\d{{6}})\.tif$')
         pruned = 0
+        manifest = load_manifest()
         for f in CACHE_DIR.glob(f'{PRODUCT}_*.tif'):
             m = ts_re.search(f.name)
             if not m:
                 continue
-            ts = datetime.datetime.strptime(m.group(1), '%Y%m%d-%H%M%S')
+            ts_str = m.group(1)
+            ts = datetime.datetime.strptime(ts_str, '%Y%m%d-%H%M%S')
             if ts < cutoff:
                 try:
                     f.unlink()
                     pruned += 1
+                    manifest.pop(ts_str, None)
                 except Exception as e:
                     log.warning(f'prune failed {f.name}: {e}')
         if pruned:
+            save_manifest(manifest)
             log.info(f'Pruned {pruned} expired frames')
 
         sync_mapcache_dims(list(CACHE_DIR.glob(f'{PRODUCT}_*.tif')))

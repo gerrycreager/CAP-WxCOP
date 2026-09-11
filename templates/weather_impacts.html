@@ -143,7 +143,9 @@
         .param-value { font-size: 13px; font-weight: 600; }
         .pv-GREEN  { color: #2e7d32; }
         .pv-YELLOW { color: #f57f17; }
+        .pv-ORANGE { color: #e65100; }
         .pv-RED    { color: #c62828; }
+        .pv-DARKRED{ color: #7f0000; }
         .pv-UNKNOWN{ color: #9e9e9e; }
 
         /* Forecast table */
@@ -282,6 +284,58 @@
                 <div id="windStatus" style="font-size:10px;color:#888;text-align:center;min-height:14px;"></div>
             </div>
         </div>
+
+        <!-- Air Quality: AirNow PM2.5 -->
+        <div class="sb-section">
+            <div class="sb-label">Air Quality — AirNow</div>
+            <label class="toggle-row"><input type="checkbox" id="airnowToggle"> PM2.5 Contour (IDW)</label>
+            <div id="airnowOpacityRow" style="display:none;margin-top:4px;">
+                <label style="font-size:11px;color:#666;display:flex;align-items:center;gap:6px;">
+                    Opacity
+                    <input type="range" id="airnowOpacity" min="0" max="100" value="65" style="flex:1;accent-color:#2c5f41;">
+                    <span id="airnowOpacityVal" style="min-width:28px;">65%</span>
+                </label>
+            </div>
+            <div id="airnowStatus" style="font-size:10px;color:#888;min-height:12px;margin-top:2px;"></div>
+        </div>
+
+        <!-- HRRR smoke plume -->
+        <div class="sb-section">
+            <div class="sb-label">Smoke — HRRR Forecast</div>
+            <label class="toggle-row"><input type="checkbox" id="smokeToggle"> Near-Surface Smoke</label>
+            <div id="smokeOpacityRow" style="display:none;margin-top:4px;">
+                <label style="font-size:11px;color:#666;display:flex;align-items:center;gap:6px;">
+                    Opacity
+                    <input type="range" id="smokeOpacity" min="0" max="100" value="80" style="flex:1;accent-color:#2c5f41;">
+                    <span id="smokeOpacityVal" style="min-width:28px;">80%</span>
+                </label>
+            </div>
+            <div id="smokeStatus" style="font-size:10px;color:#888;min-height:12px;margin-top:2px;"></div>
+        </div>
+
+        <!-- PM2.5 / Smoke legend -->
+        <div class="sb-section">
+            <div class="sb-label">PM2.5 / Smoke Scale (EPA AQI)</div>
+            <div class="leg-item"><div class="leg-dot" style="background:rgb(0,228,0);"></div>0–9.0 µg/m³ Good</div>
+            <div class="leg-item"><div class="leg-dot" style="background:rgb(255,255,0);border-color:#888;"></div>9.1–35.4 Moderate</div>
+            <div class="leg-item"><div class="leg-dot" style="background:rgb(255,126,0);"></div>35.5–55.4 Unhealthy (Sens.)</div>
+            <div class="leg-item"><div class="leg-dot" style="background:rgb(255,0,0);"></div>55.5–125.4 Unhealthy</div>
+            <div class="leg-item"><div class="leg-dot" style="background:rgb(143,63,151);"></div>125.5–225.4 Very Unhealthy</div>
+            <div class="leg-item"><div class="leg-dot" style="background:rgb(126,0,35);"></div>&gt;225.4 Hazardous</div>
+        </div>
+
+        <!-- FITS legend -->
+        <div class="sb-section">
+            <div class="sb-label">FITS (Thermal Stress)</div>
+            <div class="leg-item"><div class="leg-dot" style="background:#2e7d32;"></div>&lt;85°F No flag</div>
+            <div class="leg-item"><div class="leg-dot" style="background:#f57f17;"></div>85–89.9° Caution</div>
+            <div class="leg-item"><div class="leg-dot" style="background:#e65100;"></div>90–94.9° Increased Caution</div>
+            <div class="leg-item"><div class="leg-dot" style="background:#c62828;"></div>95–99.9° Danger</div>
+            <div class="leg-item"><div class="leg-dot" style="background:#7f0000;"></div>&ge;100° Extreme Danger</div>
+            <div style="font-size:10px;color:#888;margin-top:4px;">
+                FITS = 0.83×Twb + 0.35×Tdb + 5.08 (°C, USAF/DAFI 48-151); Twb derived from temp/dewpoint
+            </div>
+        </div>
     </div>
 
     <!-- Map -->
@@ -344,6 +398,7 @@ const PARAM_LABELS = {
     temp_hot:   'Temp (Hot)',
     wind_chill: 'Wind Chill',
     heat_index: 'Heat Index',
+    fits:       'FITS',
 };
 
 // Airport display tiers
@@ -461,6 +516,134 @@ var pollTimer      = null;
                   if(el) el.textContent='Radar unavailable';
                 });
           }
+
+        /* ── HRRR near-surface smoke (advances with Forecast Hour, capped F18) ── */
+        var smokeLayer=null, smokeTimer=null, smokeFrames=[];
+        var SMOKE_FRAMES_API='/CAP_WxCOP/api/hrrr-smoke/frames';
+        function mapcacheTileUrl(tileset, ts) {
+            return '/mapcache/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0'
+                 + '&LAYER=' + tileset + '&STYLE=&TILEMATRIXSET=GoogleMapsCompatible'
+                 + '&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image/png'
+                 + (ts ? '&ts=' + ts : '');
+        }
+        function smokeOpacity(){var el=document.getElementById('smokeOpacity');return el?parseInt(el.value)/100:0.8;}
+        function applySmokeFrame(hour){
+            if(!document.getElementById('smokeToggle').checked) return;
+            var statusEl=document.getElementById('smokeStatus');
+            if(!smokeFrames.length){
+                if(statusEl) statusEl.textContent='No smoke frames available';
+                return;
+            }
+            // HRRR smoke cache only carries F00-F18 (same cap as Wind Flow) --
+            // pick the closest available forecast hour to the requested one.
+            var targetFhr=Math.min(hour, 18);
+            var best=smokeFrames[0], bestDiff=Infinity;
+            smokeFrames.forEach(function(f){
+                var diff=Math.abs((f.fhr!==undefined?f.fhr:0)-targetFhr);
+                if(diff<bestDiff){bestDiff=diff;best=f;}
+            });
+            var url=mapcacheTileUrl('hrrr_smoke', best.ts);
+            if(smokeLayer){map.removeLayer(smokeLayer);smokeLayer=null;}
+            smokeLayer=L.tileLayer(url,{opacity:smokeOpacity(),zIndex:405,attribution:'HRRR smoke © NOAA/NCEP'});
+            smokeLayer.addTo(map);
+            if(statusEl) statusEl.textContent='HRRR '+(best.label||('F'+String(best.fhr).padStart(2,'0')))+
+                (hour>18?' (capped at F18)':'');
+        }
+        function loadSmoke(){
+            if(!document.getElementById('smokeToggle').checked) return;
+            fetch(SMOKE_FRAMES_API+'?hours=12')
+              .then(function(r){return r.json();})
+              .then(function(data){
+                smokeFrames=data.frames||[];
+                applySmokeFrame(currentHour);
+              })
+              .catch(function(){
+                var el=document.getElementById('smokeStatus');
+                if(el) el.textContent='Smoke layer unavailable';
+              });
+        }
+        window._smokeSetFhr=function(h){ applySmokeFrame(h); };
+
+        /* ── AirNow PM2.5 IDW contour ─────────────────────────────────── */
+        var airnowLayer=null, airnowStationLayer=null, airnowTimer=null;
+        var AIRNOW_GRID_API='/CAP_WxCOP/api/cadet_wx/airnow_grid';
+        var AQI_BANDS=[
+            {max:9.0,     color:[0,228,0]},
+            {max:35.4,    color:[255,255,0]},
+            {max:55.4,    color:[255,126,0]},
+            {max:125.4,   color:[255,0,0]},
+            {max:225.4,   color:[143,63,151]},
+            {max:Infinity,color:[126,0,35]}
+        ];
+        function pm25ToColor(v){
+            for(var i=0;i<AQI_BANDS.length;i++){if(v<=AQI_BANDS[i].max) return AQI_BANDS[i].color;}
+            return AQI_BANDS[AQI_BANDS.length-1].color;
+        }
+        function airnowOpacity(){var el=document.getElementById('airnowOpacity');return el?parseInt(el.value)/100:0.65;}
+        function removeAirnowLayer(){
+            if(airnowLayer){map.removeLayer(airnowLayer);airnowLayer=null;}
+            if(airnowStationLayer){map.removeLayer(airnowStationLayer);airnowStationLayer=null;}
+        }
+        function gridToImageOverlay(grid){
+            var nLat=grid.lats.length, nLon=grid.lons.length;
+            var canvas=document.createElement('canvas');
+            canvas.width=nLon; canvas.height=nLat;
+            var ctx=canvas.getContext('2d');
+            var img=ctx.createImageData(nLon,nLat);
+            for(var i=0;i<nLat;i++){
+                var row=grid.values[i];
+                var outRow=nLat-1-i;
+                for(var j=0;j<nLon;j++){
+                    var v=row[j];
+                    var idx=(outRow*nLon+j)*4;
+                    if(v==null){img.data[idx+3]=0;continue;}
+                    var c=pm25ToColor(v);
+                    img.data[idx]=c[0]; img.data[idx+1]=c[1]; img.data[idx+2]=c[2]; img.data[idx+3]=255;
+                }
+            }
+            ctx.putImageData(img,0,0);
+            return canvas.toDataURL('image/png');
+        }
+        function loadAirnowGrid(){
+            if(!document.getElementById('airnowToggle').checked) return;
+            var statusEl=document.getElementById('airnowStatus');
+            var b=map.getBounds();
+            var url=AIRNOW_GRID_API+'?west='+b.getWest()+'&south='+b.getSouth()
+                  +'&east='+b.getEast()+'&north='+b.getNorth()+'&resolution=50';
+            if(statusEl) statusEl.textContent='Loading AirNow stations…';
+            fetch(url)
+              .then(function(r){return r.json();})
+              .then(function(data){
+                if(!document.getElementById('airnowToggle').checked) return;
+                removeAirnowLayer();
+                if(!data.grid || data.count<2){
+                    if(statusEl) statusEl.textContent='Too few AirNow stations in view ('+(data.count||0)+')';
+                    return;
+                }
+                var grid=data.grid;
+                var bounds=L.latLngBounds(
+                    [grid.lats[0], grid.lons[0]],
+                    [grid.lats[grid.lats.length-1], grid.lons[grid.lons.length-1]]
+                );
+                airnowLayer=L.imageOverlay(gridToImageOverlay(grid), bounds, {opacity:airnowOpacity(), zIndex:404, interactive:false});
+                airnowLayer.addTo(map);
+                airnowStationLayer=L.layerGroup();
+                (data.stations||[]).forEach(function(s){
+                    if(s.pm25_ugm3==null) return;
+                    var c=pm25ToColor(s.pm25_ugm3);
+                    L.circleMarker([s.lat,s.lon],{radius:4,weight:1,color:'#111',
+                        fillColor:'rgb('+c[0]+','+c[1]+','+c[2]+')',fillOpacity:1})
+                     .bindPopup('<b>'+s.station_name+'</b><br>'+s.pm25_ugm3.toFixed(1)+' µg/m³'+
+                                (s.aqi_value!=null?(' (AQI '+s.aqi_value+')'):''))
+                     .addTo(airnowStationLayer);
+                });
+                airnowStationLayer.addTo(map);
+                if(statusEl) statusEl.textContent=data.count+' AirNow stations in view';
+              })
+              .catch(function(){
+                if(statusEl) statusEl.textContent='AirNow layer unavailable';
+              });
+        }
 
 function updateHourBtns(h) {
     document.querySelectorAll('.hour-btn').forEach(function(btn) {
@@ -637,6 +820,7 @@ function renderDetail(data) {
         ' · Valid ' + (row.valid_time ? fmtTime(row.valid_time) + 'Z' : '—');
 
     // Parameter grid — key values with color coding
+    var fitsVal = computeFits(row.tmp_f, row.dpt_f);
     var params = [
         { label: 'Ceiling',   value: row.ceil_display || '—',
           cls: ceilClass(row.ceil_ft) },
@@ -656,6 +840,8 @@ function renderDetail(data) {
           cls: hiClass(row.heat_index_f) },
         { label: 'Wind Chill', value: row.wind_chill_f !== null ? row.wind_chill_f.toFixed(1) + '°' : '—',
           cls: wcClass(row.wind_chill_f) },
+        { label: 'FITS',      value: fitsVal !== null ? fitsVal.toFixed(1) + '°' : '—',
+          cls: fitsClass(fitsVal) },
         { label: 'Best Rwy',  value: row.best_runway_hdg !== null
                                      ? 'Rwy ' + String(Math.round(row.best_runway_hdg/10)).padStart(2,'0')
                                      : '—',
@@ -754,6 +940,34 @@ function wcClass(f) {
     if (f >= 22) return 'pv-YELLOW';
     return 'pv-RED';
 }
+// FITS (Fighter Index of Thermal Stress), USAF/DAFI 48-151 psychrometric form:
+//   FITS(C) = 0.8281*Twb(C) + 0.3549*Tdb(C) + 5.080
+// Twb (psychrometric wet-bulb) isn't directly available -- derived from
+// dry-bulb/dewpoint via relative humidity (Magnus) and Stull's (2011)
+// empirical wet-bulb approximation, valid -20..50C / 5-99% RH.
+function computeFits(tmpF, dptF) {
+    if (tmpF === null || tmpF === undefined || dptF === null || dptF === undefined) return null;
+    var tC = (tmpF - 32) * 5 / 9;
+    var tdC = (dptF - 32) * 5 / 9;
+    function esat(t) { return 6.112 * Math.exp(17.67 * t / (t + 243.5)); }
+    var rh = 100 * esat(tdC) / esat(tC);
+    rh = Math.max(5, Math.min(99, rh));
+    var twC = tC * Math.atan(0.151977 * Math.sqrt(rh + 8.313659))
+            + Math.atan(tC + rh)
+            - Math.atan(rh - 1.676331)
+            + 0.00391838 * Math.pow(rh, 1.5) * Math.atan(0.023101 * rh)
+            - 4.686035;
+    var fitsC = 0.8281 * twC + 0.3549 * tC + 5.080;
+    return fitsC * 9 / 5 + 32;
+}
+function fitsClass(f) {
+    if (f === null || f === undefined) return '';
+    if (f < 85) return 'pv-GREEN';
+    if (f < 90) return 'pv-YELLOW';
+    if (f < 95) return 'pv-ORANGE';
+    if (f < 100) return 'pv-RED';
+    return 'pv-DARKRED';
+}
 
 // ── Airport search ────────────────────────────────────────────────────────
 function searchAirport() {
@@ -802,6 +1016,8 @@ function onHourChange(h) {
     if (selectedStation) loadStationDetail(selectedStation);
     // Update wind layer forecast hour
     if (typeof window._windSetFhr === 'function') window._windSetFhr(h);
+    // Update smoke layer forecast hour
+    if (typeof window._smokeSetFhr === 'function') window._smokeSetFhr(h);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -919,6 +1135,40 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('glmToggle').addEventListener('change',function(){
         if(this.checked){loadGLM();glmTimer=setInterval(loadGLM,60000);}
         else{if(glmLayer){map.removeLayer(glmLayer);glmLayer=null;}if(glmTimer){clearInterval(glmTimer);glmTimer=null;}}
+    });
+    document.getElementById('smokeToggle').addEventListener('change',function(){
+        var row=document.getElementById('smokeOpacityRow');
+        if(this.checked){
+            row.style.display='block';
+            loadSmoke();smokeTimer=setInterval(loadSmoke,300000);
+        } else {
+            row.style.display='none';
+            if(smokeLayer){map.removeLayer(smokeLayer);smokeLayer=null;}
+            if(smokeTimer){clearInterval(smokeTimer);smokeTimer=null;}
+        }
+    });
+    document.getElementById('smokeOpacity').addEventListener('input',function(){
+        var pct=parseInt(this.value);
+        document.getElementById('smokeOpacityVal').textContent=pct+'%';
+        if(smokeLayer) smokeLayer.setOpacity(pct/100);
+    });
+    document.getElementById('airnowToggle').addEventListener('change',function(){
+        var row=document.getElementById('airnowOpacityRow');
+        if(this.checked){
+            row.style.display='block';
+            loadAirnowGrid();airnowTimer=setInterval(loadAirnowGrid,300000);
+            map.on('moveend',loadAirnowGrid);
+        } else {
+            row.style.display='none';
+            removeAirnowLayer();
+            if(airnowTimer){clearInterval(airnowTimer);airnowTimer=null;}
+            map.off('moveend',loadAirnowGrid);
+        }
+    });
+    document.getElementById('airnowOpacity').addEventListener('input',function(){
+        var pct=parseInt(this.value);
+        document.getElementById('airnowOpacityVal').textContent=pct+'%';
+        if(airnowLayer) airnowLayer.setOpacity(pct/100);
     });
 });
 
@@ -1078,6 +1328,8 @@ async function generatePDF() {
                       value: curRow.heat_index_f !== null ? curRow.heat_index_f.toFixed(1) + '\u00b0F' : '\u2014' },
                     { label:'Wind Chill',
                       value: curRow.wind_chill_f !== null ? curRow.wind_chill_f.toFixed(1) + '\u00b0F' : '\u2014' },
+                    { label:'FITS',
+                      value: (function(){ var v=computeFits(curRow.tmp_f, curRow.dpt_f); return v!==null ? v.toFixed(1)+'\u00b0F' : '\u2014'; })() },
                     { label:'Tstm Prob',
                       value: (curRow.tstm_prob !== null && curRow.tstm_prob !== undefined)
                              ? curRow.tstm_prob + '%' : '\u2014' },

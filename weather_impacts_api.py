@@ -98,6 +98,7 @@ def get_impacts_airports():
                 wi.crosswind_kts,
                 wi.best_runway_hdg,
                 wi.tmp_f,
+                wi.dpt_c,
                 wi.heat_index_f,
                 wi.wind_chill_f,
                 {color_col}         AS color,
@@ -130,7 +131,7 @@ def get_impacts_airports():
             (station_id, lat, lon, name, is_military, longest_rwy,
              fhour, valid_time, model_source,
              ceil_ft, vis_m, wind_kts, wind_dir, wind_gust,
-             xwind, best_hdg, tmp_f, hi_f, wc_f,
+             xwind, best_hdg, tmp_f, dpt_f, hi_f, wc_f,
              color, worst_param, tstm_prob, tstm_color, mr) = row
 
             if model_run is None and mr:
@@ -161,6 +162,7 @@ def get_impacts_airports():
                 'crosswind_kts':  float(xwind) if xwind is not None else None,
                 'best_runway_hdg': best_hdg,
                 'tmp_f':          float(tmp_f) if tmp_f is not None else None,
+                'dpt_f':          float(dpt_f) if dpt_f is not None else None,
                 'heat_index_f':   float(hi_f) if hi_f is not None else None,
                 'wind_chill_f':   float(wc_f) if wc_f is not None else None,
             })
@@ -206,6 +208,7 @@ def get_impacts_station(station_id):
                 wi.crosswind_kts,
                 wi.best_runway_hdg,
                 wi.tmp_f,
+                wi.dpt_c,
                 wi.heat_index_f,
                 wi.wind_chill_f,
                 wi.vfr_color,
@@ -242,20 +245,20 @@ def get_impacts_station(station_id):
         first = rows[0]
         station = {
             'station_id':     station_id,
-            'name':           first[20],
-            'lat':            float(first[21]) if first[21] else None,
-            'lon':            float(first[22]) if first[22] else None,
-            'is_military':    bool(first[23]),
-            'elevation_ft':   first[24],
-            'longest_rwy_ft': first[25],
-            'model_run':      first[19].strftime('%Y-%m-%dT%H:%MZ') if first[19] else None,
+            'name':           first[21],
+            'lat':            float(first[22]) if first[22] else None,
+            'lon':            float(first[23]) if first[23] else None,
+            'is_military':    bool(first[24]),
+            'elevation_ft':   first[25],
+            'longest_rwy_ft': first[26],
+            'model_run':      first[20].strftime('%Y-%m-%dT%H:%MZ') if first[20] else None,
         }
 
         forecast = []
         for row in rows:
             (fhour, valid_time, model_source,
              ceil_ft, vis_m, wind_kts, wind_dir, wind_gust,
-             xwind, best_hdg, tmp_f, hi_f, wc_f,
+             xwind, best_hdg, tmp_f, dpt_f, hi_f, wc_f,
              vfr_color, vfr_worst, ifr_color, ifr_worst,
              tstm_prob, tstm_color, model_run, *_) = row
 
@@ -281,6 +284,7 @@ def get_impacts_station(station_id):
                 'crosswind_kts':  float(xwind) if xwind is not None else None,
                 'best_runway_hdg': best_hdg,
                 'tmp_f':          float(tmp_f) if tmp_f is not None else None,
+                'dpt_f':          float(dpt_f) if dpt_f is not None else None,
                 'heat_index_f':   float(hi_f) if hi_f is not None else None,
                 'wind_chill_f':   float(wc_f) if wc_f is not None else None,
                 'tstm_prob':      int(tstm_prob) if tstm_prob is not None else None,

@@ -29,6 +29,7 @@ Author: CAP WxCOP
 
 import os
 import re
+import json
 import subprocess
 import tempfile
 import datetime
@@ -37,11 +38,12 @@ from flask import Blueprint, request, jsonify, Response, abort
 
 hrrr_smoke_wms_bp = Blueprint('hrrr_smoke_wms', __name__)
 
-CACHE_DIR   = Path('/var/www/mapserver/cache/hrrr_smoke')
-MAPFILE     = Path('/var/www/mapserver/mapfiles/hrrr_smoke.map')
-MS_CONFIG   = '/var/www/mapserver/mapserver.conf'
-MAPSERV_BIN = '/usr/bin/mapserv'
-PRODUCT     = 'hrrr_smoke'
+CACHE_DIR         = Path('/var/www/mapserver/cache/hrrr_smoke')
+MAPFILE           = Path('/var/www/mapserver/mapfiles/hrrr_smoke.map')
+MS_CONFIG         = '/var/www/mapserver/mapserver.conf'
+MAPSERV_BIN       = '/usr/bin/mapserv'
+PRODUCT           = 'hrrr_smoke'
+LATEST_CYCLE_PATH = CACHE_DIR / 'latest_cycle.json'
 
 TS_RE = re.compile(r'^\d{8}-\d{6}$')
 
@@ -82,22 +84,30 @@ def hrrr_smoke_frames():
     Return sorted list of available frame timestamps.
 
     Query params:
-      hours : 1-12 (default 6)
+      hours : 1-24 (default 12)
 
     Response:
       {
-        "hours": 6,
+        "hours": 12,
         "frames": [
-          {"ts": "20260717-150000", "label": "F00"},
+          {"ts": "20260717-150000", "label": "F00 (Now)", "fhr": 0},
           ...
-          {"ts": "20260717-180000", "label": "LIVE"}
+          {"ts": "20260718-090000", "label": "F18", "fhr": 18}
         ]
       }
+
+    "fhr" is the forecast hour of the latest HRRR cycle currently being
+    cached (see latest_cycle.json, written by hrrr_smoke_cache_updater.py),
+    computed from each frame's valid time relative to that cycle's start --
+    not just its position in this list -- so the CAPR 70-1 Forecast Hour
+    slider can pick the frame matching a specific hour. Falls back to list
+    position if latest_cycle.json is missing/unreadable (e.g. right after
+    this field was added, before the updater's next tick writes it).
     """
     try:
-        hours = min(12, max(1, int(request.args.get('hours', 6))))
+        hours = min(24, max(1, int(request.args.get('hours', 12))))
     except ValueError:
-        hours = 6
+        hours = 12
 
     if not CACHE_DIR.is_dir():
         return jsonify({'hours': hours, 'frames': []})
@@ -124,10 +134,18 @@ def hrrr_smoke_frames():
 
     frames.sort(key=lambda x: x[0])
 
+    cycle_start = None
+    try:
+        cyc = json.loads(LATEST_CYCLE_PATH.read_text())
+        cycle_start = datetime.datetime.strptime(cyc['cycle_start'], '%Y%m%d%H%M%S')
+    except Exception:
+        cycle_start = None
+
     result = []
     for i, (ts_dt, ts_str) in enumerate(frames):
-        label = 'LIVE' if i == len(frames) - 1 else ts_dt.strftime('%HZ')
-        result.append({'ts': ts_str, 'label': label})
+        fhr = round((ts_dt - cycle_start).total_seconds() / 3600) if cycle_start else i
+        label = 'F00 (Now)' if fhr == 0 else f'F{fhr:02d}'
+        result.append({'ts': ts_str, 'label': label, 'fhr': fhr})
 
     return jsonify({'hours': hours, 'frames': result})
 
