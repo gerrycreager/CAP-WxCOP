@@ -66,6 +66,7 @@ class Check:
     db_query: Optional[str] = None
     # file_mtime
     file_glob: Optional[str] = None
+    glob_timeout: float = 30.0     # raise for globs matching very many files
     # log_heartbeat
     log_path: Optional[str] = None
     success_pattern: Optional[str] = None
@@ -113,7 +114,17 @@ CHECKS = [
         name="TDWR poller",
         kind="file_mtime",
         max_age=timedelta(minutes=10),
-        file_glob="/LDM/radar/level3/*/T*/nids/*/*.nids",
+        # Checks the per-date DIRECTORIES, not individual .nids files --
+        # matches ~150K files under the 2-day scour retention, and
+        # individually os.path.getmtime()-ing every one of them over NFS
+        # took 66-70s (confirmed measuring it directly), well past even a
+        # generously raised timeout -- 100% of "STALE" alerts since
+        # 2026-09-12 20:34 UTC trace back to this, none a genuine outage.
+        # A directory's mtime already advances whenever a new file is
+        # created in it, so checking the ~580 site/product/date dirs one
+        # level up gives the same freshness signal for ~60x fewer stat()
+        # calls (measured: 1.2s total).
+        file_glob="/LDM/radar/level3/*/T*/nids/*",
     ),
     # GLM East (G19) and West (G18) are two independent satellite feeds,
     # not a primary/failover pair -- checked separately because a raw-file
@@ -308,7 +319,7 @@ def run_check(check: Check) -> tuple[bool, str]:
     if check.kind == "db_max":
         last = check_db_max(check)
     elif check.kind == "file_mtime":
-        last = check_file_mtime(check)
+        last = check_file_mtime(check, timeout=check.glob_timeout)
     elif check.kind == "log_heartbeat":
         last = check_log_heartbeat(check)
     else:
