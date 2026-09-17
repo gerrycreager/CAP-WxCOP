@@ -1,0 +1,31 @@
+[DEFAULT]
+# Loosened 2026-09-17 at Gerry's explicit direction: SSH is MFA-gated with a
+# single authorized user, so a hair-trigger password/key-attempt threshold
+# adds lockout risk without much real security benefit. bantime was -1
+# (permanent, requires a manual unbanip from another session) -- that's what
+# caused repeated multi-hour lockouts this week. Now self-clears in 24h.
+maxretry = 5
+bantime = 24h
+findtime = 600
+ignoreip = 192.168.0.0/24 209.248.104.135 50.229.126.35
+
+[dropbear]
+enabled = true
+
+[sendmail-auth]
+enabled = true
+action = hostsdeny[]
+findtime = 2h
+ignoreip = 192.168.0.0/24
+[apache-auth]
+enabled = true
+maxretry = 2
+[apache-overflows]
+enabled = false
+[apache-badbots]
+enabled = true
+action = hostsdeny[]
+[apache-noscript]
+enabled = true
+[apache-botsearch]
+enabled = true
