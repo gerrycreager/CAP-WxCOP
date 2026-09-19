@@ -7,7 +7,7 @@
 maxretry = 5
 bantime = 24h
 findtime = 600
-ignoreip = 192.168.0.0/24 209.248.104.135 50.229.126.35
+ignoreip = 192.168.0.0/24 209.248.104.135 50.229.126.35 68.50.62.172
 
 [dropbear]
 enabled = true
