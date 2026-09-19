@@ -2678,22 +2678,28 @@
 
 
     <script>
-    // ── Animated Wind Particles (ECMWF IFS / ECMWF AIFS / HRRR, leaflet-velocity)
+    // ── Animated Wind Particles (HRRR only, leaflet-velocity)
     // ─────────────────────────────────────────────────────────────────────────
     // GFS was dropped as a source (too CPU-heavy for r815 at its old refresh
-    // rate -- see wind_particles_api.py). HRRR is nearest-neighbor regridded
-    // from its native curvilinear grid (scripts/render_hrrr_winds.py) -- a
-    // best-effort approximation, not a precision product; flagged as such via
-    // HRRR_NOTE below whenever it's the selected source. Backend:
-    // render_wind_particles.py (ECMWF) / render_hrrr_winds.py (HRRR) /
-    // wind_particles_api.py.
+    // rate -- see wind_particles_api.py). ECMWF IFS/AIFS dropped 2026-09-19
+    // at Gerry's direction -- another resource sink on r815, positive
+    // feedback was specifically about HRRR; may be rebuilt on cosp1 for
+    // personal use, just not on this webpage. HRRR is nearest-neighbor
+    // regridded from its native curvilinear grid (scripts/render_hrrr_winds.py)
+    // -- a best-effort approximation, not a precision product; flagged as such
+    // via HRRR_NOTE below. Backend: render_hrrr_particles.py / wind_particles_api.py.
     (function() {
         'use strict';
         var API = '/CAP_WxCOP/api/wind-particles';
         var SOURCES = [
-            { key:'ecmwf-ifs',  label:'ECMWF IFS' },
-            { key:'ecmwf-aifs', label:'ECMWF AIFS (AI)' },
-            { key:'hrrr',       label:'HRRR (best effort)' },
+            // ECMWF sources commented out 2026-09-19 at Gerry's direction --
+            // another resource sink on r815; positive feedback was
+            // specifically about HRRR. May be rebuilt on cosp1 for personal
+            // use. Re-enable by uncommenting these two plus the matching
+            // entries in wind_particles_api.py's VALID_SOURCES.
+            // { key:'ecmwf-ifs',  label:'ECMWF IFS' },
+            // { key:'ecmwf-aifs', label:'ECMWF AIFS (AI)' },
+            { key:'hrrr', label:'HRRR (best effort)' },
         ];
         var HRRR_NOTE = '⚠ Best effort only — nearest-neighbor regridded from HRRR’s native grid. ' +
             'Not for aviation decision-making; use official HRRR/NWS products for flight planning.';
@@ -2702,8 +2708,15 @@
             { key:'850', label:'850 hPa' },
             { key:'700', label:'700 hPa' },
             { key:'500', label:'500 hPa' },
-            { key:'200', label:'200 hPa' },
-            { key:'DLM', label:'Deep-Layer Mean (850-700-500 hPa steering flow)' },
+            // 200 hPa was ECMWF-only (HRRR has no native 200 hPa level) --
+            // moot now that ECMWF is commented out above.
+            // { key:'200', label:'200 hPa' },
+            // DLM (Deep-Layer Mean steering flow) commented out 2026-09-19 --
+            // it existed for tropical cyclone track analysis, but HRRR's
+            // CONUS domain doesn't reach the Tropical Atlantic where that's
+            // actually useful, so computing it was pure waste. Re-enable by
+            // uncommenting this plus render_hrrr_particles.py's DLM block.
+            // { key:'DLM', label:'Deep-Layer Mean (850-700-500 hPa steering flow)' },
         ];
         // earth.nullschool/Windy-style continuous rainbow ramp -- fully saturated
         // throughout (no pastel/light stops) so it reads against both ocean blue
@@ -2712,7 +2725,7 @@
                             '#FFFF00', '#FFA500', '#FF4500', '#FF00FF'];
 
         var particlesLayer = null;
-        var source   = 'ecmwf-ifs';
+        var source   = 'hrrr';
         var level    = 'SFC';
         var fhrs     = [0];   // available forecast hours for current source, from index.json
         var fhrIndex = 0;
@@ -2723,6 +2736,9 @@
         var _cache   = {};
         var wpPlaying = false, wpTimer = null;
 
+        // DLM/200 branch is unreachable now that both are commented out of
+        // LEVELS above, but left intact (not ripped out) so it's still
+        // correct if either gets uncommented again.
         function maxVelocity() { return (level === 'DLM' || level === '200') ? 40 : 25; }
 
         function setStatus(msg) {

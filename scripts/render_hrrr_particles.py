@@ -26,11 +26,14 @@ and is orders of magnitude cheaper than re-triangulating per level/FHR. This
 approximation is part of why HRRR is labeled "best effort" in the UI, not a
 precise decision-support product.
 
-Levels: SFC 850 700 500, plus synthetic DLM (vector mean of 850/700/500 —
-matches render_wind_particles.py's ECMWF DLM exactly, for cross-source
-comparability). No 200 hPa: HRRR's native isobaric levels top out at 250 hPa
-with no 200 hPa product, so that combination is simply absent for source=hrrr
-(the API 404s it — the frontend already handles a missing level/fhr combo).
+Levels: SFC 850 700 500. No 200 hPa: HRRR's native isobaric levels top out
+at 250 hPa with no 200 hPa product, so that combination is simply absent for
+source=hrrr (the API 404s it — the frontend already handles a missing
+level/fhr combo). Also no DLM (Deep-Layer Mean, vector mean of 850/700/500 —
+matches render_wind_particles.py's ECMWF DLM) as of 2026-09-19: it existed
+for Atlantic-basin TC track analysis, but this domain doesn't reach the
+Tropical Atlantic, so it was commented out rather than computed for nothing
+-- see the DLM block in render_fhr() below to re-enable.
 
 FHR: 000-012 (fetch_models.sh's S3 pull only goes to F12) — short-range only,
 unlike the 120h ECMWF sources; this is near-term convective-scale guidance,
@@ -74,14 +77,20 @@ LON_MIN, LON_MAX = -130.0, -60.0
 GRID_RES = 0.25
 
 DIRECT_LEVELS  = ['SFC', '850', '700', '500']
-DLM_COMPONENTS = ['850', '700', '500']
-ALL_LEVELS     = DIRECT_LEVELS + ['DLM']
+DLM_COMPONENTS = ['850', '700', '500']   # only used by the commented-out DLM block below
+# DLM commented out 2026-09-19 at Gerry's direction -- it was for Atlantic-
+# basin TC track analysis, but this domain (see LAT/LON_MIN/MAX above) never
+# reaches the Tropical Atlantic, so computing it was pure waste. Re-enable by
+# uncommenting this line and the DLM block in render_fhr() below, plus the
+# matching entries in wind_particles_api.py and enhanced_weather_map_complete.html.
+# ALL_LEVELS     = DIRECT_LEVELS + ['DLM']
+ALL_LEVELS     = DIRECT_LEVELS
 LEVEL_LABELS = {
     'SFC': 'Surface (10m AGL)',
     '850': '850 hPa',
     '700': '700 hPa',
     '500': '500 hPa',
-    'DLM': 'Deep-Layer Mean (850-700-500 hPa steering flow)',
+    # 'DLM': 'Deep-Layer Mean (850-700-500 hPa steering flow)',
 }
 
 # ── Logging ────────────────────────────────────────────────────────────────
@@ -260,7 +269,8 @@ def find_latest_cycle():
 # ── Per-FHR render (called in thread) ──────────────────────────────────────
 def render_fhr(fhr, date, cycle, out_dir, force, tree, target_lats, target_lons):
     """
-    Render all levels (direct + synthetic DLM) for one forecast hour.
+    Render all direct levels for one forecast hour (synthetic DLM commented
+    out 2026-09-19 -- see module docstring).
     Returns (fhr, index_entry_or_None, rendered_count, error_count).
     Called concurrently — must be thread-safe (tree/target grid are
     read-only here, safe to share across threads).
@@ -285,15 +295,17 @@ def render_fhr(fhr, date, cycle, out_dir, force, tree, target_lats, target_lons)
     ref_time = f'{date}T{cycle.replace("z", "")}:00:00Z'
     rendered  = 0
     errors    = 0
-    dlm_parts = {}   # level -> (u_regrid, v_regrid) for DLM averaging
+    # dlm_parts = {}   # level -> (u_regrid, v_regrid) for DLM averaging -- only needed by the commented-out DLM block below
 
     for level in DIRECT_LEVELS:
         out_file = out_dir / f'particles_{level}_f{fhr:03d}.json'
         try:
             u, v, lats, lons = extract_level(datasets, level, np)
             u_r, v_r = regrid_nearest(u, v, tree, target_lats, target_lons, np)
-            if level in DLM_COMPONENTS:
-                dlm_parts[level] = (u_r, v_r)
+            # DLM commented out 2026-09-19 -- see module docstring. Uncomment
+            # to resume collecting components for the DLM block below.
+            # if level in DLM_COMPONENTS:
+            #     dlm_parts[level] = (u_r, v_r)
 
             if out_file.exists() and not force:
                 continue
@@ -308,26 +320,32 @@ def render_fhr(fhr, date, cycle, out_dir, force, tree, target_lats, target_lons)
             log.error(f'  F{fhr:03d} {level}: {e}')
             errors += 1
 
-    if len(dlm_parts) == len(DLM_COMPONENTS):
-        try:
-            out_file = out_dir / f'particles_DLM_f{fhr:03d}.json'
-            if force or not out_file.exists():
-                u_stack = np.stack([dlm_parts[lv][0] for lv in DLM_COMPONENTS])
-                v_stack = np.stack([dlm_parts[lv][1] for lv in DLM_COMPONENTS])
-                u_dlm = u_stack.mean(axis=0)
-                v_dlm = v_stack.mean(axis=0)
-                grid = build_windjs_grid(u_dlm, v_dlm, target_lats, target_lons, ref_time, fhr)
-                tmp = out_file.with_suffix(f'.{fhr:03d}_DLM.tmp')
-                with open(tmp, 'w') as f:
-                    json.dump(grid, f, separators=(',', ':'))
-                tmp.rename(out_file)
-                rendered += 1
-                log.info(f'  F{fhr:03d} DLM: vector mean of {DLM_COMPONENTS} -> {out_file.name}')
-        except Exception as e:
-            log.error(f'  F{fhr:03d} DLM: {e}')
-            errors += 1
-    elif dlm_parts:
-        log.warning(f'  F{fhr:03d}: DLM skipped, only got {list(dlm_parts.keys())}')
+    # DLM (Deep-Layer Mean) synthetic level commented out 2026-09-19 at
+    # Gerry's direction -- it existed for Atlantic-basin TC track analysis,
+    # but this domain (LAT/LON_MIN/MAX above) doesn't reach the Tropical
+    # Atlantic, so computing it every cycle was pure waste. Re-enable by
+    # uncommenting this block, the dlm_parts collection above, and
+    # ALL_LEVELS/LEVEL_LABELS['DLM'] near the top of this file.
+    # if len(dlm_parts) == len(DLM_COMPONENTS):
+    #     try:
+    #         out_file = out_dir / f'particles_DLM_f{fhr:03d}.json'
+    #         if force or not out_file.exists():
+    #             u_stack = np.stack([dlm_parts[lv][0] for lv in DLM_COMPONENTS])
+    #             v_stack = np.stack([dlm_parts[lv][1] for lv in DLM_COMPONENTS])
+    #             u_dlm = u_stack.mean(axis=0)
+    #             v_dlm = v_stack.mean(axis=0)
+    #             grid = build_windjs_grid(u_dlm, v_dlm, target_lats, target_lons, ref_time, fhr)
+    #             tmp = out_file.with_suffix(f'.{fhr:03d}_DLM.tmp')
+    #             with open(tmp, 'w') as f:
+    #                 json.dump(grid, f, separators=(',', ':'))
+    #             tmp.rename(out_file)
+    #             rendered += 1
+    #             log.info(f'  F{fhr:03d} DLM: vector mean of {DLM_COMPONENTS} -> {out_file.name}')
+    #     except Exception as e:
+    #         log.error(f'  F{fhr:03d} DLM: {e}')
+    #         errors += 1
+    # elif dlm_parts:
+    #     log.warning(f'  F{fhr:03d}: DLM skipped, only got {list(dlm_parts.keys())}')
 
     for ds in datasets:
         try:

@@ -1,24 +1,27 @@
 #!/usr/bin/env python3
 """
 wind_particles_api.py — Serve pre-rendered animated wind-particle grids
-(leaflet-velocity / wind-js format) for the Atlantic basin TC-tracking layer.
+(leaflet-velocity / wind-js format) for the Enhanced Weather Map's animated
+wind layer.
 
-Files are pre-rendered by scripts/render_wind_particles.py (cron, no WSGI).
+Files are pre-rendered by scripts/render_hrrr_particles.py (cron, no WSGI).
 This module just reads and returns the JSON from disk — no cfgrib, no numpy.
 
 GFS was dropped as a source (too CPU-heavy to regenerate every 20 min for
-the load it put on r815) -- ECMWF IFS/AIFS/HRRR remain, rendered under the
-same /LDM/models/wind_particles/{source}/ layout. HRRR is rendered by
-scripts/render_hrrr_particles.py (nearest-neighbor regridded from its native
-curvilinear grid -- "best effort", not a precision product; see that
-script's docstring) and only ever has SFC/850/700/500/DLM -- HRRR has no
-native 200 hPa level, so source=hrrr&level=200 404s like any other
-not-yet-rendered combo.
+the load it put on r815). ECMWF IFS/AIFS were dropped 2026-09-19 at Gerry's
+direction -- another resource sink, and the positive user feedback was
+specifically about HRRR; that source (and DLM, which came along with ECMWF
+for Atlantic-basin TC track analysis this app never actually reaches with
+HRRR's CONUS domain) may get rebuilt on cosp1 for personal use, just not on
+this webpage. HRRR is nearest-neighbor regridded from its native curvilinear
+grid -- "best effort", not a precision product; see render_hrrr_particles.py's
+docstring -- and only ever has SFC/850/700/500 -- no native 200 hPa level,
+so source=hrrr&level=200 404s like any other not-yet-rendered combo.
 
 Endpoints:
-  GET /api/wind-particles?source=ecmwf-ifs&level=SFC&fhr=0  — wind-js grid for level/fhr
-  GET /api/wind-particles/index?source=ecmwf-ifs             — available cycle/levels/fhrs
-  GET /api/wind-particles/levels?source=ecmwf-ifs             — level definitions
+  GET /api/wind-particles?source=hrrr&level=SFC&fhr=0  — wind-js grid for level/fhr
+  GET /api/wind-particles/index?source=hrrr             — available cycle/levels/fhrs
+  GET /api/wind-particles/levels?source=hrrr             — level definitions
 """
 import os
 import glob
@@ -31,17 +34,25 @@ wind_particles_api = Blueprint('wind_particles_api', __name__)
 
 OUTPUT_ROOT = '/LDM/models/wind_particles'
 
-VALID_SOURCES = {'ecmwf-ifs', 'ecmwf-aifs', 'hrrr'}
+# ECMWF IFS/AIFS commented out 2026-09-19 at Gerry's direction -- resource
+# sink, positive feedback was specifically about HRRR. Re-enable by
+# uncommenting here and in enhanced_weather_map_complete.html's SOURCES.
+VALID_SOURCES = {'hrrr'}  # was {'ecmwf-ifs', 'ecmwf-aifs', 'hrrr'}
 
-VALID_LEVELS = {'SFC', '850', '700', '500', '200', 'DLM'}
+# DLM (Deep-Layer Mean, 850-700-500 hPa steering flow) and 200 hPa commented
+# out 2026-09-19 -- DLM was for Atlantic-basin TC track analysis HRRR's CONUS
+# domain never actually reached; 200 hPa was ECMWF-only. Re-enable by
+# uncommenting here and in render_hrrr_particles.py's DLM block (200 hPa
+# would need ECMWF re-enabled too, HRRR has no native 200 hPa level).
+VALID_LEVELS = {'SFC', '850', '700', '500'}  # was {..., '200', 'DLM'}
 
 LEVEL_LABELS = {
     'SFC': 'Surface (10m AGL)',
     '850': '850 hPa',
     '700': '700 hPa',
     '500': '500 hPa',
-    '200': '200 hPa',
-    'DLM': 'Deep-Layer Mean (850-700-500 hPa steering flow)',
+    # '200': '200 hPa',
+    # 'DLM': 'Deep-Layer Mean (850-700-500 hPa steering flow)',
 }
 
 
@@ -69,7 +80,7 @@ def find_particle_file(source, level, fhr):
 
 
 def _validated_source():
-    source = request.args.get('source', 'ecmwf-ifs').lower()
+    source = request.args.get('source', 'hrrr').lower()
     if source not in VALID_SOURCES:
         return None, jsonify({'error': f'Unknown source: {source}. '
                                         f'Use: {", ".join(sorted(VALID_SOURCES))}'}), 400
