@@ -1302,13 +1302,18 @@
             var zoom         = map.getZoom();
             var bounds       = map.getBounds();
             noMetarMarkers.forEach(function(m) {
-                if (!showNoMetar) { if (m._map) map.removeLayer(m); return; }
+                var tier = m.options.airportTier;
+                // Tier 0 (MEF-priority override) always shows, bypassing
+                // every checkbox -- including the master showNoMetar toggle
+                // itself, not just the per-tier ones below (found live
+                // 2026-09-22: this early-return used to gate tier 0 too,
+                // silently hiding the 4 MEF-priority airports that have no
+                // METAR reporting whenever showNoMetar was off, which it is
+                // by default) -- and the mil/civ zoom threshold below -- see
+                // MEF_PRIORITY_AIRPORTS.
+                if (!showNoMetar && tier !== 0) { if (m._map) map.removeLayer(m); return; }
                 var pos      = m.getLatLng();
                 var inBounds = bounds.contains(pos);
-                var tier     = m.options.airportTier;
-                // Tier 0 (MEF-priority override) always shows, bypassing
-                // every checkbox and the mil/civ zoom threshold below --
-                // see MEF_PRIORITY_AIRPORTS.
                 var toggleOn = (tier === 0) ||
                                (tier === 1 && showMilitary) ||
                                (tier === 2 && showHubs)     ||
@@ -1803,9 +1808,24 @@
                         var metatIds = new Set(currentMetars.map(function(m) { return m.station_id; }));
                         var fresh    = data.airports.filter(function(a) { return !metatIds.has(a.station_id); });
                         noMetarAirports = fresh;
-                        if (document.getElementById('showNoMetar').checked) {
-                            fresh.forEach(addNoMetarMarker);
-                        }
+                        // Tier 0 (MEF-priority) markers must always be
+                        // created, even if showNoMetar is off -- found live
+                        // 2026-09-22: when an MEF airport happened to fall
+                        // inside this fetch's (often huge, e.g. zoomed-out)
+                        // viewport, it landed in noMetarAirports here
+                        // without ever getting a marker, since marker
+                        // creation used to be fully gated behind
+                        // showNoMetar. loadMefPriorityAirports()'s own
+                        // dedupe then saw it as "already present" and
+                        // skipped it too -- invisible either way despite
+                        // updateNoMetarSymbols()'s tier-0 bypass, because
+                        // there was no marker object for it to show.
+                        var showNoMetarChecked = document.getElementById('showNoMetar').checked;
+                        fresh.forEach(function(a) {
+                            if (showNoMetarChecked || MEF_PRIORITY_AIRPORTS[a.station_id] === 1) {
+                                addNoMetarMarker(a);
+                            }
+                        });
                         updateLabels();
                     }
                 })
