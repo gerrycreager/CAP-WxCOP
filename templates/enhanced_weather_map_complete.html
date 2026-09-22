@@ -548,6 +548,9 @@
         <label class="checkbox-label"><input type="checkbox" id="showLocal" checked> Local Airfields (5000&ndash;6999 ft)</label>
         <label class="checkbox-label"><input type="checkbox" id="showSmall"> Small Airfields (2500&ndash;4999 ft)</label>
         <label class="checkbox-label"><input type="checkbox" id="labelToggle"> Show labels</label>
+        <label class="checkbox-label" title="Wind barbs + station plots (temp/dewpoint/sky/ceiling/vis/gust), tiered by zoom">
+            <input type="checkbox" id="stationPlotToggle" checked> Station Plots
+        </label>
 
         <div class="divider"></div>
         <div style="font-size:12px;font-weight:700;color:#555;text-transform:uppercase;
@@ -853,14 +856,148 @@
 
         // Tier definitions:
         //   1 = Military  — show at z0+ when toggled on
-        //   2 = Hub       — major commercial, z5+
-        //   3 = Regional  — paved >= 7000 ft, z6+  (checked by default)
-        //   4 = Local     — paved 5000-6999 ft, z8+ (unchecked by default)
+        //   2 = Hub       — major commercial, z3+
+        //   3 = Regional  — paved >= 7000 ft, z3+  (checked by default)
+        //   4 = Local     — paved 5000-6999 ft, z7+ (checked by default)
         //   5 = Small     — paved 2500-4999 ft, z10+(unchecked by default)
-        var TIER_MIN_ZOOM = { 1: 0, 2: 3, 3: 3, 4: 7, 5: 12 };
+        // Tier 5 lowered 12 -> 10 on 2026-09-22 at Gerry's request ("more
+        // airports visible at Zoom 10 than are there") -- the comment
+        // already said z10+ but the code had drifted to 12.
+        var TIER_MIN_ZOOM = { 0: 0, 1: 0, 2: 3, 3: 3, 4: 7, 5: 10 };
 
         // No-METAR symbol zoom thresholds
-        var NO_METAR_SYM_ZOOM = { mil: 3, civ: 12 };
+        var NO_METAR_SYM_ZOOM = { mil: 3, civ: 8 };  // civ lowered 12 -> 9 -> 8 on 2026-09-20 at Gerry's request (observed KSER needing zoom 10 at the civ:9 setting) -- needed to see no-METAR civil fields at a wider (regional, not just close-in) zoom for TDY-area planning
+
+        // ---------------------------------------------------------------
+        // Station plots, added 2026-09-22, promoted from the KBAK/KAFF
+        // 100nm test scope to universal on 2026-09-22 -- see
+        // project_ewmc_station_plots memory. Wind barb alone renders at
+        // the same zoom a tier's marker already appears at
+        // (TIER_MIN_ZOOM); the rest of the plot (temp/dewpoint, sky-cover
+        // symbol, ceiling, vis, gust) waits an additional
+        // STATION_PLOT_ZOOM_OFFSET levels deeper, per Gerry: "I don't want
+        // it too crowded." STATION_PLOT_FULL_ZOOM_OVERRIDE lets a specific
+        // tier's full-plot zoom be tuned independently of that formula --
+        // tier 4 lowered straight to 9 on 2026-09-22 at Gerry's request.
+        // ---------------------------------------------------------------
+        var STATION_PLOT_ZOOM_OFFSET = 3;
+        var STATION_PLOT_FULL_ZOOM_OVERRIDE = { 4: 9 };
+
+        // Standard meteorological wind barb as an inline SVG string.
+        // Calm (<3kt): open circle, no barbs. Otherwise a shaft from
+        // center pointing toward where the wind is FROM, with pennants
+        // (50kt), full barbs (10kt) and half barbs (5kt) built from the
+        // rounded-to-nearest-5kt speed. Rotated via CSS transform on the
+        // wrapping div (see stationPlotHtml) rather than baked into the
+        // path, so the same SVG serves any direction.
+        function windBarbSvg(speedKt, color) {
+            var s = Math.round((speedKt || 0) / 5) * 5;
+            if (s < 3) {
+                return '<svg width="34" height="34" viewBox="0 0 34 34">' +
+                       '<circle cx="17" cy="17" r="5" fill="none" stroke="' + color + '" stroke-width="2"/></svg>';
+            }
+            var shaftLen = 15, x0 = 17, y0 = 17, y1 = y0 - shaftLen;
+            var parts = ['<line x1="' + x0 + '" y1="' + y0 + '" x2="' + x0 + '" y2="' + y1 +
+                        '" stroke="' + color + '" stroke-width="2"/>'];
+            var remaining = s, y = y1, step = 3;
+            while (remaining >= 50) {
+                parts.push('<polygon points="' + x0 + ',' + y + ' ' + (x0 + 8) + ',' + (y + 2) + ' ' + x0 + ',' + (y + 4) +
+                           '" fill="' + color + '"/>');
+                remaining -= 50; y += step + 1;
+            }
+            while (remaining >= 10) {
+                parts.push('<line x1="' + x0 + '" y1="' + y + '" x2="' + (x0 + 8) + '" y2="' + (y + 3) +
+                           '" stroke="' + color + '" stroke-width="2"/>');
+                remaining -= 10; y += step;
+            }
+            if (remaining >= 5) {
+                parts.push('<line x1="' + x0 + '" y1="' + y + '" x2="' + (x0 + 4) + '" y2="' + (y + 1.5) +
+                           '" stroke="' + color + '" stroke-width="2"/>');
+            }
+            parts.push('<circle cx="' + x0 + '" cy="' + y0 + '" r="3" fill="none" stroke="' + color + '" stroke-width="2"/>');
+            return '<svg width="34" height="34" viewBox="0 0 34 34">' + parts.join('') + '</svg>';
+        }
+
+        // Sky-cover symbol (standard station-model coverage circle), plus
+        // temp/dewpoint (left) and ceiling/vis (right) text -- only shown
+        // at the deeper STATION_PLOT_ZOOM_OFFSET zoom, wind barb alone
+        // below that. Colored by flight category (not a fixed black/white),
+        // per Gerry (2026-09-22): "should be representative of Flight
+        // Category just like before" -- matching the original plain-dot
+        // marker's color language rather than a neutral synoptic-plot look.
+        function skyCoverSvg(skyConditions, color) {
+            var covers = (skyConditions || []).map(function(s) { return (s.cover || '').toUpperCase(); });
+            var worst = 'SKC';
+            ['OVC', 'BKN', 'SCT', 'FEW'].forEach(function(c) { if (covers.indexOf(c) !== -1 && worst === 'SKC') worst = c; });
+            var r = 7;
+            if (worst === 'SKC') return '<circle cx="17" cy="17" r="' + r + '" fill="none" stroke="' + color + '" stroke-width="1.5"/>';
+            if (worst === 'FEW') return '<circle cx="17" cy="17" r="' + r + '" fill="none" stroke="' + color + '" stroke-width="1.5"/>' +
+                '<path d="M 17 10 A 7 7 0 0 1 17 24" fill="' + color + '"/>';
+            if (worst === 'SCT') return '<circle cx="17" cy="17" r="' + r + '" fill="none" stroke="' + color + '" stroke-width="1.5"/>' +
+                '<path d="M 17 10 A 7 7 0 0 1 24 17 L 17 17 Z" fill="' + color + '"/>';
+            if (worst === 'BKN') return '<circle cx="17" cy="17" r="' + r + '" fill="' + color + '" stroke="' + color + '" stroke-width="1.5"/>' +
+                '<path d="M 17 10 A 7 7 0 0 0 10 17 L 17 17 Z" fill="#fff"/>';
+            return '<circle cx="17" cy="17" r="' + r + '" fill="' + color + '" stroke="' + color + '" stroke-width="1.5"/>';  // OVC
+        }
+
+        // Lowest BKN/OVC layer height, in feet -- matches TAF-convention
+        // ceiling definition (bulk METAR endpoint doesn't return a
+        // standalone ceiling_ft field, only the raw sky_conditions array).
+        function deriveCeilingFt(skyConditions) {
+            var ceil = null;
+            (skyConditions || []).forEach(function(s) {
+                var cover = (s.cover || '').toUpperCase();
+                if ((cover === 'BKN' || cover === 'OVC') && s.height_ft !== undefined && s.height_ft !== null) {
+                    if (ceil === null || s.height_ft < ceil) ceil = s.height_ft;
+                }
+            });
+            return ceil;
+        }
+
+        // Full-plot icon is wider (70x34, not 34x34) so temp/dewpoint
+        // (left) and ceiling/vis (right) text has room around the sky/barb
+        // symbol without being clipped by the icon's own bounding box
+        // (found live 2026-09-22: the original 34px-wide box clipped
+        // anything positioned outside it, silently hiding text even
+        // though it was in the DOM). The symbol stays centered on
+        // iconAnchor -- see buildMarkerIcon's [35,17] anchor.
+        function stationPlotHtml(metar, showFullPlot) {
+            var color = getCategoryColor(metar.flight_category);
+            var dir = metar.wind_dir || 0;
+            if (!showFullPlot) {
+                var barbOnly = '<div style="position:absolute;top:0;left:0;transform:rotate(' + dir + 'deg);">' +
+                               windBarbSvg(metar.wind_speed_kts, color) + '</div>';
+                return '<div style="position:relative;width:34px;height:34px;">' + barbOnly + '</div>';
+            }
+            var tempC = (metar.temp_c !== null && metar.temp_c !== undefined) ? Math.round(metar.temp_c) : null;
+            var dewC  = (metar.dewpoint_c !== null && metar.dewpoint_c !== undefined) ? Math.round(metar.dewpoint_c) : null;
+            var ceilFt = deriveCeilingFt(metar.sky_conditions);
+            var visSm = (metar.visibility_sm !== null && metar.visibility_sm !== undefined) ? metar.visibility_sm : null;
+            var sky = '<svg width="34" height="34" viewBox="0 0 34 34" style="position:absolute;top:0;left:18px;">' +
+                      skyCoverSvg(metar.sky_conditions, color) + '</svg>';
+            var barb = '<div style="position:absolute;top:0;left:18px;transform:rotate(' + dir + 'deg);">' +
+                       windBarbSvg(metar.wind_speed_kts, color) + '</div>';
+            var textStyle = 'position:absolute;font:bold 11px sans-serif;color:' + color +
+                            ';text-shadow:0 0 2px #fff,0 0 2px #fff;';
+            var tempHtml = (tempC !== null) ? '<div style="' + textStyle + 'left:0;top:8px;width:16px;text-align:right;">' + tempC + '</div>' : '';
+            var dewHtml  = (dewC !== null) ? '<div style="' + textStyle + 'left:0;top:20px;width:16px;text-align:right;">' + dewC + '</div>' : '';
+            var ceilText = (ceilFt !== null) ? 'C' + String(Math.round(ceilFt / 100)).padStart(3, '0') : '';
+            var ceilHtml = ceilText ? '<div style="' + textStyle + 'left:52px;top:2px;width:24px;text-align:left;font-size:10px;">' + ceilText + '</div>' : '';
+            var visText = (visSm !== null) ? (visSm >= 10 ? '10' : Math.round(visSm)) : '';
+            var visHtml  = (visText !== '') ? '<div style="' + textStyle + 'left:52px;top:22px;width:18px;text-align:left;font-size:10px;">' + visText + '</div>' : '';
+            // Gust: METAR's own wind_gust_kts is only ever populated when
+            // the observation itself judged it significant (no secondary
+            // threshold needed here) -- found live 2026-09-22 that gusts
+            // weren't shown on the plot at all (windBarbSvg only ever got
+            // wind_speed_kts). Shown as "Gxx" centered below the barb, in
+            // red regardless of flight category -- gust is a hazard flag,
+            // not a flight-category-colored data point like the rest.
+            var gustKt = (metar.wind_gust_kts !== null && metar.wind_gust_kts !== undefined) ? Math.round(metar.wind_gust_kts) : null;
+            var gustHtml = (gustKt !== null) ? '<div style="position:absolute;left:18px;top:26px;width:34px;text-align:center;' +
+                'font:bold 10px sans-serif;color:#cc0000;text-shadow:0 0 2px #fff,0 0 2px #fff;">G' + gustKt + '</div>' : '';
+            return '<div style="position:relative;width:70px;height:44px;">' +
+                   sky + barb + tempHtml + dewHtml + ceilHtml + visHtml + gustHtml + '</div>';
+        }
 
         var airportTiers = {
             'KATL': 2, 'KORD': 2, 'KLAX': 2, 'KDFW': 2, 'KDEN': 2, 'KJFK': 2,
@@ -869,6 +1006,30 @@
             'KLGA': 2, 'KDCA': 2, 'KMDW': 2, 'KBWI': 2, 'KSLC': 2, 'KSAN': 2,
             'KTPA': 2, 'KPDX': 2, 'KHON': 2
         };
+
+        // Tier 0: guaranteed-visible override, added 2026-09-22 at Gerry's
+        // request ("I need to see those this week at Zoom 9+") after KSER
+        // stayed hidden despite the relevant tier checkboxes being on --
+        // rather than keep chasing generic runway-length-tier/zoom
+        // interactions per airport, these specific MEF-development
+        // airports (the KBAK cluster from project_mission_taf_kbak_cluster
+        // memory) always show at z0+, bypassing BOTH the tier checkboxes
+        // AND runway-based classification entirely. Checked first, before
+        // airportTiers/military/runway resolution, in both addMarker() and
+        // addNoMetarMarker().
+        var MEF_PRIORITY_AIRPORTS = {
+            'KBAK': 1, 'KOVO': 1, 'KMQJ': 1, 'KSER': 1, 'KBFR': 1,
+            'KGEZ': 1, 'KI34': 1, 'KHLB': 1, 'KCEV': 1
+        };
+        // Fixed bounding box covering all 9 (west,south,east,north; small
+        // padding around their real coordinates) -- used to fetch these
+        // regardless of the user's current map viewport. Tier 0 alone
+        // only controls DISPLAY of already-loaded markers; both
+        // /metar/recent and /no-metar-airports are scoped to the CURRENT
+        // viewport bounds (found live 2026-09-22: Gerry only saw 4 of the
+        // 9 -- the ones that happened to fall inside his current pan/zoom
+        // -- because the rest were never fetched at all, not a display bug).
+        var MEF_PRIORITY_BOUNDS = '-86.55,38.74,-85.03,39.94';
 
         // Resolve runway-based tier for a METAR/airport object.
         // Returns tier 3/4/5 based on longest_runway_ft; defaults to 3 if unknown.
@@ -922,10 +1083,13 @@
             setupControls();
             loadWeatherData();
 
-            // Auto-refresh METAR/flight status every 10 minutes.
-            // METARs are issued hourly; 10-min interval ensures data is
-            // never more than ~10 min stale without requiring a page reload.
-            setInterval(loadWeatherData, 10 * 60 * 1000);
+            // Auto-refresh METAR/flight status every 2 minutes. Lowered
+            // from 10 min on 2026-09-22 at Gerry's request for this week's
+            // live flight test -- LDM ingests METARs continuously straight
+            // into the DB, so this endpoint is a local Postgres query, not
+            // an external fetch; 2 min is cheap. (5 min would also have
+            // been acceptable per Gerry -- picked the tighter of the two.)
+            setInterval(loadWeatherData, 2 * 60 * 1000);
 
             // Both filterMarkers and updateLabels run on zoom/pan so markers
             // disappear/appear correctly at tier zoom thresholds.
@@ -933,6 +1097,7 @@
             map.on('zoomend moveend', function() {
                 filterMarkers();
                 updateLabels();
+                updateStationPlots();
                 // Reload weather data for new bounds after pan/zoom settles
                 clearTimeout(_loadTimer);
                 _loadTimer = setTimeout(loadWeatherData, 800);
@@ -970,6 +1135,8 @@
             ['Military', 'Hubs', 'Regional', 'Local', 'Small'].forEach(function(type) {
                 document.getElementById('show' + type).addEventListener('change', filterMarkers);
             });
+
+            document.getElementById('stationPlotToggle').addEventListener('change', updateStationPlots);
 
             document.getElementById('showNoMetar').addEventListener('change', function(e) {
                 if (e.target.checked) {
@@ -1105,8 +1272,10 @@
 
             metatMarkers.forEach(function(marker) {
                 var tier = marker.options.airportTier;
-                // Is the toggle for this tier enabled?
-                var toggleOn = (tier === 1 && showMilitary) ||
+                // Tier 0 (MEF-priority override) always shows, bypassing
+                // every checkbox -- see MEF_PRIORITY_AIRPORTS.
+                var toggleOn = (tier === 0) ||
+                               (tier === 1 && showMilitary) ||
                                (tier === 2 && showHubs)     ||
                                (tier === 3 && showRegional) ||
                                (tier === 4 && showLocal)    ||
@@ -1137,13 +1306,21 @@
                 var pos      = m.getLatLng();
                 var inBounds = bounds.contains(pos);
                 var tier     = m.options.airportTier;
-                var toggleOn = (tier === 1 && showMilitary) ||
+                // Tier 0 (MEF-priority override) always shows, bypassing
+                // every checkbox and the mil/civ zoom threshold below --
+                // see MEF_PRIORITY_AIRPORTS.
+                var toggleOn = (tier === 0) ||
+                               (tier === 1 && showMilitary) ||
                                (tier === 2 && showHubs)     ||
                                (tier === 3 && showRegional) ||
                                (tier === 4 && showLocal)    ||
                                (tier === 5 && showSmall);
-                var minZ     = m._noMetarMilitary ? NO_METAR_SYM_ZOOM.mil : NO_METAR_SYM_ZOOM.civ;
-                if (inBounds && toggleOn && zoom >= minZ) {
+                var minZ     = (tier === 0) ? 0 : (m._noMetarMilitary ? NO_METAR_SYM_ZOOM.mil : NO_METAR_SYM_ZOOM.civ);
+                // Tier 0 also bypasses the viewport-bounds check below --
+                // otherwise an MEF-priority airport far from the current
+                // pan position (e.g. zoomed in tight on just one of the
+                // 9) gets hidden even with toggleOn/minZ both satisfied.
+                if ((inBounds || tier === 0) && toggleOn && zoom >= minZ) {
                     if (!m._map) m.addTo(map);
                 } else {
                     if (m._map) map.removeLayer(m);
@@ -1228,7 +1405,8 @@
                       'box-shadow:0 0 3px rgba(0,0,0,0.4);"></div>',
                 iconSize: [12, 12], iconAnchor: [6, 6]
             });
-            var tier   = airport.is_military ? 1 : runwayTier(airport);
+            var tier   = MEF_PRIORITY_AIRPORTS[airport.station_id] === 1 ? 0 :
+                        (airport.is_military ? 1 : runwayTier(airport));
             var rnwy   = airport.longest_runway_ft
                 ? (Math.round(airport.longest_runway_ft / 100) * 100 + ' ft') : 'unknown';
             var marker = L.marker([lat, lon], { icon: icon, airportTier: tier });
@@ -1254,32 +1432,126 @@
             noMetarMarkers.push(marker);
         }
 
-        function addMarker(metar) {
-            var color = getCategoryColor(metar.flight_category);
-            var icon = L.divIcon({
+        function dotIcon(color) {
+            return L.divIcon({
                 className: '',
                 html: '<div style="width:12px;height:12px;background:' + color +
                       ';border:2px solid #000;border-radius:50%;' +
                       'box-shadow:0 0 4px rgba(0,0,0,0.5);"></div>',
                 iconSize: [12, 12], iconAnchor: [6, 6]
             });
-            // Explicit tier from hub list or military flag; otherwise use runway length
-            var tier = airportTiers[metar.station_id] ||
-                       (metar.is_military === true || metar.military === true ? 1 : null);
-            if (!tier) tier = runwayTier(metar);
+        }
+
+        // Chooses dot / wind-barb-only / full-plot for one marker based on
+        // the current stationPlotToggle + zoom state. Wind barb appears at
+        // the tier's normal TIER_MIN_ZOOM (same as the dot always has);
+        // the full plot (sky symbol + temp/dewpoint/ceiling/vis/gust) needs
+        // an additional STATION_PLOT_ZOOM_OFFSET zoom levels, unless the
+        // tier has an explicit STATION_PLOT_FULL_ZOOM_OVERRIDE.
+        function buildMarkerIcon(metar, tier) {
+            var color = getCategoryColor(metar.flight_category);
+            var plotsOn = document.getElementById('stationPlotToggle').checked;
+            if (!plotsOn) return dotIcon(color);
+            var zoom = map.getZoom();
+            var minZ = (TIER_MIN_ZOOM[tier] !== undefined) ? TIER_MIN_ZOOM[tier] : 6;
+            if (zoom < minZ) return dotIcon(color);  // shouldn't normally be visible at all here
+            var fullZ = (STATION_PLOT_FULL_ZOOM_OVERRIDE[tier] !== undefined) ?
+                        STATION_PLOT_FULL_ZOOM_OVERRIDE[tier] : (minZ + STATION_PLOT_ZOOM_OFFSET);
+            var showFullPlot = zoom >= fullZ;
+            return L.divIcon({
+                className: '', html: stationPlotHtml(metar, showFullPlot),
+                iconSize: showFullPlot ? [70, 44] : [34, 34],
+                iconAnchor: showFullPlot ? [35, 17] : [17, 17]
+            });
+        }
+
+        // Formats a station's tooltip age suffix, e.g. " (12m ago)" or
+        // " (2h 5m ago)" -- added 2026-09-22 per Gerry's request to show
+        // observation age on hover. Returns '' if observation_time is
+        // missing/unparseable rather than showing a misleading age.
+        function obsAgeTooltipSuffix(obsTimeIso) {
+            if (!obsTimeIso) return '';
+            var obsMs = Date.parse(obsTimeIso);
+            if (isNaN(obsMs)) return '';
+            var ageMin = Math.max(0, Math.round((Date.now() - obsMs) / 60000));
+            var ageStr = (ageMin < 60) ? (ageMin + 'm ago') :
+                         (Math.floor(ageMin / 60) + 'h ' + (ageMin % 60) + 'm ago');
+            return ' (' + ageStr + ')';
+        }
+
+        function addMarker(metar) {
+            var color = getCategoryColor(metar.flight_category);
+            // MEF-priority override first, then hub list/military flag, then runway length
+            var tier = MEF_PRIORITY_AIRPORTS[metar.station_id] === 1 ? 0 :
+                       (airportTiers[metar.station_id] ||
+                       (metar.is_military === true || metar.military === true ? 1 : null));
+            if (tier === null || tier === undefined) tier = runwayTier(metar);
 
             var marker = L.marker([metar.latitude, metar.longitude], {
-                icon: icon, flightCategory: metar.flight_category, airportTier: tier
+                icon: buildMarkerIcon(metar, tier),
+                flightCategory: metar.flight_category, airportTier: tier,
+                stationMetar: metar
             });
-            marker.bindTooltip(metar.station_id + ' — ' + metar.flight_category,
+            marker.bindTooltip(metar.station_id + ' — ' + metar.flight_category + obsAgeTooltipSuffix(metar.observation_time),
                 { permanent: false, direction: 'top', offset: [0, -8] });
-            marker.on('click', function() { showStationPopup(metar); });
+            marker.on('click', function() {
+                if (document.getElementById('stationPlotToggle').checked) {
+                    showNearestTafPopup(metar);
+                } else {
+                    showStationPopup(metar);
+                }
+            });
 
             // Apply initial zoom gate before adding to map
             var zoom = map.getZoom();
             var minZ = (TIER_MIN_ZOOM[tier] !== undefined) ? TIER_MIN_ZOOM[tier] : 6;
             if (zoom >= minZ) marker.addTo(map);
             metatMarkers.push(marker);
+        }
+
+        // Re-renders every marker's icon for the current zoom/toggle state
+        // -- called from the same zoomend/moveend handler filterMarkers()
+        // already uses, plus stationPlotToggle's change.
+        function updateStationPlots() {
+            metatMarkers.forEach(function(marker) {
+                marker.setIcon(buildMarkerIcon(marker.options.stationMetar, marker.options.airportTier));
+            });
+        }
+
+        // Click behavior for station-plot markers: nearest TAF (not
+        // necessarily this station's own -- most small fields don't have
+        // one) instead of the full METAR-detail popup, since the METAR
+        // itself is already visible on the map via the plot. Pans the map
+        // first so the popup has room (Leaflet's autoPan, on by default,
+        // handles the "displace the view to accommodate the box" ask).
+        function showNearestTafPopup(metar) {
+            var latlng = [metar.latitude, metar.longitude];
+            var loading = L.popup({ autoPan: true }).setLatLng(latlng)
+                .setContent('<div style="font-family:monospace;min-width:220px;">Loading nearest TAF…</div>')
+                .openOn(map);
+            fetch('/CAP_WxCOP/api/weather-enhanced/taf/nearest?lat=' + metar.latitude + '&lon=' + metar.longitude)
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.error) {
+                        loading.setContent('<div style="font-family:monospace;min-width:220px;">' +
+                            metar.station_id + '<hr style="margin:0.4rem 0;"><p style="color:#888;">' + data.error + '</p></div>');
+                        return;
+                    }
+                    var srcNote = (data.station_id === metar.station_id) ? '' :
+                        ' <span style="color:#888;font-weight:normal;">(nearest TAF: ' + data.station_id +
+                        ', ' + data.distance_nm + ' nm)</span>';
+                    loading.setContent(
+                        '<div style="font-family:monospace;min-width:260px;">' +
+                        '<h3 style="margin:0 0 4px;">' + metar.station_id + srcNote + '</h3>' +
+                        '<pre style="white-space:pre-wrap;font-size:12px;margin:0;">' +
+                        (typeof formatTAF === 'function' ? formatTAF(data.raw_text) : data.raw_text) +
+                        '</pre></div>'
+                    );
+                })
+                .catch(function() {
+                    loading.setContent('<div style="font-family:monospace;min-width:220px;">' +
+                        metar.station_id + '<hr style="margin:0.4rem 0;"><p style="color:#888;">TAF lookup failed</p></div>');
+                });
         }
 
         function getCategoryColor(cat) {
@@ -1511,11 +1783,18 @@
         }
 
         function loadNoMetarAirports() {
-            // Use fixed CONUS bounds to match the METAR fetch — dynamic map bounds
-            // at initial zoom 5 may clip airports near the edges of the viewport.
+            // NOTE (corrected 2026-09-22): this comment previously claimed
+            // "fixed CONUS bounds" but the code below always used the
+            // CURRENT viewport (map.getBounds()) -- genuinely dynamic, not
+            // fixed. That mismatch is exactly why MEF-priority airports
+            // outside the current view were silently never fetched; see
+            // loadMefPriorityAirports() for the actual fixed-bounds fetch
+            // those 9 airports need. Returns the fetch promise so callers
+            // (loadWeatherData()) can chain work that must run after this
+            // resolves, since it rebuilds noMetarMarkers/noMetarAirports.
             var _b = map.getBounds();
             var bounds = _b.getWest().toFixed(2)+','+_b.getSouth().toFixed(2)+','+_b.getEast().toFixed(2)+','+_b.getNorth().toFixed(2);
-            fetch('/CAP_WxCOP/api/weather/no-metar-airports?bounds=' + bounds + '&limit=5000')
+            return fetch('/CAP_WxCOP/api/weather/no-metar-airports?bounds=' + bounds + '&limit=5000')
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
                     noMetarMarkers.forEach(function(m) { if (m._map) map.removeLayer(m); });
@@ -1531,6 +1810,50 @@
                     }
                 })
                 .catch(function(err) { console.warn('No-METAR airports load failed:', err); });
+        }
+
+        // Fetches the 9 MEF-priority airports using a fixed bounding box,
+        // independent of the current map viewport -- called after the
+        // normal viewport-based loadWeatherData()/loadNoMetarAirports()
+        // chain, so these always appear regardless of where the user has
+        // panned/zoomed (as long as tier 0's zoom>=0 threshold is met,
+        // which it always is). Dedupes against whatever the viewport-
+        // based fetch already loaded, matching loadNoMetarAirports()'s
+        // own dedupe pattern.
+        function loadMefPriorityAirports() {
+            fetch('/CAP_WxCOP/api/weather-enhanced/metar/recent?bounds=' + MEF_PRIORITY_BOUNDS + '&limit=100')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (!data.metars) return;
+                    var haveIds = new Set(currentMetars.map(function(m) { return m.station_id; }));
+                    data.metars.forEach(function(m) {
+                        if (MEF_PRIORITY_AIRPORTS[m.station_id] === 1 && !haveIds.has(m.station_id)) {
+                            currentMetars.push(m);
+                            addMarker(m);
+                            haveIds.add(m.station_id);
+                        }
+                    });
+                    filterMarkers();
+                })
+                .catch(function(err) { console.warn('MEF-priority METAR load failed:', err); });
+
+            fetch('/CAP_WxCOP/api/weather/no-metar-airports?bounds=' + MEF_PRIORITY_BOUNDS + '&limit=100')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (!data.airports) return;
+                    var haveMetarIds = new Set(currentMetars.map(function(m) { return m.station_id; }));
+                    var haveNoMetarIds = new Set(noMetarAirports.map(function(a) { return a.station_id; }));
+                    data.airports.forEach(function(a) {
+                        if (MEF_PRIORITY_AIRPORTS[a.station_id] === 1 &&
+                            !haveMetarIds.has(a.station_id) && !haveNoMetarIds.has(a.station_id)) {
+                            noMetarAirports.push(a);
+                            addNoMetarMarker(a);
+                            haveNoMetarIds.add(a.station_id);
+                        }
+                    });
+                    updateNoMetarSymbols();
+                })
+                .catch(function(err) { console.warn('MEF-priority no-METAR load failed:', err); });
         }
 
         function loadWeatherData() {
@@ -1552,7 +1875,7 @@
                         data.metars.forEach(addMarker);
                         filterMarkers();   // reapply current checkbox state
                         updateLabels();
-                        loadNoMetarAirports();
+                        loadNoMetarAirports().then(loadMefPriorityAirports);
                     }
                 })
                 .catch(function(error) {
