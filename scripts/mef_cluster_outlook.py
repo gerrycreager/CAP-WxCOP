@@ -2,8 +2,11 @@
 """
 mef_cluster_outlook.py — ceiling/wind/vis fly-or-no-fly outlook for the
 KBAK MEF cluster (the same 9-airport set mission_taf_extract.py and
-EWMC's MEF-priority tier use), across RRFS/HRRR (and optionally NAM),
-emailed as HTML tables.
+EWMC's MEF-priority tier use), across RRFS/HRRR/NAM. Produces 3 separate
+per-model HTML files (a short combined verdict goes in the email body;
+the full hourly grid for each model is its own attachment), saved to
+--archive-dir (default ~/CAP/Weather/MEF_cluster) with a run-timestamped
+filename and attached to the outgoing email.
 
 Built 2026-09-23 for Gerry's real fly/no-fly calls, after two live runs
 found (a) RRFS's ceiling field bug (see docs/rrfs-model-taf.md /
@@ -32,12 +35,18 @@ Examples:
   mef_cluster_outlook.py --auto
   mef_cluster_outlook.py --window 2026-09-23T18:00 2026-09-23T22:00 \\
                           --window 2026-09-24T12:00 2026-09-24T22:00
-  mef_cluster_outlook.py --auto --with-nam --to someone@example.com
+  mef_cluster_outlook.py --auto --skip-nam --to someone@example.com
 
 Run manually (not a cron job -- this is an on-demand analysis tool, not a
 routine ingest). Takes several minutes: RRFS is ~30-40 NOMADS byte-range
 fetches (polite pacing/retry built in, same lesson as rrfs_wind_fetch.py),
-HRRR is local/fast, NAM (if requested) is another ~35 NOMADS fetches.
+HRRR is local/fast, NAM is another ~35 NOMADS fetches (--skip-nam to drop
+it for a faster run).
+
+Note on email: needs a per-user msmtp config (~/.msmtprc) since /etc/msmtprc
+is deliberately ACL-restricted to root+ldm on this host -- if you get an
+auth/config error sending, that's why; ask for a private copy rather than
+loosening the system one.
 """
 import argparse
 import math
@@ -477,71 +486,108 @@ def ceiling_grid_html(model_name, model_data, hours, threshold_ft, label=''):
     '''
 
 
-def build_email(models, threshold_ft, min_hours, windows_arg):
-    parts = [f'''
-    <html><body style="font-family:sans-serif;">
-    <h2>KBAK MEF Cluster (9 airports) — Fly/No-Fly Ceiling Outlook</h2>
-    <p>Generated {datetime.now(timezone.utc):%Y-%m-%d %H:%M UTC}. Threshold: ceiling &ge;{threshold_ft}ft AGL
-    at KBAK and all 8 outlying fields simultaneously.</p>
-    <p><b>RRFS and HRRR are not proven for this use case</b> (fine-grid convection-allowing
-    model output at named GA airfields is beyond their designed/verified scope) -- treat as
-    experimental guidance, not definitive.</p>
-    <hr><h2>Summary</h2>
-    ''']
-
-    for name, (data, cycle_dt) in models.items():
-        if not data or not any(data[icao] for icao in AIRPORTS):
-            parts.append(f'<p><b>{name}</b>: no usable data this run.</p>')
-            continue
-        cyc_label = f' ({cycle_dt:%Y-%m-%d %HZ} cycle)' if cycle_dt else ''
-        if windows_arg:
-            parts.append(f'<p><b>{name}{cyc_label}</b>:</p><ul>')
-            for ws, we in windows_arg:
-                verdict, _ = window_verdict(data, ws, we, threshold_ft)
-                parts.append(f'<li>{ws:%a %m/%d %HZ}&ndash;{we:%a %m/%d %HZ}: {verdict}</li>')
+def model_summary_html(name, data, cycle_dt, threshold_ft, min_hours, windows_arg):
+    """Short verdict-only block for the email BODY (not the per-model
+    attachment, which carries the full grid)."""
+    if not data or not any(data[icao] for icao in AIRPORTS):
+        return f'<p><b>{name}</b>: no usable data this run.</p>'
+    cyc_label = f' ({cycle_dt:%Y-%m-%d %HZ} cycle)' if cycle_dt else ''
+    parts = []
+    if windows_arg:
+        parts.append(f'<p><b>{name}{cyc_label}</b>:</p><ul>')
+        for ws, we in windows_arg:
+            verdict, _ = window_verdict(data, ws, we, threshold_ft)
+            parts.append(f'<li>{ws:%a %m/%d %HZ}&ndash;{we:%a %m/%d %HZ}: {verdict}</li>')
+        parts.append('</ul>')
+    else:
+        windows, _ = find_auto_windows(data, threshold_ft, min_hours)
+        if not windows:
+            parts.append(f'<p><b>{name}{cyc_label}</b>: no window &ge;{min_hours}h found.</p>')
+        else:
+            parts.append(f'<p><b>{name}{cyc_label}</b> — flyable window(s):</p><ul>')
+            for s, e, dur in windows:
+                flag = ' — <b>6+ hrs, ideal</b>' if dur >= 6 else ''
+                parts.append(f'<li>{datetime.fromisoformat(s):%a %m/%d %HZ}&ndash;'
+                              f'{datetime.fromisoformat(e):%a %m/%d %HZ} ({dur}h){flag}</li>')
             parts.append('</ul>')
-        else:
-            windows, _ = find_auto_windows(data, threshold_ft, min_hours)
-            if not windows:
-                parts.append(f'<p><b>{name}{cyc_label}</b>: no window &ge;{min_hours}h found.</p>')
-            else:
-                parts.append(f'<p><b>{name}{cyc_label}</b> — flyable window(s):</p><ul>')
-                for s, e, dur in windows:
-                    flag = ' — <b>6+ hrs, ideal</b>' if dur >= 6 else ''
-                    parts.append(f'<li>{datetime.fromisoformat(s):%a %m/%d %HZ}&ndash;'
-                                  f'{datetime.fromisoformat(e):%a %m/%d %HZ} ({dur}h){flag}</li>')
-                parts.append('</ul>')
-
-    parts.append('<hr>')
-    for name, (data, _cycle_dt) in models.items():
-        if not data:
-            continue
-        if windows_arg:
-            for ws, we in windows_arg:
-                _, hours = window_verdict(data, ws, we, threshold_ft)
-                parts.append(ceiling_grid_html(name, data, hours, threshold_ft,
-                                                f'{ws:%m/%d %HZ}-{we:%m/%d %HZ}'))
-        else:
-            all_hours = sorted(set.union(*[set(data[icao].keys()) for icao in AIRPORTS])) if any(data[i] for i in AIRPORTS) else []
-            parts.append(ceiling_grid_html(name, data, all_hours, threshold_ft))
-
-    parts.append('</body></html>')
     return ''.join(parts)
 
 
-def send_email(html, recipient, subject):
-    msg = (
-        "MIME-Version: 1.0\nContent-Type: text/html; charset=utf-8\n"
-        f"Subject: {subject}\nTo: {recipient}\n\n{html}"
-    )
+def model_attachment_html(name, data, cycle_dt, threshold_ft, min_hours, windows_arg, caveat):
+    """Full standalone HTML document for one model -- verdict + full grid(s),
+    saved as its own file and attached to the email separately."""
+    cyc_label = f'{cycle_dt:%Y-%m-%d %HZ} cycle' if cycle_dt else 'no data'
+    body = [f'''
+    <html><body style="font-family:sans-serif;">
+    <h2>KBAK MEF Cluster — {name} ({cyc_label})</h2>
+    <p>Generated {datetime.now(timezone.utc):%Y-%m-%d %H:%M UTC}. Threshold: ceiling &ge;{threshold_ft}ft AGL
+    at KBAK and all 8 outlying fields simultaneously.</p>
+    {f"<p>{caveat}</p>" if caveat else ""}
+    <hr>
+    ''', model_summary_html(name, data, cycle_dt, threshold_ft, min_hours, windows_arg), '<hr>']
+
+    if not data:
+        body.append('</body></html>')
+        return ''.join(body)
+
+    if windows_arg:
+        for ws, we in windows_arg:
+            _, hours = window_verdict(data, ws, we, threshold_ft)
+            body.append(ceiling_grid_html(name, data, hours, threshold_ft, f'{ws:%m/%d %HZ}-{we:%m/%d %HZ}'))
+    else:
+        all_hours = (sorted(set.union(*[set(data[icao].keys()) for icao in AIRPORTS]))
+                     if any(data[i] for i in AIRPORTS) else [])
+        body.append(ceiling_grid_html(name, data, all_hours, threshold_ft))
+    body.append('</body></html>')
+    return ''.join(body)
+
+
+MODEL_CAVEATS = {
+    'RRFS': 'RRFS is not proven for this use case (fine-grid convection-allowing model output at named GA '
+            'airfields is beyond its designed/verified scope) -- treat as experimental guidance, not definitive.',
+    'HRRR': 'HRRR is not proven for this use case either, though its dynamical core is more established than '
+            "RRFS's current (pre-MPAS) one -- still experimental guidance for named GA airfields, not definitive.",
+    'NAM': 'NAM has no true ceiling field -- HGT:cloud base is used as a proxy, not RRFS/HRRR\'s real diagnosed '
+           'ceiling height. Included as a coarser, more conventionally-validated cross-check.',
+}
+
+
+def save_attachment(name, html, archive_dir, run_stamp):
+    os.makedirs(archive_dir, exist_ok=True)
+    path = os.path.join(archive_dir, f'mef_cluster_{name}_{run_stamp}.html')
+    with open(path, 'w') as f:
+        f.write(html)
+    return path
+
+
+def send_email_with_attachments(summary_html, attachments, recipient, subject):
+    """attachments: list of (display_name, file_path) to attach as
+    text/html. Uses email.mime for correct multipart/mixed + base64
+    encoding -- raw string concatenation (the original single-body
+    approach) doesn't extend cleanly to real file attachments."""
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+    from email.mime.application import MIMEApplication
+
+    msg = MIMEMultipart('mixed')
+    msg['Subject'] = subject
+    msg['To'] = recipient
+    msg.attach(MIMEText(summary_html, 'html'))
+
+    for display_name, path in attachments:
+        with open(path, 'rb') as f:
+            part = MIMEApplication(f.read(), _subtype='html')
+        part.add_header('Content-Disposition', 'attachment', filename=os.path.basename(path))
+        msg.attach(part)
+
     # msmtp is the real, working mail path on this host -- confirmed live
     # 2026-09-23. auth.py's smtplib-to-localhost:25 approach has no
     # listener here; don't copy that pattern for new scripts.
-    p = subprocess.run(['msmtp', '-a', 'gmail', recipient], input=msg, capture_output=True, text=True)
+    p = subprocess.run(['msmtp', '-a', 'gmail', recipient], input=msg.as_string(), capture_output=True, text=True)
     if p.returncode != 0:
         log(f'EMAIL SEND FAILED: {p.stderr}')
         return False
-    log(f'EMAIL SENT to {recipient}')
+    log(f'EMAIL SENT to {recipient} with {len(attachments)} attachment(s)')
     return True
 
 
@@ -553,9 +599,11 @@ def main():
     ap.add_argument('--threshold-ft', type=int, default=2000, help='Ceiling threshold, ft AGL (default 2000)')
     ap.add_argument('--min-hours', type=int, default=4, help='Minimum window length for --auto (default 4)')
     ap.add_argument('--max-fhour', type=int, default=34, help='Max forecast hour to fetch (default 34)')
-    ap.add_argument('--with-nam', action='store_true', help='Also include NAM (cloud-base proxy, no true ceiling field)')
+    ap.add_argument('--skip-nam', action='store_true', help='Skip NAM (runs by default alongside RRFS/HRRR)')
     ap.add_argument('--to', default=DEFAULT_RECIPIENT, help=f'Email recipient (default {DEFAULT_RECIPIENT})')
-    ap.add_argument('--no-email', action='store_true', help='Build the HTML but skip sending')
+    ap.add_argument('--no-email', action='store_true', help='Build the attachments but skip sending')
+    ap.add_argument('--archive-dir', default=os.path.expanduser('~/CAP/Weather/MEF_cluster'),
+                     help='Directory to save the 3 per-model HTML files (default ~/CAP/Weather/MEF_cluster)')
     args = ap.parse_args()
 
     windows_arg = None
@@ -568,17 +616,32 @@ def main():
     models = {}
     models['RRFS'] = run_rrfs(args.max_fhour)
     models['HRRR'] = run_hrrr(args.max_fhour)
-    if args.with_nam:
+    if not args.skip_nam:
         models['NAM'] = run_nam(args.max_fhour)
 
-    html = build_email(models, args.threshold_ft, args.min_hours, windows_arg)
-    out_path = '/tmp/mef_cluster_outlook_last.html'
-    with open(out_path, 'w') as f:
-        f.write(html)
-    log(f'HTML written to {out_path}')
+    run_stamp = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%SZ')
+    attachments = []
+    for name, (data, cycle_dt) in models.items():
+        html = model_attachment_html(name, data, cycle_dt, args.threshold_ft, args.min_hours,
+                                      windows_arg, MODEL_CAVEATS.get(name, ''))
+        path = save_attachment(name, html, args.archive_dir, run_stamp)
+        attachments.append((name, path))
+        log(f'{name}: saved to {path}')
+
+    summary_html = f'''
+    <html><body style="font-family:sans-serif;">
+    <h2>KBAK MEF Cluster (9 airports) — Fly/No-Fly Ceiling Outlook</h2>
+    <p>Generated {datetime.now(timezone.utc):%Y-%m-%d %H:%M UTC}. Threshold: ceiling &ge;{args.threshold_ft}ft AGL
+    at KBAK and all 8 outlying fields simultaneously. Full per-model hourly grids attached separately
+    (RRFS/HRRR{"" if args.skip_nam else "/NAM"}).</p>
+    <hr><h3>Summary</h3>
+    {''.join(model_summary_html(name, data, cycle_dt, args.threshold_ft, args.min_hours, windows_arg)
+             for name, (data, cycle_dt) in models.items())}
+    </body></html>
+    '''
 
     if not args.no_email:
-        send_email(html, args.to, 'KBAK MEF Cluster Fly/No-Fly Outlook')
+        send_email_with_attachments(summary_html, attachments, args.to, 'KBAK MEF Cluster Fly/No-Fly Outlook')
 
     log('=== Done ===')
 
