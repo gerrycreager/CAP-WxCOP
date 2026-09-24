@@ -55,6 +55,7 @@ import subprocess
 import sys
 import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 sys.path.insert(0, '/var/www/cap_winds_app')
 import numpy as np
@@ -64,6 +65,24 @@ from scipy.spatial import cKDTree
 
 from scripts import rrfs_model_taf as rmt
 from scripts import rrfs_wind_fetch as rwf
+
+# /tmp/rrfs_wind_cache (rrfs_wind_fetch.py's default CACHE_DIR) is shared
+# with this app's production crons -- render_hrrr_particles/winds and
+# rrfs_model_taf.py's own real-time TAF requests run as root/www-data/ldm
+# depending on which host/path invokes them. Found live 2026-09-24
+# (Gerry running this as his own user): whichever process creates a given
+# cycle's subdirectory first sets its ownership, and a directory created
+# by e.g. the ldm-owned wind-particle cron (0775, ldm:ldm) blocks any
+# other user from writing new files into it -- a real "Permission denied"
+# for a second user, same class of bug as the earlier fixed-/tmp-path
+# issue with this script's own output file. Rather than fight over the
+# shared cache (or loosen its permissions, which affects production
+# scripts too), this tool gets its own private, per-invoking-user cache
+# tree -- redirecting rwf.CACHE_DIR here affects every fetch_and_cache()
+# call transitively made through rmt.fetch_fhour() too, since Python
+# resolves module globals at call time, not import time.
+_CACHE_ROOT = Path(os.path.expanduser('~/.cache/mef_cluster_outlook'))
+rwf.CACHE_DIR = _CACHE_ROOT / 'rrfs'
 
 AIRPORTS = {
     'KBAK': (39.262386, -85.895576, 656),
@@ -89,7 +108,7 @@ NAM_WANTED = {
     ('GUST', 'surface'), ('VIS', 'surface'),
     ('HGT', 'cloud base'), ('PRMSL', 'mean sea level'), ('PRES', 'surface'),
 }
-NAM_CACHE_DIR = '/tmp/mef_cluster_nam_cache'
+NAM_CACHE_DIR = str(_CACHE_ROOT / 'nam')  # also the parent for the HRRR S3 gap-fill cache below
 
 
 def log(msg):
