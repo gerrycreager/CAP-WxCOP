@@ -256,6 +256,9 @@ def run_rrfs(max_fhour):
         gust_msg = find(msgs, 'gust', 'surface'); vis_msg = find(msgs, 'vis', 'surface')
         ceil_msg = find(msgs, 'gh', 'cloudCeiling') or find(msgs, 'unknown', 'cloudCeiling')
         sp_msg = find(msgs, 'sp', 'surface')
+        if u_msg is None or v_msg is None:
+            log(f'RRFS F{fhr:03d}: decoded but missing wind fields, skipping')
+            continue
         if tree is None:
             lats, lons = u_msg.latlons()
             tree, shape = build_kdtree(lats, lons)
@@ -288,6 +291,14 @@ def find_latest_hrrr_synoptic_cycle(max_fhour):
 
 
 def hrrr_s3_fill(date, cyc, fhr):
+    """Raises on any failure (bad HTTP status on a range fetch, or a
+    missing required field) rather than returning a path to a silently
+    incomplete file -- found live 2026-09-24: the previous version never
+    checked each range GET's status code, so a single failed request (S3
+    rate-limit or transient error) wrote whatever error-page bytes it got
+    into the file, and the caller had no way to know the resulting GRIB
+    was missing fields (wind, in the observed crash) until it crashed
+    trying to use them."""
     S3_BASE = 'https://noaa-hrrr-bdp-pds.s3.amazonaws.com'
     HRRR_WANTED = {
         ('VIS', 'surface'), ('UGRD', '10 m above ground'), ('VGRD', '10 m above ground'),
@@ -307,18 +318,28 @@ def hrrr_s3_fill(date, cyc, fhr):
             entries.append((parts[0], int(parts[1]), parts[3], parts[4]))
         entries.sort(key=lambda e: e[1])
         head = s.head(grib_url, timeout=20)
+        head.raise_for_status()
         total = int(head.headers['Content-Length'])
         ranges = []
+        matched_fields = set()
         for i, (mn, off, var, level) in enumerate(entries):
             if (var, level) in HRRR_WANTED:
                 end = entries[i + 1][1] - 1 if i + 1 < len(entries) else total - 1
                 ranges.append((off, end))
+                matched_fields.add((var, level))
+        missing = HRRR_WANTED - matched_fields
+        if missing:
+            raise RuntimeError(f'S3 idx missing fields for f{fhr:03d}: {missing}')
         out_path = f'{NAM_CACHE_DIR}/hrrr_gapfill/hrrr.t{cyc}z.f{fhr:03d}.grib2'
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
-        with open(out_path, 'wb') as out:
+        tmp_path = out_path + '.tmp'
+        with open(tmp_path, 'wb') as out:
             for start, end in ranges:
                 resp = s.get(grib_url, headers={'Range': f'bytes={start}-{end}'}, timeout=30)
+                if resp.status_code not in (200, 206):
+                    raise RuntimeError(f'S3 range fetch failed for f{fhr:03d}: HTTP {resp.status_code}')
                 out.write(resp.content)
+        os.rename(tmp_path, out_path)
     return out_path
 
 
@@ -351,6 +372,13 @@ def run_hrrr(max_fhour):
         ceil_msg = find(msgs, 'gh', 'cloudCeiling')
         mslp_msg = find(msgs, 'prmsl', 'meanSea') or find(msgs, 'mslma', 'meanSea')
         sp_msg = find(msgs, 'sp', 'surface')
+        if u_msg is None or v_msg is None:
+            # Defense in depth against any other way a decoded file could
+            # end up missing wind fields (hrrr_s3_fill() now validates its
+            # own fetch, but don't trust that alone -- skip the hour
+            # cleanly rather than crash extract_all() on a None.
+            log(f'HRRR F{fhr:03d}: decoded but missing wind fields, skipping')
+            continue
         if tree is None:
             lats, lons = u_msg.latlons()
             tree, shape = build_kdtree(lats, lons)
@@ -464,6 +492,9 @@ def run_nam(max_fhour):
         cbase_msg = find(msgs, 'gh', 'cloudBase')
         mslp_msg = find(msgs, 'prmsl', 'meanSea')
         sp_msg = find(msgs, 'sp', 'surface')
+        if u_msg is None or v_msg is None:
+            log(f'NAM F{fhr:03d}: decoded but missing wind fields, skipping')
+            continue
         if tree is None:
             lats, lons = u_msg.latlons()
             tree, shape = build_kdtree(lats, lons)
