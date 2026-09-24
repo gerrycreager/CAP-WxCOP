@@ -146,13 +146,57 @@ def extract_all(u_msg, v_msg, gust_msg, vis_msg, ceil_msg, mslp_msg, sp_msg, idx
                                                 vis_sm=vis, ceil_ft=ceil_ft, mslp_mb=mslp, altim=alt)
 
 
+def _rrfs_cycle_fully_posted(date, cyc, max_fhour):
+    """Network-only check (no cache) -- is F000 AND the far-out hour both
+    actually posted for this cycle right now."""
+    for fhr in (0, max_fhour) if max_fhour > 0 else (0,):
+        url = (f'{rwf.SOURCE_BASE}/rrfs.{date}/{cyc}/rrfs.t{cyc}z.2dfld.'
+               f'3km.f{fhr:03d}.conus.grib2.idx')
+        try:
+            if requests.head(url, timeout=10).status_code != 200:
+                return False
+        except requests.RequestException:
+            return False
+    return True
+
+
+def find_latest_rrfs_cycle(max_fhour, max_lookback_hours=36):
+    """Deliberately NOT rmt.find_cycle_covering() -- that function checks
+    the LOCAL CACHE first (correct for rrfs_model_taf.py's own real-time
+    TAF use case, where a fully-cached recent cycle is normally still the
+    current one). Found live 2026-09-24: for a tool meant to always fetch
+    the latest data, that cache-first shortcut is a real footgun -- an
+    OLDER cycle that happened to be fully cached from earlier testing (this
+    script's own prior runs, same 'modeltaf' cache tag) won over a genuinely
+    fresher cycle (18Z) that just hadn't been fetched yet, because the
+    cache-first loop returns on the first *cached* hit scanning backward,
+    never reaching the network-verification pass that would have found 18Z.
+    This function always checks the network, freshest cycle first, and
+    ignores what happens to already be on disk for the SELECTION decision
+    (the actual fetch step still benefits from cache, via fetch_fhour())."""
+    need_synoptic = max_fhour > 17
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    cursor = (now - timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+    oldest = now - timedelta(hours=max_lookback_hours)
+    c = cursor
+    while c >= oldest:
+        if not need_synoptic or c.hour in (0, 6, 12, 18):
+            date, cyc = c.strftime('%Y%m%d'), c.strftime('%H')
+            if _rrfs_cycle_fully_posted(date, cyc, max_fhour):
+                return date, cyc
+        c -= timedelta(hours=1)
+    return None, None
+
+
 # ---------------------------------------------------------------------------
-# RRFS -- reuses rrfs_model_taf.py's cycle-selection + fetch/decode path
-# (includes the HGT:cloud-ceiling fix), adds a supplementary MSLET fetch
-# (not in rrfs_model_taf's own field set, which doesn't need it for TAF text)
+# RRFS -- reuses rrfs_model_taf.py's fetch/decode path (includes the
+# HGT:cloud-ceiling fix) but NOT its cycle selection (see
+# find_latest_rrfs_cycle() above for why). Adds a supplementary MSLET
+# fetch (not in rrfs_model_taf's own field set, which doesn't need it for
+# TAF text).
 # ---------------------------------------------------------------------------
 def run_rrfs(max_fhour):
-    date, cyc = rmt.find_cycle_covering(max_fhour)
+    date, cyc = find_latest_rrfs_cycle(max_fhour)
     if date is None:
         log('RRFS: no ready cycle found for this range')
         return {}, None
