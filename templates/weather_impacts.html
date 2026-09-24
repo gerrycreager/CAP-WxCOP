@@ -88,6 +88,19 @@
         .leg-item { display: flex; align-items: center; gap: 8px; margin: 4px 0; font-size: 12px; color: #444; }
         .leg-dot { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; border: 1.5px solid rgba(0,0,0,0.2); }
 
+        /* WWA legend — upper-left, dynamic, only shown when toggle is on and hazards exist */
+        #wwaLegend {
+            position: fixed; top: 54px; left: 250px; z-index: 900;
+            background: rgba(255,255,255,0.95); border: 1px solid #ccc; border-radius: 6px;
+            padding: 8px 10px; font-size: 11px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+            display: none; max-width: 220px;
+        }
+        #wwaLegend.visible { display: block; }
+        #wwaLegend .wl-title { font-weight: 700; font-size: 10px; color: #b71c1c;
+                                text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 4px; }
+        #wwaLegend .wl-row { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
+        #wwaLegend .wl-swatch { width: 16px; height: 9px; border-radius: 2px; border: 1px solid rgba(0,0,0,0.2); flex-shrink: 0; }
+
         /* Status */
         #statusBar { font-size: 10px; color: #888; padding: 6px 12px;
                      border-top: 1px solid #e0e0e0; margin-top: auto; }
@@ -247,6 +260,9 @@
             <label class="toggle-row">
                 <input type="checkbox" id="showLabels" checked> Airport labels
             </label>
+            <label class="toggle-row" title="Live observed METAR, alongside the forecast stoplight -- what's the real-world 'now' vs the forecast">
+                <input type="checkbox" id="liveMetarToggle" checked> Live METAR Station Plots
+            </label>
         </div>
 
         <!-- Legend -->
@@ -271,6 +287,14 @@
             <div id="mrmsStatus" style="font-size:10px;color:#888;min-height:12px;"></div>
             <label class="toggle-row" style="margin-top:4px;"><input type="checkbox" id="glmToggle"> GLM Lightning</label>
             <div id="glmStatus" style="font-size:10px;color:#888;min-height:12px;"></div>
+        </div>
+
+        <!-- Weather Hazards: WWA + AIRMET/SIGMET -->
+        <div class="sb-section">
+            <div class="sb-label">Weather Hazards</div>
+            <label class="toggle-row"><input type="checkbox" id="wwaToggle"> NWS Watches/Warnings</label>
+            <label class="toggle-row" style="margin-top:4px;"><input type="checkbox" id="airmetToggle"> AIRMETs/SIGMETs</label>
+            <div id="hazardStatus" style="font-size:10px;color:#888;min-height:12px;margin-top:2px;"></div>
         </div>
 
         <!-- Wind streamlines -->
@@ -340,6 +364,12 @@
 
     <!-- Map -->
     <div id="map"></div>
+
+    <!-- WWA Legend (upper-left, dynamic — shows only active phenomena) -->
+    <div id="wwaLegend">
+        <div class="wl-title">&#9888; Active NWS Alerts</div>
+        <div id="wwaLegendItems"></div>
+    </div>
 
     <!-- Right detail panel -->
     <div id="detailPanel">
@@ -417,6 +447,20 @@ var availableHours = [];
 var modelRun       = null;
 var pollTimer      = null;
 
+// ── Live METAR station plots (added 2026-09-24, per Gerry: "what's the
+// real-world 'now' vs the forecast?") -- a second layer, independent of
+// the forecast stoplight dots above. Reuses EWMC's proven bounds-scoped
+// METAR endpoint, wind-barb/sky-cover rendering, and this page's OWN
+// tier/zoom system (not EWMC's 6-tier one -- deliberately different pages,
+// different declutter needs). Coloring uses flight category (VFR/MVFR/
+// IFR/LIFR), matching the real observation's own semantics, NOT the
+// page's GREEN/YELLOW/RED stoplight scale used for the forecast dots --
+// an explicit colored-text flight-category label is included in the full
+// plot so the two color languages on screen at once aren't ambiguous.
+var metarPlotLayer, liveMetars = [], liveMetarTimer = null;
+const METAR_RECENT_API = '/CAP_WxCOP/api/weather-enhanced/metar/recent';
+const LIVE_PLOT_ZOOM_OFFSET = 3;  // full plot this many zoom levels past TIER_SYM_ZOOM
+
 
         /* ── Web Audio alarm engine ─────────────────────────────────── */
         var _audioCtx=null, _alarmState=null, _selectedApt=null;
@@ -488,6 +532,85 @@ var pollTimer      = null;
                 _checkAlarmState(data.features);
                 var el=document.getElementById('glmStatus');if(el)el.textContent=count+' flashes · '+new Date().toUTCString().slice(17,25)+'Z';
             }).catch(function(){var el=document.getElementById('glmStatus');if(el)el.textContent='GLM unavailable';});
+        }
+
+        /* ── NWS Watches/Warnings (WWA) — LDM/pqact-sourced, observations.wwa ── */
+        var wwaLayer=null, wwaTimer=null;
+        function loadWWA(){
+            fetch('/CAP_WxCOP/api/weather-enhanced/wwa/active')
+                .then(function(r){return r.json();})
+                .then(function(data){
+                    if(wwaLayer){map.removeLayer(wwaLayer);wwaLayer=null;}
+                    var features=data.features||[];
+                    if(features.length===0){
+                        document.getElementById('wwaLegend').classList.remove('visible');
+                        return;
+                    }
+                    wwaLayer=L.layerGroup();
+                    features.forEach(function(f){
+                        if(!f.geometry) return;
+                        var color=f.properties.color||'#AAAAAA';
+                        var label=f.properties.label||'';
+                        var wfo=f.properties.wfo||'';
+                        var begin=f.properties.begin_time?new Date(f.properties.begin_time).toUTCString().slice(17,22)+'Z':'';
+                        var end=f.properties.end_time?new Date(f.properties.end_time).toUTCString().slice(17,22)+'Z':'';
+                        L.geoJSON(f.geometry,{
+                            style:{color:color,weight:2.5,opacity:0.9,fillColor:color,fillOpacity:0.15}
+                        }).bindPopup(
+                            '<b>'+label+'</b><br>WFO: '+wfo+'<br>'+
+                            (begin?'Issued: '+begin+'<br>':'')+
+                            (end?'Expires: '+end+'<br>':'')+
+                            (f.properties.headline?'<i style="font-size:0.85em">'+f.properties.headline.substring(0,120)+'</i>':'')
+                        ).addTo(wwaLayer);
+                    });
+                    if(document.getElementById('wwaToggle').checked) wwaLayer.addTo(map);
+                    var seen={}, legendHtml='';
+                    features.forEach(function(f){
+                        var key=f.properties.phenomena+'.'+f.properties.significance;
+                        if(!seen[key]){
+                            seen[key]=true;
+                            legendHtml+='<div class="wl-row"><div class="wl-swatch" style="background:'+f.properties.color+';border-color:'+f.properties.color+';"></div><span>'+f.properties.label+'</span></div>';
+                        }
+                    });
+                    document.getElementById('wwaLegendItems').innerHTML=legendHtml;
+                    var legendEl=document.getElementById('wwaLegend');
+                    if(legendHtml && document.getElementById('wwaToggle').checked) legendEl.classList.add('visible');
+                    else legendEl.classList.remove('visible');
+                    var st=document.getElementById('hazardStatus');
+                    if(st) st.textContent=features.length+' active WWA';
+                }).catch(function(){console.warn('WWA load error');});
+        }
+
+        /* ── AIRMET/SIGMET — live JSON fetch from aviationweather.gov, no LDM/DB ── */
+        var airmetLayer=null;
+        var PHENOMENON_LABELS={TURB:'Turbulence',ICE:'Icing',IFR:'IFR Conditions',MTN_OBSC:'Mountain Obscuration',
+            LLWS:'Low-Level Wind Shear',STG_SFC_WINDS:'Strong Surface Winds',CONVECTIVE:'Convective',
+            ASH:'Volcanic Ash',TSGR:'Thunderstorms / Hail'};
+        function loadAirmets(){
+            fetch('/CAP_WxCOP/api/airmet-sigmet/weather-hazards')
+                .then(function(r){return r.json();})
+                .then(function(geojson){
+                    if(airmetLayer){map.removeLayer(airmetLayer);airmetLayer=null;}
+                    var features=(geojson.features||[]).filter(function(f){return f.geometry && f.geometry.type==='Polygon';});
+                    if(features.length===0) return;
+                    airmetLayer=L.layerGroup();
+                    features.forEach(function(f){
+                        var p=f.properties||{};
+                        var color=p.color||'#808080';
+                        var weight=p.type==='SIGMET'?3:2;
+                        var label=PHENOMENON_LABELS[p.phenomenon]||p.phenomenon||'Hazard';
+                        var sev=(p.severity && p.severity!=='UNSPECIFIED' && p.severity!=='MOD')?' — '+p.severity:'';
+                        var alt=(p.flight_levels && p.flight_levels!=='Not specified')?p.flight_levels:'';
+                        L.geoJSON(f.geometry,{
+                            style:{color:color,weight:weight,opacity:0.85,fillColor:color,fillOpacity:0.15}
+                        }).bindPopup(
+                            '<b>'+(p.type||'AIRMET')+'</b> — '+label+sev+'<br>'+
+                            (alt?'Altitude: '+alt+'<br>':'')+
+                            (p.due_to?'Due to: '+p.due_to+'<br>':'')
+                        ).addTo(airmetLayer);
+                    });
+                    if(document.getElementById('airmetToggle').checked) airmetLayer.addTo(map);
+                }).catch(function(){console.warn('AIRMET/SIGMET load error');});
         }
 
         /* ── MRMS Composite live tile ──────────────────────────────────── */
@@ -712,6 +835,185 @@ function updateStatus(data) {
     el.textContent = data.count + ' airports · ' +
         (data.model_run ? 'Run: ' + fmtTime(data.model_run) + 'Z' : '—') +
         (age !== null ? ' (' + age + ' min ago)' : '');
+}
+
+// ── Live METAR station plots ─────────────────────────────────────────────
+function getCategoryColor(cat) {
+    if (cat === 'VFR')  return '#00b300';
+    if (cat === 'MVFR') return '#0099ff';
+    if (cat === 'IFR')  return '#cc0000';
+    if (cat === 'LIFR') return '#ff00ff';
+    return '#808080';
+}
+
+function escapeHtml(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function obsAgeTooltipSuffix(obsTimeIso) {
+    if (!obsTimeIso) return '';
+    var obsMs = Date.parse(obsTimeIso);
+    if (isNaN(obsMs)) return '';
+    var ageMin = Math.max(0, Math.round((Date.now() - obsMs) / 60000));
+    var ageStr = (ageMin < 60) ? (ageMin + 'm ago') :
+                 (Math.floor(ageMin / 60) + 'h ' + (ageMin % 60) + 'm ago');
+    return ' (' + ageStr + ')';
+}
+
+// Same header+raw-text tooltip as EWMC (project_ewmc_station_plots) --
+// kept as its own copy here rather than a shared include, matching this
+// codebase's existing per-page JS duplication convention.
+function metarTooltipHtml(metar) {
+    var header = escapeHtml(metar.station_id) + ' — ' + escapeHtml(metar.flight_category) +
+                 obsAgeTooltipSuffix(metar.observation_time);
+    if (!metar.raw_text) return header;
+    return header + '<br><span style="font:11px monospace;">' + escapeHtml(metar.raw_text) + '</span>';
+}
+
+function windBarbSvg(speedKt, color) {
+    var s = Math.round((speedKt || 0) / 5) * 5;
+    if (s < 3) {
+        return '<svg width="34" height="34" viewBox="0 0 34 34">' +
+               '<circle cx="17" cy="17" r="5" fill="none" stroke="' + color + '" stroke-width="2"/></svg>';
+    }
+    var shaftLen = 15, x0 = 17, y0 = 17, y1 = y0 - shaftLen;
+    var parts = ['<line x1="' + x0 + '" y1="' + y0 + '" x2="' + x0 + '" y2="' + y1 +
+                '" stroke="' + color + '" stroke-width="2"/>'];
+    var remaining = s, y = y1, step = 3;
+    while (remaining >= 50) {
+        parts.push('<polygon points="' + x0 + ',' + y + ' ' + (x0 + 8) + ',' + (y + 2) + ' ' + x0 + ',' + (y + 4) +
+                   '" fill="' + color + '"/>');
+        remaining -= 50; y += step + 1;
+    }
+    while (remaining >= 10) {
+        parts.push('<line x1="' + x0 + '" y1="' + y + '" x2="' + (x0 + 8) + '" y2="' + (y + 3) +
+                   '" stroke="' + color + '" stroke-width="2"/>');
+        remaining -= 10; y += step;
+    }
+    if (remaining >= 5) {
+        parts.push('<line x1="' + x0 + '" y1="' + y + '" x2="' + (x0 + 4) + '" y2="' + (y + 1.5) +
+                   '" stroke="' + color + '" stroke-width="2"/>');
+    }
+    parts.push('<circle cx="' + x0 + '" cy="' + y0 + '" r="3" fill="none" stroke="' + color + '" stroke-width="2"/>');
+    return '<svg width="34" height="34" viewBox="0 0 34 34">' + parts.join('') + '</svg>';
+}
+
+function skyCoverSvg(skyConditions, color) {
+    var covers = (skyConditions || []).map(function(s) { return (s.cover || '').toUpperCase(); });
+    var worst = 'SKC';
+    ['OVC', 'BKN', 'SCT', 'FEW'].forEach(function(c) { if (covers.indexOf(c) !== -1 && worst === 'SKC') worst = c; });
+    var r = 7;
+    if (worst === 'SKC') return '<circle cx="17" cy="17" r="' + r + '" fill="none" stroke="' + color + '" stroke-width="1.5"/>';
+    if (worst === 'FEW') return '<circle cx="17" cy="17" r="' + r + '" fill="none" stroke="' + color + '" stroke-width="1.5"/>' +
+        '<path d="M 17 10 A 7 7 0 0 1 17 24" fill="' + color + '"/>';
+    if (worst === 'SCT') return '<circle cx="17" cy="17" r="' + r + '" fill="none" stroke="' + color + '" stroke-width="1.5"/>' +
+        '<path d="M 17 10 A 7 7 0 0 1 24 17 L 17 17 Z" fill="' + color + '"/>';
+    if (worst === 'BKN') return '<circle cx="17" cy="17" r="' + r + '" fill="' + color + '" stroke="' + color + '" stroke-width="1.5"/>' +
+        '<path d="M 17 10 A 7 7 0 0 0 10 17 L 17 17 Z" fill="#fff"/>';
+    return '<circle cx="17" cy="17" r="' + r + '" fill="' + color + '" stroke="' + color + '" stroke-width="1.5"/>';  // OVC
+}
+
+function deriveCeilingFt(skyConditions) {
+    var ceil = null;
+    (skyConditions || []).forEach(function(s) {
+        var cover = (s.cover || '').toUpperCase();
+        if ((cover === 'BKN' || cover === 'OVC') && s.height_ft !== undefined && s.height_ft !== null) {
+            if (ceil === null || s.height_ft < ceil) ceil = s.height_ft;
+        }
+    });
+    return ceil;
+}
+
+// Full station plot -- same visual language as EWMC's, plus an explicit
+// colored flight-category text label (per Gerry, 2026-09-24): this page's
+// own color scale is the GREEN/YELLOW/RED forecast stoplight, so a plot
+// colored by flight category needs its category spelled out, not left to
+// color alone the way EWMC (all-flight-category, no competing scale) can.
+function livePlotHtml(metar, showFullPlot) {
+    var color = getCategoryColor(metar.flight_category);
+    var dir = metar.wind_dir || 0;
+    if (!showFullPlot) {
+        var barbOnly = '<div style="position:absolute;top:0;left:0;transform:rotate(' + dir + 'deg);">' +
+                       windBarbSvg(metar.wind_speed_kts, color) + '</div>';
+        return '<div style="position:relative;width:34px;height:34px;">' + barbOnly + '</div>';
+    }
+    var tempC = (metar.temp_c !== null && metar.temp_c !== undefined) ? Math.round(metar.temp_c) : null;
+    var dewC  = (metar.dewpoint_c !== null && metar.dewpoint_c !== undefined) ? Math.round(metar.dewpoint_c) : null;
+    var ceilFt = deriveCeilingFt(metar.sky_conditions);
+    var visSm = (metar.visibility_sm !== null && metar.visibility_sm !== undefined) ? metar.visibility_sm : null;
+    var sky = '<svg width="34" height="34" viewBox="0 0 34 34" style="position:absolute;top:0;left:18px;">' +
+              skyCoverSvg(metar.sky_conditions, color) + '</svg>';
+    var barb = '<div style="position:absolute;top:0;left:18px;transform:rotate(' + dir + 'deg);">' +
+               windBarbSvg(metar.wind_speed_kts, color) + '</div>';
+    var textStyle = 'position:absolute;font:bold 11px sans-serif;color:' + color +
+                    ';text-shadow:0 0 2px #fff,0 0 2px #fff;';
+    var tempHtml = (tempC !== null) ? '<div style="' + textStyle + 'left:0;top:8px;width:16px;text-align:right;">' + tempC + '</div>' : '';
+    var dewHtml  = (dewC !== null) ? '<div style="' + textStyle + 'left:0;top:20px;width:16px;text-align:right;">' + dewC + '</div>' : '';
+    var ceilText = (ceilFt !== null) ? 'C' + String(Math.round(ceilFt / 100)).padStart(3, '0') : '';
+    var ceilHtml = ceilText ? '<div style="' + textStyle + 'left:52px;top:2px;width:24px;text-align:left;font-size:10px;">' + ceilText + '</div>' : '';
+    var visText = (visSm !== null) ? (visSm >= 10 ? '10' : Math.round(visSm)) : '';
+    var visHtml  = (visText !== '') ? '<div style="' + textStyle + 'left:52px;top:22px;width:18px;text-align:left;font-size:10px;">' + visText + '</div>' : '';
+    var gustKt = (metar.wind_gust_kts !== null && metar.wind_gust_kts !== undefined) ? Math.round(metar.wind_gust_kts) : null;
+    var gustHtml = (gustKt !== null) ? '<div style="position:absolute;left:18px;top:26px;width:34px;text-align:center;' +
+        'font:bold 10px sans-serif;color:#cc0000;text-shadow:0 0 2px #fff,0 0 2px #fff;">G' + gustKt + '</div>' : '';
+    var catHtml = '<div style="position:absolute;left:0;top:32px;width:70px;text-align:center;' +
+        'font:bold 10px sans-serif;color:' + color + ';text-shadow:0 0 2px #fff,0 0 2px #fff;">' +
+        escapeHtml(metar.flight_category) + '</div>';
+    return '<div style="position:relative;width:70px;height:44px;">' +
+           sky + barb + tempHtml + dewHtml + ceilHtml + visHtml + gustHtml + catHtml + '</div>';
+}
+
+function liveTier(metar) {
+    return metar.is_military ? 1 :
+           (metar.longest_runway_ft >= 8000 ? 2 :
+           (metar.longest_runway_ft >= 5000 ? 3 : 4));
+}
+
+function buildLiveMarkerIcon(metar, tier) {
+    var color = getCategoryColor(metar.flight_category);
+    var zoom = map.getZoom();
+    var minZ = TIER_SYM_ZOOM[tier] !== undefined ? TIER_SYM_ZOOM[tier] : 6;
+    var showFullPlot = zoom >= (minZ + LIVE_PLOT_ZOOM_OFFSET);
+    return L.divIcon({
+        className: '', html: livePlotHtml(metar, showFullPlot),
+        // Offset away from center so this doesn't sit exactly on top of
+        // the forecast stoplight dot at the same coordinate -- iconAnchor
+        // outside the icon's own box shifts the whole rendering up-right
+        // of the true point rather than centering on it.
+        iconSize: showFullPlot ? [70, 44] : [34, 34],
+        iconAnchor: showFullPlot ? [-8, 54] : [-4, 40]
+    });
+}
+
+function updateLivePlots() {
+    metarPlotLayer.clearLayers();
+    if (!document.getElementById('liveMetarToggle').checked) return;
+    var zoom = map.getZoom();
+    var bounds = map.getBounds();
+    liveMetars.forEach(function(metar) {
+        if (!metar.latitude || !metar.longitude) return;
+        if (!bounds.contains([metar.latitude, metar.longitude])) return;
+        var tier = liveTier(metar);
+        var minZ = TIER_SYM_ZOOM[tier] !== undefined ? TIER_SYM_ZOOM[tier] : 6;
+        if (zoom < minZ) return;
+        L.marker([metar.latitude, metar.longitude], { icon: buildLiveMarkerIcon(metar, tier), zIndexOffset: 2000 })
+            .bindTooltip(metarTooltipHtml(metar), { permanent: false, direction: 'top', offset: [0, -8] })
+            .on('click', function() { loadStationDetail(metar.station_id); })
+            .addTo(metarPlotLayer);
+    });
+}
+
+function loadLiveMetars() {
+    var b = map.getBounds();
+    var bounds = b.getWest().toFixed(2) + ',' + b.getSouth().toFixed(2) + ',' +
+                 b.getEast().toFixed(2) + ',' + b.getNorth().toFixed(2);
+    return fetch(METAR_RECENT_API + '?bounds=' + bounds + '&limit=2500')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            liveMetars = data.metars || [];
+            updateLivePlots();
+        })
+        .catch(function(err) { console.warn('Live METAR load failed:', err); });
 }
 
 // ── Marker rendering ──────────────────────────────────────────────────────
@@ -1060,7 +1362,8 @@ function setupControls() {
         if (e.key === 'Enter') searchAirport();
     });
 
-    map.on('moveend', function() { loadData(); });
+    map.on('moveend', function() { loadData(); loadLiveMetars(); });
+    document.getElementById('liveMetarToggle').addEventListener('change', updateLivePlots);
 }
 
 // ── UTC clock ─────────────────────────────────────────────────────────────
@@ -1103,8 +1406,10 @@ function initMap() {
     symbolsLayer   = L.featureGroup().addTo(map);
     labelsLayer    = L.featureGroup().addTo(map);
     highlightLayer = L.featureGroup().addTo(map);
+    metarPlotLayer = L.featureGroup().addTo(map);
 
     map.on('zoomend moveend', updateMarkers);
+    map.on('zoomend moveend', updateLivePlots);
 }
 
 function buildHourBtns() {
@@ -1126,8 +1431,11 @@ document.addEventListener('DOMContentLoaded', function() {
     buildHourBtns();
     setupControls();
     loadData();
-    // Auto-refresh every 5 min
+    loadLiveMetars();
+    // Auto-refresh every 5 min (forecast) / 2 min (live METAR -- matches
+    // EWMC's cadence, since it's just a DB read, not an external fetch)
     pollTimer = setInterval(function() { loadData(); }, 5 * 60 * 1000);
+    liveMetarTimer = setInterval(loadLiveMetars, 2 * 60 * 1000);
     document.getElementById('mrmsToggle').addEventListener('change',function(){
         if(this.checked){loadMRMS();mrmsTimer=setInterval(loadMRMS,120000);}
         else{if(mrmsLayer){map.removeLayer(mrmsLayer);mrmsLayer=null;}if(mrmsTimer){clearInterval(mrmsTimer);mrmsTimer=null;}}
@@ -1135,6 +1443,18 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('glmToggle').addEventListener('change',function(){
         if(this.checked){loadGLM();glmTimer=setInterval(loadGLM,60000);}
         else{if(glmLayer){map.removeLayer(glmLayer);glmLayer=null;}if(glmTimer){clearInterval(glmTimer);glmTimer=null;}}
+    });
+    document.getElementById('wwaToggle').addEventListener('change',function(){
+        if(this.checked){loadWWA();wwaTimer=setInterval(loadWWA,120000);}
+        else{
+            if(wwaLayer){map.removeLayer(wwaLayer);wwaLayer=null;}
+            if(wwaTimer){clearInterval(wwaTimer);wwaTimer=null;}
+            document.getElementById('wwaLegend').classList.remove('visible');
+        }
+    });
+    document.getElementById('airmetToggle').addEventListener('change',function(){
+        if(this.checked){loadAirmets();}
+        else{if(airmetLayer){map.removeLayer(airmetLayer);airmetLayer=null;}}
     });
     document.getElementById('smokeToggle').addEventListener('change',function(){
         var row=document.getElementById('smokeOpacityRow');
