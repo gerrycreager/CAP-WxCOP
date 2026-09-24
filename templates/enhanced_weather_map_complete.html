@@ -1484,6 +1484,22 @@
             return ' (' + ageStr + ')';
         }
 
+        function escapeHtml(s) {
+            return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        // Station tooltip: header line (station -- category (age)) plus the
+        // raw METAR text below it -- added 2026-09-24 per Gerry, matching a
+        // pattern he's seen on Bifrost's situational-awareness page. Skips
+        // the raw-text line entirely if it's missing rather than showing an
+        // empty second line.
+        function metarTooltipHtml(metar) {
+            var header = escapeHtml(metar.station_id) + ' — ' + escapeHtml(metar.flight_category) +
+                         obsAgeTooltipSuffix(metar.observation_time);
+            if (!metar.raw_text) return header;
+            return header + '<br><span style="font:11px monospace;">' + escapeHtml(metar.raw_text) + '</span>';
+        }
+
         function addMarker(metar) {
             var color = getCategoryColor(metar.flight_category);
             // MEF-priority override first, then hub list/military flag, then runway length
@@ -1497,7 +1513,7 @@
                 flightCategory: metar.flight_category, airportTier: tier,
                 stationMetar: metar
             });
-            marker.bindTooltip(metar.station_id + ' — ' + metar.flight_category + obsAgeTooltipSuffix(metar.observation_time),
+            marker.bindTooltip(metarTooltipHtml(metar),
                 { permanent: false, direction: 'top', offset: [0, -8] });
             marker.on('click', function() {
                 if (document.getElementById('stationPlotToggle').checked) {
