@@ -1042,7 +1042,16 @@
         }
 
         function initMap() {
-            map = L.map('map', { zoomControl: true, worldCopyJump: true });
+            // zoomSnap/zoomDelta 0.25 (added 2026-09-25 per Gerry: "It's
+            // about precision for pan and zoom ops") -- Leaflet defaults
+            // to whole-integer-only zoom steps for both the +/-
+            // buttons and scroll wheel; this applies to both since
+            // neither is configured separately. Every zoom-threshold
+            // comparison elsewhere in this file (TIER_MIN_ZOOM,
+            // STATION_PLOT_FULL_ZOOM_OVERRIDE, NO_METAR_SYM_ZOOM, etc.)
+            // uses zoom >= N, which is unaffected by fractional zoom
+            // values -- 9.25 still satisfies >= 9 correctly.
+            map = L.map('map', { zoomControl: true, worldCopyJump: true, zoomSnap: 0.25, zoomDelta: 0.25 });
             window._capMap = map;  // expose for GLM/MRMS local scope
             map.setView([38.5, -96.5], 4);
 
