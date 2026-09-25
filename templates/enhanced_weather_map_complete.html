@@ -1042,16 +1042,25 @@
         }
 
         function initMap() {
-            // zoomSnap/zoomDelta 0.25 (added 2026-09-25 per Gerry: "It's
-            // about precision for pan and zoom ops") -- Leaflet defaults
-            // to whole-integer-only zoom steps for both the +/-
-            // buttons and scroll wheel; this applies to both since
-            // neither is configured separately. Every zoom-threshold
-            // comparison elsewhere in this file (TIER_MIN_ZOOM,
-            // STATION_PLOT_FULL_ZOOM_OVERRIDE, NO_METAR_SYM_ZOOM, etc.)
-            // uses zoom >= N, which is unaffected by fractional zoom
-            // values -- 9.25 still satisfies >= 9 correctly.
-            map = L.map('map', { zoomControl: true, worldCopyJump: true, zoomSnap: 0.25, zoomDelta: 0.25 });
+            // zoomSnap/zoomDelta (added 2026-09-25 per Gerry: "It's about
+            // precision for pan and zoom ops" -- 0.25 tried first, still
+            // not fine enough for precisely framing something like a
+            // single airfield while looking at radar/lightning without
+            // needing a whole extra zoom level; landed on "more
+            // intermediate tiers" -- 0.1 gives 10 discrete steps per
+            // whole zoom level instead of the Leaflet default's 1, for
+            // both the +/- buttons and scroll wheel (neither is
+            // configured separately, so one setting covers both).
+            // Deliberately NOT zoomSnap:0 (fully continuous/unsnapped) --
+            // Gerry's own word was "tiers," i.e. more discrete steps, not
+            // a stepless continuum. Marker-visibility tier thresholds
+            // (TIER_MIN_ZOOM, STATION_PLOT_FULL_ZOOM_OVERRIDE,
+            // NO_METAR_SYM_ZOOM, etc.) are unaffected -- explicitly kept
+            // as-is per Gerry ("keep the marker visibility on either
+            // integer or fractional boundaries, and don't need to cache
+            // invisible ones"), zoom >= N still works correctly with any
+            // fractional zoom value.
+            map = L.map('map', { zoomControl: true, worldCopyJump: true, zoomSnap: 0.1, zoomDelta: 0.1 });
             window._capMap = map;  // expose for GLM/MRMS local scope
             map.setView([38.5, -96.5], 4);
 
