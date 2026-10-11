@@ -3082,18 +3082,19 @@
             'Not for aviation decision-making; use official HRRR/NWS products for flight planning.';
         var LEVELS = [
             { key:'SFC', label:'Surface (10m AGL)' },
+            { key:'AGL1000', label:'1,000 ft AGL (search/photo)' },
             { key:'850', label:'850 hPa' },
             { key:'700', label:'700 hPa' },
             { key:'500', label:'500 hPa' },
             // 200 hPa was ECMWF-only (HRRR has no native 200 hPa level) --
             // moot now that ECMWF is commented out above.
             // { key:'200', label:'200 hPa' },
-            // DLM (Deep-Layer Mean steering flow) commented out 2026-09-19 --
-            // it existed for tropical cyclone track analysis, but HRRR's
-            // CONUS domain doesn't reach the Tropical Atlantic where that's
-            // actually useful, so computing it was pure waste. Re-enable by
-            // uncommenting this plus render_hrrr_particles.py's DLM block.
-            // { key:'DLM', label:'Deep-Layer Mean (850-700-500 hPa steering flow)' },
+            // DLM (Deep-Layer Mean steering flow) re-enabled 2026-10-08 for
+            // Hurricane Isaias in the Gulf of Mexico -- HRRR/RRFS's CONUS
+            // domain covers the Gulf even though it doesn't reach the open
+            // Tropical Atlantic, which is why this was commented out
+            // 2026-09-19. Re-comment if that stops being useful.
+            { key:'DLM', label:'Deep-Layer Mean (850-700-500 hPa steering flow)' },
         ];
         // earth.nullschool/Windy-style continuous rainbow ramp -- fully saturated
         // throughout (no pastel/light stops) so it reads against both ocean blue
@@ -3113,9 +3114,9 @@
         var _cache   = {};
         var wpPlaying = false, wpTimer = null;
 
-        // DLM/200 branch is unreachable now that both are commented out of
-        // LEVELS above, but left intact (not ripped out) so it's still
-        // correct if either gets uncommented again.
+        // 200 branch is unreachable while ECMWF stays commented out above
+        // (HRRR has no native 200 hPa level); DLM is live again as of
+        // 2026-10-08.
         function maxVelocity() { return (level === 'DLM' || level === '200') ? 40 : 25; }
 
         function setStatus(msg) {
