@@ -300,6 +300,11 @@ def enhanced_weather_map_html_legacy():
 def weather_impacts():
     return render_template('weather_impacts.html')
 
+@app.route('/user-guide')
+def user_guide():
+    """Tool-by-tool WxCOP user guide, mirrored from the claude.ai artifact"""
+    return render_template('user_guide.html')
+
 @app.route('/wbgt')
 def wbgt_calculator():
     return render_template('wbgt_calculator.html')

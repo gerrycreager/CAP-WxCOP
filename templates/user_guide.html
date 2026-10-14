@@ -1,0 +1,441 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><title>WxCOP User Guide</title><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<style>
+/* Layout: fixed left TOC rail (grouped by mission area) + scrollable content column; TOC collapses to a tap-to-open sheet under 760px */
+:root{
+  --bg:#f6f2e9; --surface:#ffffff; --surface-2:#faf7f0; --fg:#23262b; --muted:#6b6459;
+  --border:#ddd3bd; --accent:#2b5a8c; --accent-fg:#ffffff; --accent-soft:#e4edf6;
+  --go:#1f8a3b; --caution:#b9790c; --nogo:#c23b3b; --go-bg:#e6f4ea; --caution-bg:#fbf0dc; --nogo-bg:#fbe8e8;
+  --warn-bg:#fdf1d9; --warn-border:#e0ad3f; --warn-fg:#6b4a05;
+  --new-bg:#2b5a8c; --new-fg:#ffffff;
+  --code-bg:#efe8d8; --shadow: 0 1px 2px rgba(40,30,10,0.06), 0 6px 20px rgba(40,30,10,0.05);
+  font-family:'Public Sans',system-ui,-apple-system,sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme: dark;
+    --bg:#11151b; --surface:#1a2029; --surface-2:#161b22; --fg:#e7e7e2; --muted:#9aa0a6;
+    --border:#2c3440; --accent:#6ea3d9; --accent-fg:#0e1420; --accent-soft:#1d2a3a;
+    --go:#49c472; --caution:#e0ab3c; --nogo:#e46a6a; --go-bg:#15291c; --caution-bg:#2e2410; --nogo-bg:#2e1616;
+    --warn-bg:#2c2410; --warn-border:#8a6a1f; --warn-fg:#e8c674;
+    --new-bg:#6ea3d9; --new-fg:#0e1420;
+    --code-bg:#20262f; --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.35);
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --bg:#11151b; --surface:#1a2029; --surface-2:#161b22; --fg:#e7e7e2; --muted:#9aa0a6;
+  --border:#2c3440; --accent:#6ea3d9; --accent-fg:#0e1420; --accent-soft:#1d2a3a;
+  --go:#49c472; --caution:#e0ab3c; --nogo:#e46a6a; --go-bg:#15291c; --caution-bg:#2e2410; --nogo-bg:#2e1616;
+  --warn-bg:#2c2410; --warn-border:#8a6a1f; --warn-fg:#e8c674;
+  --new-bg:#6ea3d9; --new-fg:#0e1420;
+  --code-bg:#20262f; --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.35);
+}
+*{box-sizing:border-box;}
+body{background:var(--bg); color:var(--fg); margin:0; line-height:1.55;}
+h1,h2,h3{font-family:'Fraunces',serif; text-wrap:balance; margin:0 0 .3em;}
+code,.route,.field{font-family:'IBM Plex Mono',monospace;}
+a{color:var(--accent);}
+
+.shell{display:flex; min-height:100%; max-width:1280px; margin:0 auto;}
+.toc{
+  width:264px; flex-shrink:0; border-right:1px solid var(--border);
+  padding:28px 18px 28px 24px; position:sticky; top:0; align-self:flex-start;
+  max-height:100vh; overflow-y:auto;
+}
+.toc-brand{font-family:'Fraunces',serif; font-weight:700; font-size:20px; margin-bottom:2px;}
+.toc-sub{color:var(--muted); font-size:12.5px; margin-bottom:22px;}
+.toc-group{margin-bottom:18px;}
+.toc-group-label{font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin-bottom:6px;}
+.toc a{display:block; font-size:13.5px; color:var(--fg); text-decoration:none; padding:5px 8px; border-radius:6px;}
+.toc a:hover{background:var(--surface-2); color:var(--accent);}
+
+.content{flex:1; min-width:0; padding:40px 36px 100px;}
+.masthead{margin-bottom:8px;}
+.masthead h1{font-size:34px;}
+.masthead p{color:var(--muted); font-size:15px; max-width:640px; margin:10px 0 0;}
+.status-note{
+  margin:22px 0 40px; padding:12px 16px; border-radius:10px; background:var(--accent-soft);
+  border:1px solid var(--border); font-size:13.5px; color:var(--fg); max-width:640px;
+}
+.status-note b{color:var(--accent);}
+
+.group-heading{
+  font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.08em; color:var(--muted);
+  border-bottom:1px solid var(--border); padding-bottom:8px; margin:48px 0 22px;
+}
+.group-heading:first-of-type{margin-top:0;}
+
+.page-card{
+  background:var(--surface); border:1px solid var(--border); border-radius:14px;
+  padding:26px 28px 30px; margin-bottom:28px; box-shadow:var(--shadow); scroll-margin-top:16px;
+}
+.page-card h2{font-size:23px; display:flex; align-items:baseline; gap:10px; flex-wrap:wrap;}
+.route{font-size:12px; color:var(--muted); background:var(--code-bg); padding:2px 8px; border-radius:6px; font-weight:500;}
+.purpose{color:var(--fg); font-size:15px; margin:10px 0 20px; max-width:640px;}
+
+.badge-new{
+  font-family:'Public Sans',sans-serif; font-size:10.5px; font-weight:700; letter-spacing:.04em;
+  background:var(--new-bg); color:var(--new-fg); padding:2px 7px; border-radius:5px; vertical-align:middle;
+}
+
+.callout{border-radius:10px; padding:14px 16px; margin:0 0 20px; font-size:13.5px; max-width:640px; border:1px solid var(--warn-border); background:var(--warn-bg); color:var(--warn-fg);}
+.callout b{display:block; font-size:12px; text-transform:uppercase; letter-spacing:.05em; margin-bottom:4px;}
+
+.subgroup{margin-bottom:18px;}
+.subgroup-label{font-weight:600; font-size:14px; color:var(--accent); margin-bottom:8px;}
+dl.controls{margin:0; display:grid; gap:10px;}
+dl.controls dt{font-weight:600; font-size:13.5px; margin-bottom:2px;}
+dl.controls dd{margin:0; color:var(--fg); font-size:13.5px; max-width:620px;}
+.field{background:var(--code-bg); padding:1px 6px; border-radius:4px; font-size:12.5px;}
+
+.steps{margin:0; padding-left:0; counter-reset:step; display:grid; gap:12px; max-width:640px;}
+.steps li{list-style:none; position:relative; padding-left:34px; font-size:13.5px;}
+.steps li::before{
+  counter-increment:step; content:counter(step); position:absolute; left:0; top:0;
+  width:22px; height:22px; border-radius:50%; background:var(--accent); color:var(--accent-fg);
+  font-size:11.5px; font-weight:700; display:flex; align-items:center; justify-content:center;
+}
+.steps li b{display:inline;}
+
+.legend-row{display:flex; gap:10px; flex-wrap:wrap; margin:6px 0 18px;}
+.legend-chip{display:flex; align-items:center; gap:6px; font-size:12.5px; padding:4px 10px; border-radius:20px; border:1px solid var(--border);}
+.dot{width:10px; height:10px; border-radius:50%; flex-shrink:0;}
+.dot.go{background:var(--go);} .dot.caution{background:var(--caution);} .dot.nogo{background:var(--nogo);} .dot.gray{background:var(--muted);}
+
+.ext-link{font-size:12.5px; color:var(--muted);}
+
+.back-link{display:inline-block; margin-bottom:18px; font-size:13px; color:var(--muted); text-decoration:none;}
+.back-link:hover{color:var(--accent);}
+
+@media (max-width: 760px){
+  .shell{display:block;}
+  .toc{position:static; width:auto; max-height:none; border-right:none; border-bottom:1px solid var(--border); padding:20px 20px 16px;}
+  .content{padding:28px 20px 80px;}
+  .page-card{padding:20px 18px 24px;}
+}
+</style>
+
+<div class="shell">
+  <nav class="toc">
+    <div class="toc-brand">WxCOP User Guide</div>
+    <div class="toc-sub">CAP WxCOP tool-by-tool walkthroughs</div>
+
+    <div class="toc-group">
+      <div class="toc-group-label">Flight Planning</div>
+      <a href="#ewmc">Enhanced Weather Map</a>
+      <a href="#foi">Flight Ops Impacts</a>
+      <a href="#mef">Mission TAF / MEF Delivery</a>
+    </div>
+    <div class="toc-group">
+      <div class="toc-group-label">Cadet Safety</div>
+      <a href="#cadet-cop">Cadet Weather COP</a>
+      <a href="#cadet-plan">Cadet Weather Planning</a>
+      <a href="#cadet-sites">Cadet Site Management</a>
+    </div>
+    <div class="toc-group">
+      <div class="toc-group-label">Heat &amp; Health</div>
+      <a href="#wbgt">WBGT Calculator</a>
+      <a href="#heatrisk">NWS HeatRisk</a>
+    </div>
+    <div class="toc-group">
+      <div class="toc-group-label">Records &amp; Administration</div>
+      <a href="#incident">Incident Archive</a>
+      <a href="#icl">Wing ICL Admin</a>
+      <a href="#manualtaf">Manual TAF Entry</a>
+    </div>
+  </nav>
+
+  <main class="content">
+    <a class="back-link" href="/CAP_WxCOP/">&larr; Back to WxCOP home</a>
+    <div class="masthead">
+      <h1>WxCOP User Guide</h1>
+      <p>How to use every tool in the CAP WxCOP suite — one page, grouped by what you're trying to get done rather than by how the software happens to be built.</p>
+    </div>
+    <div class="status-note">
+      <b>Status:</b> this pass covers how to use each tool — every control, button, and field. Technical appendices (data sources, refresh cadence, known limitations for maintainers) are coming in a follow-up pass. A couple of real issues turned up during this review anyway; they're called out in place below rather than held back.
+    </div>
+
+    <!-- ============ FLIGHT PLANNING ============ -->
+    <div class="group-heading">Flight Planning</div>
+
+    <section class="page-card" id="ewmc">
+      <h2>Enhanced Weather Map <span class="route">/enhanced-weather-map</span></h2>
+      <p class="purpose">The main situational-awareness map: radar, satellite, lightning, airspace, hazards, and winds layered over airports and METAR stations. This is the day-to-day map for "what's going on out there right now," not a single-airport forecast tool.</p>
+
+      <div class="subgroup">
+        <div class="subgroup-label">Airports &amp; Labels</div>
+        <dl class="controls">
+          <dt>Military Airfields / Major Hubs / Regional Airfields (≥7000 ft) / Local Airfields (5000–6999 ft) / Small Airfields (2500–4999 ft)</dt>
+          <dd>Five independent toggles controlling which tier of airport shows on the map. Regional and Local are on by default; Small is off, since it's the densest tier and clutters the view at low zoom.</dd>
+          <dt>Show labels</dt>
+          <dd>Prints each airport's identifier next to its marker.</dd>
+          <dt>Wind barbs + station plots</dt>
+          <dd>Shows live METAR data at each station — wind barb, temperature/dewpoint, sky condition, ceiling, visibility, gust — with the amount of detail shown increasing as you zoom in, so the map stays readable at a CONUS-wide view.</dd>
+          <dt>No-METAR Airfields</dt>
+          <dd>Shows paved airfields that don't have a reporting weather station, so you know a field exists even where there's no observation to show.</dd>
+        </dl>
+      </div>
+
+      <div class="subgroup">
+        <div class="subgroup-label">Airspace &amp; Hazards</div>
+        <dl class="controls">
+          <dt>TFRs</dt><dd>Active Temporary Flight Restrictions.</dd>
+          <dt>AIRMETs / SIGMETs</dt><dd>Current in-flight weather advisories.</dd>
+          <dt>FZLVL Contours</dt><dd>Freezing-level contour lines.</dd>
+          <dt>GLM Lightning</dt><dd>Satellite-observed lightning strikes (GOES Geostationary Lightning Mapper), not radar-inferred.</dd>
+          <dt>NWS Watches/Warnings</dt><dd>Active NWS watch/warning/advisory polygons.</dd>
+        </dl>
+      </div>
+
+      <div class="subgroup">
+        <div class="subgroup-label">Special Use Airspace</div>
+        <dl class="controls">
+          <dt>Prohibited (P-) / Restricted (R-) / MOA / Warning / Alert / Mil Training Routes (MTR)</dt>
+          <dd>Four independent toggles for the different classes of special-use and military airspace.</dd>
+        </dl>
+      </div>
+
+      <div class="subgroup">
+        <div class="subgroup-label">Radar</div>
+        <dl class="controls">
+          <dt>Local Radar (auto)</dt>
+          <dd>One toggle. The map automatically picks the right radar source for your current view — a wide-area mosaic (MRMS) when zoomed out, or the nearest single WSR-88D (or airport TDWR) site once you're zoomed in close to it. You don't choose the source yourself.</dd>
+          <dt>Reflectivity (N0B) / Hydrometeor Class (N0H) / Storm-Relative Velocity (N0S)</dt>
+          <dd>Appear only when a single WSR-88D site is active — pick which radar product to display.</dd>
+          <dt>Refl 48nmi T1–T3 (TZ0–TZ2) / Long Range Refl (TZL)</dt>
+          <dd>Appear only when an airport TDWR is active — four tilt/range reflectivity products.</dd>
+          <dt>Radar opacity</dt><dd>Slider, 0–100%.</dd>
+          <dt>TRW Probability (LAMP)</dt><dd>Model-forecast thunderstorm probability, as a separate overlay from the observed radar above.</dd>
+        </dl>
+      </div>
+
+      <div class="subgroup">
+        <div class="subgroup-label">Satellite</div>
+        <dl class="controls">
+          <dt>GOES Satellite</dt><dd>Master toggle.</dd>
+          <dt>IR (Cloud Tops) / Visible / Water Vapor</dt><dd>Pick one product.</dd>
+          <dt>Opacity</dt><dd>Slider.</dd>
+          <dt>Animate</dt><dd>Loops the satellite imagery, using the same timeline/duration control as the radar loop.</dd>
+        </dl>
+      </div>
+
+      <div class="subgroup">
+        <div class="subgroup-label">Precipitable Water</div>
+        <dl class="controls">
+          <dt>GOES TPW (background)</dt><dd>Total precipitable water, shown as a background layer, with its own opacity slider.</dd>
+        </dl>
+      </div>
+
+      <div class="subgroup">
+        <div class="subgroup-label">Wind Flow</div>
+        <dl class="controls">
+          <dt>Animated Wind</dt><dd>Master toggle for the particle-animation wind layer.</dd>
+          <dt>Source</dt><dd>Currently HRRR, labeled "best effort" in the UI — it's nearest-neighbor regridded from HRRR's native grid, so treat it as a visual guide to flow patterns, not a precision aviation product.</dd>
+          <dt>Level</dt>
+          <dd>Surface, <span class="badge-new">NEW</span> <b>1,000 ft AGL</b> (the standard search/aerial-photography altitude — calculated relative to actual ground elevation at every point on the map, not a flat band), 850 / 700 / 500 hPa, or Deep-Layer Mean (an 850–700–500 hPa steering-flow average, most useful for watching a tropical system's likely track).</dd>
+          <dt>Opacity</dt><dd>Slider.</dd>
+        </dl>
+      </div>
+
+      <p class="purpose" style="margin-top:4px;">Whichever animated layer is currently on — radar loop, satellite animation, or wind particles — shares one play/pause/step timeline bar at the bottom of the map.</p>
+    </section>
+
+    <section class="page-card" id="foi">
+      <h2>Flight Ops Impacts <span class="route">/weather-impacts</span></h2>
+      <p class="purpose">Hour-by-hour Go/Caution/No-Go forecast for flight operations at any airport, built from CAPR 70-1-style thresholds (a given Wing can tighten these via Wing ICL Admin — see below).</p>
+
+      <div class="legend-row">
+        <span class="legend-chip"><span class="dot go"></span>Go</span>
+        <span class="legend-chip"><span class="dot caution"></span>Caution</span>
+        <span class="legend-chip"><span class="dot nogo"></span>No-Go</span>
+        <span class="legend-chip"><span class="dot gray"></span>No Data</span>
+      </div>
+
+      <div class="callout" style="border-color:var(--border); background:var(--surface-2); color:var(--muted);"><b>Caveat</b>These three colors now also carry CAPR 70-10 release-authority meaning, not just a raw weather-severity read: Go lines up with an FRO-releasable flight, Caution with one needing SFRO (or SFRO + Wing CC) sign-off, and No-Go with one that needs CAP/DO. Same thresholds as before — the colors just reflect who has to approve the flight, not only how marginal the weather is.</div>
+
+      <dl class="controls">
+        <dt>Operation Type — VFR Fixed Wing / IFR Fixed Wing</dt>
+        <dd>Switches which ceiling/visibility thresholds apply to the stoplight.</dd>
+        <dt>Forecast Hour</dt>
+        <dd>Slider (1–25) plus quick-pick hour buttons below it; the label shows the actual valid time for whichever hour you land on.</dd>
+        <dt>Find Airport</dt>
+        <dd>Type an ICAO identifier (e.g. <span class="field">KLSF</span>) and click <b>Go</b> to jump straight to it.</dd>
+        <dt>Airport labels</dt><dd>Toggle identifier text on the map.</dd>
+        <dt>Live METAR Station Plots</dt><dd>Overlays real observed conditions, so you can compare "what's actually happening right now" against the forecast stoplight for the same hour.</dd>
+        <dt>Radar Composite</dt><dd>MRMS radar mosaic overlay.</dd>
+        <dt>GLM Lightning</dt><dd>Satellite-observed lightning.</dd>
+        <dt>NWS Watches/Warnings</dt><dd>Active watch/warning/advisory polygons.</dd>
+        <dt>AIRMETs/SIGMETs</dt><dd>Current in-flight advisories.</dd>
+        <dt>Streamlines (HRRR)</dt>
+        <dd>Wind-flow overlay. Pick a level: Surface, <span class="badge-new">NEW</span> <b>1,000 ft AGL (search/photo)</b> — terrain-relative, unlike the bands below it — then ~3,000 / ~6,000 / ~10,000 / ~12,000 / ~18,000 ft MSL.</dd>
+        <dt>PM2.5 Contour (IDW) — AirNow</dt><dd>Smoothed contour built from real AirNow monitoring stations, with its own opacity slider.</dd>
+        <dt>Near-Surface Smoke — HRRR Forecast</dt>
+        <dd>A modeled (not observed) smoke layer, with its own opacity slider. It uses the same EPA AQI color scale as the AirNow layer above — the two are meant to be compared against each other, not trusted individually.</dd>
+      </dl>
+
+      <p class="purpose" style="margin-top:16px;">A FITS (Thermal Stress) legend is shown as a quick reference on this page. For an actual calculation at a specific location and time, use the WBGT Calculator instead.</p>
+
+      <p class="purpose">Clicking any airport opens a detail panel: a color banner, a parameter grid, a 25-hour forecast table (ceiling, visibility, wind, crosswind, temperature, thunderstorm probability), and a <b>📄 PDF</b> button to download a report for that station.</p>
+    </section>
+
+    <section class="page-card" id="mef">
+      <h2>Mission TAF / MEF Delivery</h2>
+      <p class="purpose">This one isn't a page you browse to — it's how a Mission Execution Forecast (MEF) actually gets to you, and it's worth knowing how the pieces fit together.</p>
+      <dl class="controls">
+        <dt>Automated MEF delivery</dt>
+        <dd>For the missions it's set up for, a scheduled job pulls the freshest model data ahead of the launch window, builds the full MEF packet — route legs and timeline, winds aloft by leg, a surface-conditions table, go/no-go notes, and caveats — as a PDF, and emails it to the mission's distribution list. There's nothing to log into; just check your inbox before the stated deadline.</dd>
+        <dt>The model-TAF feed behind the laptop MEF tool</dt>
+        <dd>A backend data service, with no page and no login, that Gerry's laptop-side MEF tool calls directly to pull model-derived TAF text for any station. It's deliberately not something you browse to.</dd>
+        <dt>Looking at the raw text yourself</dt>
+        <dd>If you ever need to sanity-check what the laptop tool pulled, the fixed-cluster feed prints plain TAF-formatted text at a bare URL. It isn't linked from anywhere in WxCOP by design — ask Gerry for the current address if you need it.</dd>
+      </dl>
+    </section>
+
+    <!-- ============ CADET SAFETY ============ -->
+    <div class="group-heading">Cadet Safety</div>
+
+    <section class="page-card" id="cadet-cop">
+      <h2>Cadet Weather COP <span class="route">/cadet-wx</span></h2>
+      <p class="purpose">The live, right-now view: is it currently safe to be outside at each cadet site — not a forecast.</p>
+      <div class="callout"><b>Known issue</b>No login is required to view or act on this page's data. Flagged for awareness, not yet fixed.</div>
+      <dl class="controls">
+        <dt>Site list / map markers</dt>
+        <dd>Colored by a composite stoplight — the worst of seven categories wins. Click a site to open its detail panel.</dd>
+        <dt>Detail panel</dt>
+        <dd>Shows a data-source badge ("📡 METAR (observed)" or "🔢 Model F00 (analysis)" — whichever is more current for that site), a color banner, and a 7-box category grid: <b>Heat Stress, Cold Stress, Lightning, Surface Wind, Precip, NWS Hazards, Air Quality (PM2.5)</b>. Below that: temperature, dewpoint, heat index, wind chill, wind, precip rate, WBGT, and PM2.5 with distance to the nearest AirNow station, plus any active NWS alerts for that location.</dd>
+        <dt>⚡ GLM Lightning</dt>
+        <dd>"Show lightning flashes" toggle + a Last 5/15/30-minute window selector. Red dot = 0–5 min old ("stop if within 5NM"), yellow = 5–15 min ("caution"), green = 15–30 min ("resume if clear"). "Show Local Radar (auto)" adds the same auto-selecting radar layer as the Enhanced Weather Map.</dd>
+        <dt>💨 Smoke (HRRR)</dt>
+        <dd>"Show near-surface smoke" — a modeled layer with an opacity slider and its own play/pause animation bar.</dd>
+        <dt>🌡 Air Quality (Observed)</dt>
+        <dd>"Show AirNow PM2.5 contour" — labeled in the page itself as a prototype, since it's sparse away from monitoring stations. The page recommends comparing it against the HRRR smoke layer rather than trusting either alone.</dd>
+        <dt>◎ Range Rings</dt>
+        <dd>"Show 5/15/25 NM rings" — fixed reference circles, independent of each site's own configured warning/watch radius.</dd>
+      </dl>
+      <div class="callout" style="margin-top:14px;"><b>Future work</b>SMS lightning alerts (WARNING/WATCH on radius entry, ALL CLEAR 15 minutes after the last strike) are designed in but not operational — the carrier-side SMS service was never successfully integrated. Treat the map/detail panel as the live source of truth for now; don't rely on a text arriving.</div>
+    </section>
+
+    <section class="page-card" id="cadet-plan">
+      <h2>Cadet Weather Planning <span class="route">/cadet-wx-plan</span></h2>
+      <p class="purpose">The forward-looking counterpart to Cadet Weather COP: a forecast-hour stoplight for every active cadet site, for deciding in advance whether an activity will be safe at a specific future hour.</p>
+      <dl class="controls">
+        <dt>Forecast Hour slider (1–18)</dt><dd>Drag to a future hour; the label above shows the actual valid time (UTC).</dd>
+        <dt>Quick-select buttons</dt><dd>Jump straight to a specific hour without dragging — relabeled with real valid times once data loads.</dd>
+        <dt>Sites list</dt><dd>Click any site to select it on the map and open its detail panel.</dd>
+        <dt>GLM Lightning toggle + window dropdown</dt><dd>Overlays recent real lightning strikes on top of the forecast view — this part is observed, not forecast.</dd>
+        <dt>Detail panel</dt><dd>Shows the selected site's stoplight color, the same category grid as Cadet Weather COP, and a full forecast table you can step through hour by hour.</dd>
+      </dl>
+      <div class="legend-row">
+        <span class="legend-chip"><span class="dot go"></span>GO — no restrictions</span>
+        <span class="legend-chip"><span class="dot caution"></span>CAUTION — monitor, adjust</span>
+        <span class="legend-chip"><span class="dot nogo"></span>STOP — suspend/shelter</span>
+        <span class="legend-chip"><span class="dot gray"></span>No data</span>
+      </div>
+    </section>
+
+    <section class="page-card" id="cadet-sites">
+      <h2>Cadet Site Management <span class="route">/cadet-sites/manage</span></h2>
+      <p class="purpose">The admin form for adding, editing, and removing the sites that appear on both the COP and Planning maps.</p>
+      <div class="callout"><b>Known issue</b>No login is required to create, edit, or delete sites or manage recipients — anyone who can reach the page URL can do all of this. Flagged for awareness, not yet fixed.</div>
+      <dl class="controls">
+        <dt>Add New Site form</dt>
+        <dd>Site Name*, Short Name, CAP Region* (dropdown), Nearest ICAO Station (optional — leave blank if none nearby), Latitude*/Longitude*, Elevation (ft MSL), Activity Type (Encampment / Flight Academy / Ranger School / SLS / CLS / NCSA / Other), Lightning Units (NM/SM/KM), Warning Radius (default 10), Watch Radius (default 20). Required fields are marked <span class="field">*</span>.</dd>
+        <dt>Save Site / Cancel</dt><dd>Save creates or updates; Cancel clears the form.</dd>
+        <dt>Manage / Edit / Delete</dt><dd>Per-site row actions. Delete only confirms via the browser's own prompt — be deliberate.</dd>
+        <dt>Manage panel — recipients</dt>
+        <dd>Add a recipient by Name + 10-digit phone, and a <b>Test SMS</b> button are present in the UI, but neither currently sends anything — see the Future work note on Cadet Weather COP. The recipient list itself still saves, ready for when SMS delivery is working.</dd>
+      </dl>
+    </section>
+
+    <!-- ============ HEAT & HEALTH ============ -->
+    <div class="group-heading">Heat &amp; Health</div>
+
+    <section class="page-card" id="wbgt">
+      <h2>WBGT Calculator <span class="route">/wbgt</span></h2>
+      <p class="purpose">Computes Wet Bulb Globe Temperature — the heat-stress index CAP uses to set activity limits during outdoor training, encampments, and PT — from basic weather inputs, and reports which DAFI 48-151 flag condition currently applies.</p>
+
+      <div class="subgroup">
+        <div class="subgroup-label">Entering conditions</div>
+        <dl class="controls">
+          <dt>Temperature</dt><dd>Numeric field; toggle <span class="field">°F</span> / <span class="field">°C</span> next to it.</dd>
+          <dt>Dewpoint / Relative Humidity</dt><dd>Toggle between <span class="field">Td</span> and <span class="field">RH%</span> — the field and its expected range change with the mode.</dd>
+          <dt>Wind Speed</dt><dd>Toggle <span class="field">kts</span> / <span class="field">mph</span>.</dd>
+          <dt>Station Pressure (optional)</dt><dd>hPa — leave blank if unknown.</dd>
+          <dt>Latitude / Longitude</dt><dd>Decimal degrees. These drive the solar-angle calculation — fill them in for an accurate sun-exposure estimate rather than a rough fallback.</dd>
+          <dt>Date (UTC) / Time (UTC)</dt><dd>Date picker + hour field, or click <b>Now</b> to auto-fill both.</dd>
+          <dt>Sky Condition</dt><dd>Overcast/Shade, Partly Cloudy, or Clear/Full Sun. A live "Solar elevation… Est. DSWRF…" note appears once location and time are filled in, so you can sanity-check the sun angle being used.</dd>
+        </dl>
+      </div>
+
+      <div class="subgroup">
+        <div class="subgroup-label">Auto-filling conditions instead of typing them in</div>
+        <dl class="controls">
+          <dt>Load from Cadet Site</dt><dd>Pick a site from the dropdown, click <b>Load Wx</b> — fills in location and that site's current conditions if available.</dd>
+          <dt>Load from Nearest METAR Airport</dt><dd>Click <b>Use Current Lat/Lon → Find Nearest Station</b>, pick from the 5 nearest reporting airports shown, then <b>Load Conditions from Selected Station</b>.</dd>
+        </dl>
+      </div>
+
+      <dl class="controls">
+        <dt>▶ Calculate WBGT</dt>
+        <dd>Runs the calculation. Results show: a large colored WBGT readout labeled with the current flag (White/Green/Yellow/Red/Black); the full DAFI 48-151 Ch.4 Table 4.1 activity-guidance table with your flag's row highlighted; and secondary readouts (Wet Bulb Temp, Globe Temp, Heat Index, Wind Chill) — the page explicitly notes WBGT, not Heat Index, is the authoritative metric for setting limits.</dd>
+      </dl>
+      <div class="callout" style="border-color:var(--border); background:var(--surface-2); color:var(--muted);"><b>Caveat</b>If latitude/longitude/date/time are left blank, the solar input falls back to a rough fixed estimate per sky-condition button rather than a real sun-angle calculation. Fill in location and time for an accurate result.</div>
+    </section>
+
+    <section class="page-card" id="heatrisk">
+      <h2>NWS HeatRisk</h2>
+      <p class="purpose">Not a WxCOP page — a card on the WxCOP home page, under <b>Heat Risk &amp; Health</b>, that links out to NOAA's own HeatRisk tool (opens in a new tab, marked LIVE / EXT). WxCOP doesn't compute or display this data itself.</p>
+      <p class="purpose">It's a 7-day, color-coded forecast of daily heat-illness risk for a location you choose on NOAA's site — useful for encampment and ground SAR planning further out than the WBGT Calculator's point-in-time reading for an activity happening right now.</p>
+      <p class="ext-link">↗ Opens NOAA's Weather Prediction Center HeatRisk tool in a new tab.</p>
+    </section>
+
+    <!-- ============ RECORDS & ADMINISTRATION ============ -->
+    <div class="group-heading">Records &amp; Administration</div>
+
+    <section class="page-card" id="incident">
+      <h2>Incident Archive <span class="route">/incident-archive</span></h2>
+      <p class="purpose">Builds a downloadable ZIP of weather data around a specific time and place, for reconstructing conditions after an aviation incident — not a routine monitoring tool.</p>
+      <ol class="steps">
+        <li><b>Location</b> — three tabs: <b>Airport ID</b> (ICAO identifier, e.g. <span class="field">KCOS</span> — falls back to that station's most recent METAR if the airport itself isn't found), <b>Lat/Lon</b> (decimal degrees or degrees–decimal-minutes, e.g. <span class="field">38 48.348N</span>), or <b>MGRS</b> (10-digit grid coordinate).</li>
+        <li><b>Incident Time (UTC)</b> — pre-filled to one hour before now as a starting point; all times are UTC.</li>
+        <li><b>Collection Radii</b> — METAR/TAF (nm, default 100) and Radar (nm, default 140), each adjustable 10–300.</li>
+        <li><b>Preview</b> — queries without downloading; shows station/report counts, radar sites in range, and plots the incident location, METAR/TAF radius (blue circle), and radar radius (orange dashed circle) on the map. <b>Generate ZIP</b> stays disabled until Preview succeeds.</li>
+        <li><b>Generate ZIP</b> — downloads a file named like <span class="field">incident_20261011_1430Z_KCOS.zip</span>, containing METARs/SPECIs (6-hour window), TAFs valid at the incident time (24-hour lookback), georeferenced radar PNGs (±1 hour), a satellite-download instructions file (manual download steps, not actual imagery yet), and a metadata/README summary.</li>
+      </ol>
+      <div class="callout"><b>Known limitations</b>Radar site markers on the preview map aren't wired to real coordinates yet — only the incident marker and the two radius circles reliably render. Satellite imagery is instructions-only in this version; the ZIP's satellite folder won't contain actual image files.</div>
+    </section>
+
+    <section class="page-card" id="icl">
+      <h2>Wing ICL Admin <span class="route">/admin/wing-icl</span></h2>
+      <p class="purpose">For Wing Directors of Operations and Stan/Eval officers to tighten — never loosen — CAPR 70-1/CAPF 70-1A weather Go/No-Go thresholds for their own wing. Requires login; NHQ/admin users manage every wing's overrides, a wing-role user only their own.</p>
+      <dl class="controls">
+        <dt>National Defaults banner</dt>
+        <dd>Reference strip of baseline thresholds every wing starts from with no override: Surface Wind (Caution 21 kt / No-Go 30 kt), Crosswind VFR (8/15 kt), Crosswind IFR (8/13 kt), Cold Temperature (Caution 20°F / No-Go -10°F), Ceiling VFR (Caution 2,000 ft / No-Go 1,000 ft), Visibility VFR (Caution 3.0 SM / No-Go 1.0 SM).</dd>
+        <dt>Add / Update Override form</dt>
+        <dd>Wing/Region (admin only — wing-role users see their own wing, read-only), Parameter (grouped dropdown; auto-fills the unit and a regulation hint), Threshold (its min/max auto-constrains to the conservative side the instant you pick a parameter — you can't type a looser value), Regulation/Authority (free text), Effective/Expires dates, Notes. <b>Save Override</b> creates or, if you re-save the same wing+parameter, overwrites the existing one.</dd>
+        <dt>Current ICL Overrides table</dt>
+        <dd>One row per active override, with a side-by-side ICL-vs-National comparison and a <b>Delete</b> button (confirmed via a prompt) on each row. A wing with no overrides is shown explicitly as running on national defaults.</dd>
+      </dl>
+      <p class="purpose" style="margin-top:14px;">The core rule, stated permanently above the form: overrides may only be <b>more conservative</b> — never more lenient — and ceiling/visibility overrides must trigger sooner (higher numbers), not later.</p>
+    </section>
+
+    <section class="page-card" id="manualtaf">
+      <h2>Manual TAF Entry <span class="route">/manual-taf</span></h2>
+      <p class="purpose">For entering a TAF by hand when it doesn't arrive automatically over the normal feed — primarily KQ-prefixed USAF placeholder stations, plus any civilian ICAO that AF Weather issues TAFs for directly.</p>
+      <dl class="controls">
+        <dt>TAF Raw Text</dt>
+        <dd>Paste the complete raw TAF exactly as received. Station ID, issue time, and validity period are parsed automatically out of the text — you don't fill those in separately. Plain TAF, <span class="field">TAF AMD</span>, and <span class="field">TAF COR</span> are all recognized.</dd>
+        <dt>↑ Submit TAF</dt>
+        <dd>Disables and shows "Submitting..." while it saves. On success, a confirmation shows the parsed station, name, issue time, and validity window, and the form clears itself after 3 seconds. On failure, an error explains why — if the station isn't found in the database, it redirects you to KQ Station Management after 2 seconds to add it first.</dd>
+        <dt>Clear Form</dt><dd>Wipes the text box without submitting.</dd>
+        <dt>Known KQ &amp; AF Weather Airfields reference</dt><dd>Lists every currently-known station purely for reference — the form itself accepts a TAF for any station already in the airports database, not just the ones listed.</dd>
+      </dl>
+      <p class="purpose" style="margin-top:14px;"><b>Recent Manual TAFs</b> <span class="route">/manual-taf/recent</span> is the history view, reached via the nav link on the entry page — the last 20 manually-entered TAFs, each showing station, issue time, valid window, and a text preview (hover for the full text). It links back to Add TAF, Manage KQ Stations, and Incident Archive, so the two pages are meant to be used back and forth.</p>
+    </section>
+
+  </main>
+</div>
+
+</body></html>
