@@ -43,7 +43,7 @@ flexcache==0.3
 flexparser==0.4
 fonttools==4.61.1
 frozenlist==1.8.0
-fsspec==2026.1.0
+fsspec==2026.6.0
 geopandas==1.1.2
 greenlet==3.3.2
 gunicorn==25.3.0
