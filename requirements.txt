@@ -78,7 +78,7 @@ packaging==25.0
 pandas==2.3.3
 partd==1.4.2
 Paste==3.10.1
-pillow==12.3.0
+pillow==13.0.0
 Pint==0.25.2
 pip-api==0.0.34
 pip-requirements-parser==32.0.1
