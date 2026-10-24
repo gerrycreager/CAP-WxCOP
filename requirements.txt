@@ -35,7 +35,7 @@ eccodes==2.44.0
 eccodeslib==2.44.1.8
 eckitlib==1.32.4.8
 fckitlib==0.14.1.8
-filelock==3.28.0
+filelock==4.2.1
 findlibs==0.1.2
 fiona==1.10.1
 Flask==3.1.3
