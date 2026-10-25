@@ -747,3 +747,280 @@ def get_active_wwa():
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+# ── WPC Surface Fronts ──────────────────────────────────────────────────
+FRONT_COLORS = {
+    'cold':       '#0000FF',
+    'warm':       '#FF0000',
+    'stationary': '#9B59B6',
+    'occluded':   '#8200FF',
+    'trough':     '#824100',
+    'unknown':    '#AAAAAA',
+}
+FRONT_LABELS = {
+    'cold':       'Cold Front',
+    'warm':       'Warm Front',
+    'stationary': 'Stationary Front',
+    'occluded':   'Occluded Front',
+    'trough':     'Trough',
+    'unknown':    'Front (type unknown)',
+}
+
+
+@weather_enhanced_api.route('/fronts/active', methods=['GET'])
+def get_active_fronts():
+    """
+    Return WPC surface front lines (National Forecast Chart) as GeoJSON
+    FeatureCollection. Source: observations.wpc_fronts, refreshed twice
+    daily by scripts/ingest_wpc_fronts.py from a plain-HTTPS NOAA ArcGIS
+    REST service (not LDM).
+
+    Query params:
+      day: 1, 2, or 3 (forecast_day). Defaults to 1 if omitted/invalid.
+    """
+    try:
+        day = request.args.get('day', default=1, type=int)
+        if day not in (1, 2, 3):
+            day = 1
+
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT front_type, forecast_day, valid_text, idp_filedate,
+                   ST_AsGeoJSON(geom) AS geom_json
+            FROM observations.wpc_fronts
+            WHERE forecast_day = %s
+            ORDER BY front_type
+        """, (day,))
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        features = []
+        for front_type, fday, valid_text, idp_filedate, geom_json in rows:
+            if not geom_json:
+                continue
+            ftype = front_type or 'unknown'
+            features.append({
+                'type': 'Feature',
+                'geometry': json.loads(geom_json),
+                'properties': {
+                    'front_type':   ftype,
+                    'forecast_day': fday,
+                    'color':        FRONT_COLORS.get(ftype, '#AAAAAA'),
+                    'label':        FRONT_LABELS.get(ftype, ftype.title()),
+                    'valid_text':   valid_text,
+                    'idp_filedate': idp_filedate.strftime('%Y-%m-%dT%H:%M:%SZ') if idp_filedate else None,
+                }
+            })
+
+        return jsonify({
+            'type':         'FeatureCollection',
+            'features':     features,
+            'count':        len(features),
+            'forecast_day': day,
+            'generated_at': datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'source':       'NWS/WPC natl_fcst_wx_chart',
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ── WPC Surface Pressure Centers (Highs/Lows) ───────────────────────────
+CENTER_COLORS = {
+    'high':    '#3399FF',  # conventional surface-chart blue H
+    'low':     '#FF3333',  # conventional surface-chart red L
+    'unknown': '#AAAAAA',
+}
+CENTER_LABELS = {
+    'high':    'High',
+    'low':     'Low',
+    'unknown': 'Pressure Center (type unknown)',
+}
+
+
+@weather_enhanced_api.route('/pressure-centers/active', methods=['GET'])
+def get_active_pressure_centers():
+    """
+    Return WPC surface high/low pressure center points (National Forecast
+    Chart's "Highs and Lows" layer -- parallel to the Fronts layer, same
+    Day 1/2/3 grouping) as GeoJSON FeatureCollection. Source:
+    observations.wpc_pressure_centers, refreshed by the same
+    scripts/ingest_wpc_fronts.py run that ingests fronts. No central
+    pressure value is exposed by this service -- position + H/L only.
+
+    Query params:
+      day: 1, 2, or 3 (forecast_day). Defaults to 1 if omitted/invalid.
+    """
+    try:
+        day = request.args.get('day', default=1, type=int)
+        if day not in (1, 2, 3):
+            day = 1
+
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT center_type, forecast_day, valid_text, idp_filedate,
+                   ST_AsGeoJSON(geom) AS geom_json
+            FROM observations.wpc_pressure_centers
+            WHERE forecast_day = %s
+            ORDER BY center_type
+        """, (day,))
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        features = []
+        for center_type, fday, valid_text, idp_filedate, geom_json in rows:
+            if not geom_json:
+                continue
+            ctype = center_type or 'unknown'
+            features.append({
+                'type': 'Feature',
+                'geometry': json.loads(geom_json),
+                'properties': {
+                    'center_type':  ctype,
+                    'forecast_day': fday,
+                    'color':        CENTER_COLORS.get(ctype, '#AAAAAA'),
+                    'label':        CENTER_LABELS.get(ctype, ctype.title()),
+                    'valid_text':   valid_text,
+                    'idp_filedate': idp_filedate.strftime('%Y-%m-%dT%H:%M:%SZ') if idp_filedate else None,
+                }
+            })
+
+        return jsonify({
+            'type':         'FeatureCollection',
+            'features':     features,
+            'count':        len(features),
+            'forecast_day': day,
+            'generated_at': datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'source':       'NWS/WPC natl_fcst_wx_chart',
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ── NHC Current Tropical Cyclones ───────────────────────────────────────
+STORM_CATEGORY_COLORS = {
+    'D': '#FFFFFF',  # Tropical Depression
+    'S': '#FFFF00',  # Tropical Storm
+    'H': '#FFA500',  # Hurricane
+    'M': '#FF00FF',  # Major Hurricane (Cat 3+)
+}
+STORM_CATEGORY_LABELS = {
+    'D': 'Tropical Depression',
+    'S': 'Tropical Storm',
+    'H': 'Hurricane',
+    'M': 'Major Hurricane',
+}
+
+
+def _storm_color(dvlbl):
+    return STORM_CATEGORY_COLORS.get((dvlbl or '').strip(), '#CCCCCC')
+
+
+@weather_enhanced_api.route('/tropical/active', methods=['GET'])
+def get_active_tropical():
+    """
+    Return current NHC tropical cyclone points/tracks/cones (all basins,
+    all currently active storms) as one combined response. Source:
+    observations.nhc_storm_points/tracks/cones, refreshed every 30 min
+    by scripts/ingest_nhc_tropical.py from NHC's NHC_tropical_weather_summary
+    ArcGIS REST service (plain HTTPS, not LDM). A count of 0 is a normal
+    off-season state, not an error.
+    """
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            SELECT basin, stormname, stormtype, dvlbl, ssnum, stormnum, binnumber,
+                   advisnum, tau, maxwind, gust, mslp, tcdir, tcspd, advdate,
+                   ST_AsGeoJSON(geom) AS geom_json
+            FROM observations.nhc_storm_points
+            ORDER BY stormnum, tau
+        """)
+        point_rows = cur.fetchall()
+
+        cur.execute("""
+            SELECT basin, stormname, stormnum, binnumber, advisnum, ST_AsGeoJSON(geom)
+            FROM observations.nhc_storm_tracks
+        """)
+        track_rows = cur.fetchall()
+
+        cur.execute("""
+            SELECT basin, stormname, stormnum, binnumber, advisnum, ST_AsGeoJSON(geom)
+            FROM observations.nhc_storm_cones
+        """)
+        cone_rows = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        # Per-storm "current" (tau=0) category color, propagated onto that
+        # storm's track so the line visually matches its current-position dot.
+        current_color_by_storm = {}
+        points_fc = []
+        for (basin, stormname, stormtype, dvlbl, ssnum, stormnum, binnumber,
+             advisnum, tau, maxwind, gust, mslp, tcdir, tcspd, advdate, geom_json) in point_rows:
+            if not geom_json:
+                continue
+            color = _storm_color(dvlbl)
+            if tau == 0:
+                current_color_by_storm[(basin, stormnum)] = color
+            points_fc.append({
+                'type': 'Feature',
+                'geometry': json.loads(geom_json),
+                'properties': {
+                    'basin': basin, 'stormname': stormname, 'stormtype': stormtype,
+                    'dvlbl': dvlbl, 'ssnum': ssnum, 'stormnum': stormnum,
+                    'binnumber': binnumber, 'advisnum': advisnum, 'tau': tau,
+                    'maxwind': maxwind, 'gust': gust, 'mslp': mslp,
+                    'tcdir': tcdir, 'tcspd': tcspd, 'advdate': advdate,
+                    'color': color,
+                    'label': STORM_CATEGORY_LABELS.get((dvlbl or '').strip(), stormtype),
+                    'is_current': (tau == 0),
+                }
+            })
+
+        tracks_fc = []
+        for basin, stormname, stormnum, binnumber, advisnum, geom_json in track_rows:
+            if not geom_json:
+                continue
+            color = current_color_by_storm.get((basin, stormnum), '#CCCCCC')
+            tracks_fc.append({
+                'type': 'Feature',
+                'geometry': json.loads(geom_json),
+                'properties': {
+                    'basin': basin, 'stormname': stormname, 'stormnum': stormnum,
+                    'binnumber': binnumber, 'advisnum': advisnum, 'color': color,
+                }
+            })
+
+        cones_fc = []
+        for basin, stormname, stormnum, binnumber, advisnum, geom_json in cone_rows:
+            if not geom_json:
+                continue
+            cones_fc.append({
+                'type': 'Feature',
+                'geometry': json.loads(geom_json),
+                'properties': {
+                    'basin': basin, 'stormname': stormname, 'stormnum': stormnum,
+                    'binnumber': binnumber, 'advisnum': advisnum,
+                }
+            })
+
+        now = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+        return jsonify({
+            'points':       {'type': 'FeatureCollection', 'features': points_fc},
+            'tracks':       {'type': 'FeatureCollection', 'features': tracks_fc},
+            'cones':        {'type': 'FeatureCollection', 'features': cones_fc},
+            'count':        len(points_fc),
+            'generated_at': now,
+            'source':       'NHC_tropical_weather_summary',
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500

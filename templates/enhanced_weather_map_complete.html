@@ -245,6 +245,43 @@
         #wwaLegend .wl-row { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
         #wwaLegend .wl-swatch { width: 18px; height: 10px; border-radius: 2px;
                                 flex-shrink: 0; border: 1px solid rgba(255,255,255,0.3); }
+        #wpcFrontsLegend {
+            display: none; position: fixed;
+            top: 340px; left: 10px;
+            background: rgba(20,30,20,0.92);
+            border: 1px solid #4a9c6f;
+            border-radius: 4px; padding: 6px 10px;
+            z-index: 1050; font-size: 11px;
+            color: #eee; min-width: 160px;
+            max-width: 220px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+        }
+        #wpcFrontsLegend.visible { display: block; }
+        #wpcFrontsLegend .fl-title { font-weight: 700; font-size: 10px; color: #8cf;
+                               text-transform: uppercase; letter-spacing: 0.05em;
+                               margin-bottom: 5px; border-bottom: 1px solid #4a9c6f;
+                               padding-bottom: 3px; }
+        #wpcFrontsLegend .fl-row { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
+        #wpcFrontsLegend .fl-swatch { width: 18px; height: 3px; flex-shrink: 0; }
+        #tropicalLegend {
+            display: none; position: fixed;
+            top: 470px; left: 10px;
+            background: rgba(20,30,20,0.92);
+            border: 1px solid #4a9c6f;
+            border-radius: 4px; padding: 6px 10px;
+            z-index: 1050; font-size: 11px;
+            color: #eee; min-width: 180px;
+            max-width: 240px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+        }
+        #tropicalLegend.visible { display: block; }
+        #tropicalLegend .tc-title { font-weight: 700; font-size: 10px; color: #8cf;
+                               text-transform: uppercase; letter-spacing: 0.05em;
+                               margin-bottom: 5px; border-bottom: 1px solid #4a9c6f;
+                               padding-bottom: 3px; }
+        #tropicalLegend .tc-row { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
+        #tropicalLegend .tc-swatch { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0;
+                               border: 1px solid rgba(255,255,255,0.4); }
         #glmLegend .gl-title { font-weight: 700; font-size: 10px; color: #111;
                                text-transform: uppercase; letter-spacing: 0.05em;
                                margin-bottom: 4px; border-bottom: 1px solid #ccc; padding-bottom: 3px; }
@@ -569,6 +606,8 @@
         <label class="checkbox-label"><input type="checkbox" id="fzlvlToggle"> FZLVL Contours</label>
         <label class="checkbox-label"><input type="checkbox" id="glmToggle"> GLM Lightning</label>
         <label class="checkbox-label"><input type="checkbox" id="wwaToggle"> NWS Watches/Warnings</label>
+        <label class="checkbox-label"><input type="checkbox" id="wpcFrontsToggle"> WPC Surface Depiction</label>
+        <label class="checkbox-label"><input type="checkbox" id="tropicalToggle"> Tropical Cyclones</label>
 
         <div class="divider"></div>
         <h3>Airspace</h3>
@@ -737,6 +776,7 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
     <script src="https://unpkg.com/leaflet-velocity@2.1.4/dist/leaflet-velocity.min.js"></script>
+    <script src="https://unpkg.com/leaflet-polylinedecorator@1.6.0/dist/leaflet.polylineDecorator.js"></script>
     <script>
         // ── Panel toggle ──────────────────────────────────────────
         function togglePanel() {
@@ -2651,6 +2691,286 @@
                 }
             });
 
+            // ── WPC Surface Depiction (Fronts + Highs/Lows) ──────────
+            var wpcFrontsLayer = null;
+            var wpcFrontsTimer = null;
+
+            // Front pip icon: shape bulges along local -y (side=-1) or +y
+            // (side=1) in the icon's own coordinate frame. L.Symbol.marker's
+            // rotate:true then rotates that frame so local +x aligns with
+            // the line's tangent direction -- so a -y/+y bulge ends up
+            // perpendicular to the line (i.e. to one side of it), which is
+            // the standard way front pips are drawn relative to the line.
+            function frontPipIcon(shape, color, side) {
+                var vbY = side < 0 ? -10 : 0;
+                var tip = side < 0 ? -9 : 9;
+                var svg;
+                if (shape === 'triangle') {
+                    svg = '<polygon points="-5,0 5,0 0,' + tip + '" fill="' + color + '"/>';
+                } else {
+                    var sweep = side < 0 ? 1 : 0;
+                    svg = '<path d="M-5,0 A5,5 0 0 ' + sweep + ' 5,0 Z" fill="' + color + '"/>';
+                }
+                return L.divIcon({
+                    className: 'front-pip-icon',
+                    html: '<svg width="12" height="10" viewBox="-6 ' + vbY + ' 12 10">' + svg + '</svg>',
+                    iconSize: [12, 10],
+                    iconAnchor: [6, side < 0 ? 10 : 0]
+                });
+            }
+
+            function pipSymbol(shape, color, side) {
+                return L.Symbol.marker({
+                    rotate: true,
+                    markerOptions: { icon: frontPipIcon(shape, color, side) }
+                });
+            }
+
+            // Real NWS surface-chart pip patterns per front type. Cold =
+            // repeated triangles; warm = repeated semicircles; occluded =
+            // alternating triangle/semicircle, same color, same side;
+            // stationary = alternating blue triangle / red semicircle on
+            // OPPOSITE sides of the line -- the defining stationary-front
+            // symbol that a plain colored line can't show. Trough has no
+            // NWS pip symbology (dashed line only).
+            function frontPatterns(ftype) {
+                switch (ftype) {
+                    case 'cold':
+                        return [{ offset: 10, repeat: 26, symbol: pipSymbol('triangle', '#0000FF', -1) }];
+                    case 'warm':
+                        return [{ offset: 10, repeat: 26, symbol: pipSymbol('semicircle', '#FF0000', -1) }];
+                    case 'occluded':
+                        return [
+                            { offset: 10, repeat: 52, symbol: pipSymbol('triangle', '#8200FF', -1) },
+                            { offset: 36, repeat: 52, symbol: pipSymbol('semicircle', '#8200FF', -1) }
+                        ];
+                    case 'stationary':
+                        return [
+                            { offset: 10, repeat: 52, symbol: pipSymbol('triangle', '#0000FF', -1) },
+                            { offset: 36, repeat: 52, symbol: pipSymbol('semicircle', '#FF0000', 1) }
+                        ];
+                    default:
+                        return [];
+                }
+            }
+
+            function pressureCenterIcon(label, color) {
+                return L.divIcon({
+                    className: 'pressure-center-icon',
+                    html: '<div style="font-weight:800; font-size:16px; line-height:16px; ' +
+                          'color:' + color + '; text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, ' +
+                          '-1px 1px 0 #000, 1px 1px 0 #000;">' + label + '</div>',
+                    iconSize: [16, 16],
+                    iconAnchor: [8, 8]
+                });
+            }
+
+            function loadWpcFronts() {
+                var m = getMap();
+                if (!m) return;
+                Promise.all([
+                    fetch('/CAP_WxCOP/api/weather-enhanced/fronts/active?day=1').then(function(r) { return r.json(); }),
+                    fetch('/CAP_WxCOP/api/weather-enhanced/pressure-centers/active?day=1').then(function(r) { return r.json(); })
+                ]).then(function(results) {
+                        var frontsData = results[0], centersData = results[1];
+                        if (wpcFrontsLayer) { m.removeLayer(wpcFrontsLayer); wpcFrontsLayer = null; }
+                        var hasFronts = frontsData.features && frontsData.features.length > 0;
+                        var hasCenters = centersData.features && centersData.features.length > 0;
+                        if (!hasFronts && !hasCenters) return;
+
+                        wpcFrontsLayer = L.layerGroup();
+
+                        (frontsData.features || []).forEach(function(f) {
+                            if (!f.geometry) return;
+                            var color = f.properties.color || '#AAAAAA';
+                            var label = f.properties.label || '';
+                            var ftype = f.properties.front_type;
+                            var isTrough = ftype === 'trough';
+                            var line = L.geoJSON(f.geometry, {
+                                style: {
+                                    color:    isTrough ? color : '#000000',
+                                    weight:   isTrough ? 2.5 : 1.5,
+                                    opacity:  0.85,
+                                    dashArray: isTrough ? '6,4' : null
+                                }
+                            }).bindPopup(
+                                '<b>' + label + '</b><br>' +
+                                (f.properties.valid_text ? f.properties.valid_text + '<br>' : '')
+                            );
+                            line.addTo(wpcFrontsLayer);
+
+                            var patterns = frontPatterns(ftype);
+                            if (patterns.length && typeof L.polylineDecorator === 'function') {
+                                line.eachLayer(function(polylineLayer) {
+                                    if (polylineLayer.getLatLngs) {
+                                        L.polylineDecorator(polylineLayer, { patterns: patterns }).addTo(wpcFrontsLayer);
+                                    }
+                                });
+                            }
+                        });
+
+                        (centersData.features || []).forEach(function(f) {
+                            if (!f.geometry) return;
+                            var p = f.properties;
+                            var label = p.center_type === 'high' ? 'H' : (p.center_type === 'low' ? 'L' : '?');
+                            var marker = L.marker(
+                                [f.geometry.coordinates[1], f.geometry.coordinates[0]],
+                                { icon: pressureCenterIcon(label, p.color || '#AAAAAA') }
+                            ).bindPopup('<b>' + (p.label || label) + '</b><br>' + (p.valid_text || ''));
+                            marker.addTo(wpcFrontsLayer);
+                        });
+
+                        if (document.getElementById('wpcFrontsToggle').checked) {
+                            wpcFrontsLayer.addTo(m);
+                        }
+
+                        var seen = {};
+                        var legendHtml = '';
+                        (frontsData.features || []).forEach(function(f) {
+                            var key = 'front-' + f.properties.front_type;
+                            if (!seen[key]) {
+                                seen[key] = true;
+                                legendHtml += '<div class="fl-row">' +
+                                    '<div class="fl-swatch" style="background:' +
+                                    f.properties.color + ';"></div>' +
+                                    '<span>' + f.properties.label + '</span></div>';
+                            }
+                        });
+                        (centersData.features || []).forEach(function(f) {
+                            var key = 'center-' + f.properties.center_type;
+                            if (!seen[key]) {
+                                seen[key] = true;
+                                legendHtml += '<div class="fl-row">' +
+                                    '<div class="fl-swatch" style="background:' +
+                                    f.properties.color + '; border-radius:50%;"></div>' +
+                                    '<span>' + f.properties.label + ' Pressure Center</span></div>';
+                            }
+                        });
+                        var legendEl = document.getElementById('wpcFrontsLegend');
+                        document.getElementById('wpcFrontsLegendItems').innerHTML = legendHtml;
+                        if (legendHtml && document.getElementById('wpcFrontsToggle').checked) {
+                            legendEl.classList.add('visible');
+                        } else {
+                            legendEl.classList.remove('visible');
+                        }
+                    })
+                    .catch(function(e) { console.error('WPC Surface Depiction load error:', e); });
+            }
+
+            document.getElementById('wpcFrontsToggle').addEventListener('change', function() {
+                var m = getMap();
+                if (this.checked) {
+                    loadWpcFronts();
+                    wpcFrontsTimer = setInterval(loadWpcFronts, 1800000); // 30 min -- source updates 2x/day only
+                } else {
+                    if (wpcFrontsLayer && m) { m.removeLayer(wpcFrontsLayer); wpcFrontsLayer = null; }
+                    if (wpcFrontsTimer) { clearInterval(wpcFrontsTimer); wpcFrontsTimer = null; }
+                    document.getElementById('wpcFrontsLegend').classList.remove('visible');
+                }
+            });
+
+            // ── NHC Tropical Cyclones ────────────────────────────────
+            var tropicalConeLayer = null, tropicalTrackLayer = null, tropicalPointLayer = null;
+            var tropicalTimer = null;
+
+            function loadTropical() {
+                var m = getMap();
+                if (!m) return;
+                fetch('/CAP_WxCOP/api/weather-enhanced/tropical/active')
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        [tropicalConeLayer, tropicalTrackLayer, tropicalPointLayer].forEach(function(l) {
+                            if (l) m.removeLayer(l);
+                        });
+                        tropicalConeLayer = L.layerGroup();
+                        tropicalTrackLayer = L.layerGroup();
+                        tropicalPointLayer = L.layerGroup();
+
+                        if (!data.count || data.count === 0) {
+                            document.getElementById('tropicalLegend').classList.remove('visible');
+                            return; // off-season -- not an error, render nothing quietly
+                        }
+
+                        (data.cones.features || []).forEach(function(f) {
+                            L.geoJSON(f.geometry, {
+                                style: { color: '#FF0000', weight: 1.5, fillColor: '#888888', fillOpacity: 0.25 }
+                            }).bindPopup('<b>' + f.properties.stormname + '</b> forecast cone')
+                              .addTo(tropicalConeLayer);
+                        });
+                        (data.tracks.features || []).forEach(function(f) {
+                            L.geoJSON(f.geometry, {
+                                style: { color: f.properties.color || '#CCCCCC', weight: 2, dashArray: '5,5' }
+                            }).addTo(tropicalTrackLayer);
+                        });
+                        (data.points.features || []).forEach(function(f) {
+                            var p = f.properties;
+                            var isCurrent = p.is_current;
+                            var marker = L.circleMarker(
+                                [f.geometry.coordinates[1], f.geometry.coordinates[0]],
+                                {
+                                    radius:     isCurrent ? 9 : 4,
+                                    color:      '#000000',
+                                    weight:     1,
+                                    fillColor:  p.color,
+                                    fillOpacity: 0.9
+                                }
+                            ).bindPopup(
+                                '<b>' + p.stormname + '</b> (' + (p.label || p.stormtype) + ')<br>' +
+                                'Tau: ' + p.tau + 'h<br>' +
+                                'Wind: ' + p.maxwind + ' kt, Gust: ' + p.gust + ' kt<br>' +
+                                'MSLP: ' + p.mslp + ' mb<br>' +
+                                'Advisory: ' + (p.advdate || '')
+                            );
+                            if (isCurrent) {
+                                marker.bindTooltip(p.stormname, { permanent: true, direction: 'right' });
+                            }
+                            marker.addTo(tropicalPointLayer);
+                        });
+
+                        if (document.getElementById('tropicalToggle').checked) {
+                            tropicalConeLayer.addTo(m);
+                            tropicalTrackLayer.addTo(m);
+                            tropicalPointLayer.addTo(m);
+                        }
+
+                        var seen = {};
+                        var legendHtml = '';
+                        (data.points.features || []).forEach(function(f) {
+                            var key = f.properties.dvlbl;
+                            if (!seen[key]) {
+                                seen[key] = true;
+                                legendHtml += '<div class="tc-row">' +
+                                    '<div class="tc-swatch" style="background:' +
+                                    f.properties.color + ';"></div>' +
+                                    '<span>' + f.properties.label + '</span></div>';
+                            }
+                        });
+                        var legendEl = document.getElementById('tropicalLegend');
+                        document.getElementById('tropicalLegendItems').innerHTML = legendHtml;
+                        if (legendHtml && document.getElementById('tropicalToggle').checked) {
+                            legendEl.classList.add('visible');
+                        } else {
+                            legendEl.classList.remove('visible');
+                        }
+                    })
+                    .catch(function(e) { console.error('Tropical load error:', e); });
+            }
+
+            document.getElementById('tropicalToggle').addEventListener('change', function() {
+                var m = getMap();
+                if (this.checked) {
+                    loadTropical();
+                    tropicalTimer = setInterval(loadTropical, 900000); // 15 min
+                } else {
+                    [tropicalConeLayer, tropicalTrackLayer, tropicalPointLayer].forEach(function(l) {
+                        if (l && m) m.removeLayer(l);
+                    });
+                    tropicalConeLayer = tropicalTrackLayer = tropicalPointLayer = null;
+                    if (tropicalTimer) { clearInterval(tropicalTimer); tropicalTimer = null; }
+                    document.getElementById('tropicalLegend').classList.remove('visible');
+                }
+            });
+
         }); // DOMContentLoaded
     })();
     </script>
@@ -2659,6 +2979,18 @@
     <div id="wwaLegend">
         <div class="wl-title">&#9888; Active NWS Alerts</div>
         <div id="wwaLegendItems"></div>
+    </div>
+
+    <!-- WPC Surface Depiction Legend (Fronts + Highs/Lows) -->
+    <div id="wpcFrontsLegend">
+        <div class="fl-title">WPC Surface Depiction</div>
+        <div id="wpcFrontsLegendItems"></div>
+    </div>
+
+    <!-- Tropical Cyclone Legend -->
+    <div id="tropicalLegend">
+        <div class="tc-title">Tropical Cyclones</div>
+        <div id="tropicalLegendItems"></div>
     </div>
 
     <!-- MRMS colorbar -->
