@@ -410,12 +410,16 @@ def get_available_times():
     try:
         conn = get_connection()
         cur = conn.cursor()
-        # Latest complete run
+        # Latest complete run. Grouped by (model_run, model_name) -- not just
+        # model_run -- since HRRR/RRFS/GFS/AIGFS share this table and can have
+        # coincidentally-identical model_run timestamps; the old GROUP BY
+        # model_run alone could merge different models' forecast_hour counts
+        # for the same nominal cycle time.
         cur.execute("""
-            SELECT model_run FROM (
-                SELECT model_run, MAX(forecast_hour) as max_fh
+            SELECT model_run, model_name FROM (
+                SELECT model_run, model_name, MAX(forecast_hour) as max_fh
                 FROM observations.model_wind_forecasts
-                GROUP BY model_run
+                GROUP BY model_run, model_name
             ) sub WHERE max_fh >= 12
             ORDER BY model_run DESC LIMIT 1
         """)
@@ -423,18 +427,18 @@ def get_available_times():
         if not result:
             cur.close(); conn.close()
             return jsonify({'error': 'No complete model runs available'}), 404
-        model_run = result[0]
+        model_run, model_name = result
         cur.execute("""
             SELECT DISTINCT valid_time, forecast_hour
             FROM observations.model_wind_forecasts
-            WHERE model_run = %s
+            WHERE model_run = %s AND model_name = %s
             ORDER BY valid_time
-        """, (model_run,))
+        """, (model_run, model_name))
         rows = cur.fetchall()
         cur.close(); conn.close()
         return jsonify({
             'model_run': model_run.isoformat(),
-            'model_name': 'HRRR',
+            'model_name': model_name,
             'times': [
                 {'valid_time': r[0].isoformat(), 'forecast_hour': r[1]}
                 for r in rows

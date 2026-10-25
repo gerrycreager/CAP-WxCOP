@@ -22,11 +22,32 @@ For interactive monitoring of a run in progress:
   tail -f /var/log/model_winds_ingest.log
 
 Architecture:
-  - GRIB2 files read from /LDM/models/ (NFS mount from data1)
   - Forecasts written to observations.model_wind_forecasts on data2 PostgreSQL
-  - HRRR:  CONUS only,  hourly cycles,   f000-f012 (per-forecast-hour files)
-  - GFS:   Global,      6-hourly cycles,  f000-f024 (per-forecast-hour files)
-  - AIGFS: Global,      6-hourly cycles,  f000-f096 (monolithic sfc file per cycle)
+  - CONUS 10m winds: RRFS by default (part of the HRRR->RRFS migration, see
+    /root/.claude/plans/rosy-wobbling-music.md "Phase 6"), hourly cycles,
+    f000-f012, fetched on demand via rrfs_wind_fetch.py's NOMADS byte-range
+    .idx technique (2dfld product, conus/3km) and decoded with cfgrib.
+    Set WIND_MODEL_SOURCE=hrrr to fall back to the legacy path reading
+    /LDM/models/hrrr/ (NFS mount from data1) via pygrib -- same env var
+    name render_hrrr_winds.py/render_hrrr_particles.py already use.
+    model_name is 'RRFS' or 'HRRR' in the DB depending on which is active.
+    RRFS ingestion runs in its own spawned subprocess (see _rrfs_worker() /
+    multiprocessing.get_context('spawn') in main()) -- cfgrib and pygrib
+    both bind the same underlying ecCodes C library through different
+    Python wrappers, and running both in one long-lived process (this
+    script's main() already uses pygrib for GFS/AIGFS later in the same
+    run) segfaulted live in testing on data2 (2026-09-21): the RRFS/cfgrib
+    work completed cleanly, then pygrib.open() for AIGFS crashed with a
+    real Segmentation fault, reproducible only when both libraries were
+    exercised back-to-back in one process -- isolated standalone calls to
+    either library alone were fine. 'spawn' (not 'fork') guarantees the
+    RRFS child never inherits the main process's already-imported pygrib
+    C state.
+  - GFS:   Global, 6-hourly cycles, f000-f024 (per-forecast-hour files,
+           /LDM/models/gfs/, NFS mount from data1) -- NOT part of the RRFS
+           migration (GFS isn't being retired), left untouched.
+  - AIGFS: Global, 6-hourly cycles, f000-f096 (monolithic sfc file per cycle,
+           /LDM/models/AIGFS/, NFS mount from data1) -- also untouched.
 """
 
 import os
@@ -34,6 +55,7 @@ import sys
 import fcntl
 import argparse
 import logging
+import multiprocessing as mp
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -42,6 +64,8 @@ import numpy as np
 from scipy.spatial import cKDTree
 import psycopg2
 from psycopg2.extras import execute_values
+
+import rrfs_wind_fetch as rwf
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -74,8 +98,12 @@ HRRR_BASE  = '/LDM/models/hrrr'
 GFS_BASE   = '/LDM/models/gfs'
 AIGFS_BASE = '/LDM/models/AIGFS'
 
+# 'rrfs' (default) or 'hrrr' -- controls only the CONUS 10m-wind pipeline;
+# GFS/AIGFS are unaffected by this switch, see module docstring.
+WIND_MODEL_SOURCE = os.environ.get('WIND_MODEL_SOURCE', 'rrfs')
+
 # Forecast hour limits per model
-HRRR_FORECAST_HOURS  = 12   # F00-F12  (hourly)
+HRRR_FORECAST_HOURS  = 12   # F00-F12  (hourly) -- shared by the RRFS path too
 GFS_FORECAST_HOURS   = 24   # F000-F024 (3-hourly)
 AIGFS_FORECAST_HOURS = 96   # F000-F096 (6-hourly) -- expand as needed
 
@@ -98,6 +126,7 @@ def check_existing_forecast(model_name, model_run):
     """Return True if a complete set of forecast hours exists for this cycle."""
     thresholds = {
         'HRRR':  HRRR_FORECAST_HOURS  + 1,
+        'RRFS':  HRRR_FORECAST_HOURS  + 1,
         'GFS':   (GFS_FORECAST_HOURS  // 3) + 1,
         'AIGFS': (AIGFS_FORECAST_HOURS // 6) + 1,
     }
@@ -210,6 +239,20 @@ def extract_winds_from_message(grb, airports, grid_indices):
     return results
 
 
+def extract_winds_from_array(data, airports, grid_indices):
+    """
+    Same contract as extract_winds_from_message(), for a flattened numpy
+    array (RRFS/cfgrib path) instead of a pygrib message object.
+    Returns dict: icao -> float (m/s).
+    """
+    results = {}
+    for i, icao in enumerate(airports['icao']):
+        val = data[grid_indices[i]]
+        if not np.ma.is_masked(val):
+            results[icao] = float(val)
+    return results
+
+
 def wind_speed_dir(u, v):
     """Return (speed m/s, direction degrees-from) from U/V components."""
     wspd = float(np.sqrt(u**2 + v**2))
@@ -240,6 +283,16 @@ def bulk_insert(conn, records, model_name):
                              ap_lat, ap_lon)
     Converts m/s -> knots, computes wind_category, builds PostGIS location.
     Idempotent via ON CONFLICT DO UPDATE on (station_id, model_run, valid_time).
+
+    NOTE: model_name is part of the DO UPDATE SET list -- without it, two
+    models that happen to share a (station_id, model_run, valid_time) key
+    (e.g. HRRR and RRFS both writing hourly CONUS cycles with aligned
+    model_run/valid_time) can leave a row's wind values updated to the new
+    model's data while its model_name label silently keeps the OLD model's
+    name. Found live 2026-09-21 switching WIND_MODEL_SOURCE from hrrr to
+    rrfs: 27,312 rows had their values overwritten to RRFS but stayed
+    labeled 'HRRR' until this fix, because data2's cron had already written
+    HRRR rows for the same 21z cycle before the RRFS repoint was deployed.
     """
     if not records:
         log.warning(f"  [{model_name}] No records to insert")
@@ -257,6 +310,7 @@ def bulk_insert(conn, records, model_name):
             VALUES %s
             ON CONFLICT (station_id, model_run, valid_time)
             DO UPDATE SET
+                model_name     = EXCLUDED.model_name,
                 wind_speed_kts = EXCLUDED.wind_speed_kts,
                 wind_dir       = EXCLUDED.wind_dir,
                 wind_category  = EXCLUDED.wind_category,
@@ -359,6 +413,119 @@ def ingest_hrrr_forecasts(cycle_time, cycle_dir, force=False):
 
         u_vals = extract_winds_from_message(u_msgs[0], airports, grid_indices)
         v_vals = extract_winds_from_message(v_msgs[0], airports, grid_indices)
+        valid_time = cycle_time + timedelta(hours=fhour)
+
+        n = 0
+        for i, icao in enumerate(airports['icao']):
+            if icao in u_vals and icao in v_vals:
+                wspd, wdir = wind_speed_dir(u_vals[icao], v_vals[icao])
+                records.append((icao, model_name, cycle_time, fhour,
+                                 valid_time, wspd, wdir, u_vals[icao], v_vals[icao],
+                                 float(airports['lats'][i]), float(airports['lons'][i])))
+                n += 1
+        processed += 1
+        vlog(f"  [{model_name}] F{fhour:03d}: {n:,} airports in {time.time()-t0:.1f}s")
+
+    bulk_insert(conn, records, model_name)
+    conn.close()
+    log.info(f"  [{model_name}] Done: {processed} steps, {skipped} skipped, "
+             f"{len(records):,} records, {time.time()-t_total:.0f}s elapsed")
+    sys.stdout.flush()
+
+
+# ---------------------------------------------------------------------------
+# RRFS (default CONUS 10m-wind source -- see WIND_MODEL_SOURCE)
+# ---------------------------------------------------------------------------
+
+def find_latest_rrfs_cycle():
+    """
+    RRFS CONUS 2dfld product, fetched via rrfs_wind_fetch.py's NOMADS
+    byte-range .idx technique (no local LDM feed for RRFS -- see
+    project_noaaport_sbn_href_retirement memory). Mirrors
+    find_latest_hrrr_cycle()'s (cycle_datetime, cycle_dir)-shaped return;
+    here "cycle_dir" is a (date, cycle_num) tuple threaded through to
+    ingest_rrfs_forecasts(), not a filesystem path.
+    """
+    vlog("  Scanning for latest ready RRFS cycle...")
+    date, cyc = rwf.find_ready_cycle(product='2dfld', domain='conus', resolution='3km')
+    if not date:
+        log.info("  [RRFS] No ready cycle found within lookback window")
+        return None, None
+    ct = datetime.strptime(f'{date}{cyc}', '%Y%m%d%H')
+    log.info(f"  [RRFS] Found cycle: {ct.strftime('%Y-%m-%d %H:00Z')}")
+    return ct, (date, cyc)
+
+
+def get_rrfs_sfc_winds(grib_path):
+    """
+    Decode 10m U/V + native lat/lon from an RRFS 2dfld curated subset
+    (fetched via rrfs_wind_fetch.fetch_and_cache()). Returns flattened
+    (u, v, lats, lons) numpy arrays, matching get_grid_latlons()'s
+    flattened-array contract so build_airport_indices() needs no changes.
+    Same cfgrib extraction pattern as render_hrrr_winds.py's get_sfc_winds().
+    """
+    import cfgrib
+    datasets = cfgrib.open_datasets(str(grib_path), backend_kwargs={'indexpath': ''})
+    for ds in datasets:
+        if 'heightAboveGround' not in ds.coords:
+            continue
+        heights = np.atleast_1d(ds.coords['heightAboveGround'].values)
+        if not np.any(np.abs(heights - 10.0) <= 1):
+            continue
+        if 'u10' in ds.data_vars and 'v10' in ds.data_vars:
+            lons = np.where(ds.longitude.values > 180,
+                             ds.longitude.values - 360, ds.longitude.values)
+            return (ds['u10'].values.flatten(), ds['v10'].values.flatten(),
+                    ds.latitude.values.flatten(), lons.flatten())
+    raise ValueError('No 10m wind dataset found in RRFS 2dfld subset')
+
+
+def ingest_rrfs_forecasts(cycle_time, cycle_key, force=False):
+    model_name = 'RRFS'
+    date, cyc = cycle_key
+    log.info(f"  [{model_name}] Ingesting {cycle_time.strftime('%Y-%m-%d %H:00Z')}")
+    t_total = time.time()
+
+    conn     = get_connection()
+    airports = load_airports(conn)
+
+    if force:
+        vlog(f"  [{model_name}] Deleting existing records for this cycle")
+        cur = conn.cursor()
+        cur.execute("DELETE FROM observations.model_wind_forecasts "
+                    "WHERE model_name=%s AND model_run=%s", (model_name, cycle_time))
+        conn.commit()
+        cur.close()
+
+    records = []
+    grid_indices = None
+    processed = skipped = 0
+    sfc_wanted = {('UGRD', '10 m above ground'), ('VGRD', '10 m above ground')}
+
+    for fhour in range(0, HRRR_FORECAST_HOURS + 1):
+        grib_path = rwf.fetch_and_cache('2dfld', date, cyc, fhour, sfc_wanted,
+                                         tag='modelwinds', domain='conus', resolution='3km')
+        if not grib_path:
+            vlog(f"  [{model_name}] F{fhour:03d}: not posted yet")
+            skipped += 1
+            continue
+
+        vlog(f"  [{model_name}] F{fhour:03d} {grib_path.name}")
+        sys.stdout.flush()
+        t0 = time.time()
+
+        try:
+            u_flat, v_flat, grid_lats, grid_lons = get_rrfs_sfc_winds(grib_path)
+        except Exception as e:
+            log.error(f"  [{model_name}] F{fhour:03d} decode error: {e}")
+            skipped += 1
+            continue
+
+        if grid_indices is None:
+            grid_indices = build_airport_indices(airports, grid_lats, grid_lons)
+
+        u_vals = extract_winds_from_array(u_flat, airports, grid_indices)
+        v_vals = extract_winds_from_array(v_flat, airports, grid_indices)
         valid_time = cycle_time + timedelta(hours=fhour)
 
         n = 0
@@ -662,6 +829,17 @@ def ingest_aigfs_forecasts(cycle_time, sfc_fpath, force=False):
     sys.stdout.flush()
 
 
+def _rrfs_worker(verbose, cycle_time, cycle_key, force):
+    """
+    Runs ingest_rrfs_forecasts() in a spawned child process -- see the
+    cfgrib/pygrib segfault note in the module docstring for why this can't
+    just be a plain function call from main().
+    """
+    global VERBOSE
+    VERBOSE = verbose
+    ingest_rrfs_forecasts(cycle_time, cycle_key, force=force)
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -712,19 +890,33 @@ Logging modes:
              + (" [verbose]" if VERBOSE else ""))
     log.info("=" * 70)
 
-    # --- HRRR ---
-    log.info("Checking for new HRRR data...")
-    hrrr_run, hrrr_dir = find_latest_hrrr_cycle()
-    if hrrr_run:
-        exists = check_existing_forecast('HRRR', hrrr_run)
-        if args.force_hrrr or args.reprocess or not exists:
-            log.info(f"✓ Processing HRRR {hrrr_run.strftime('%Y-%m-%d %H:00Z')}")
-            ingest_hrrr_forecasts(hrrr_run, hrrr_dir,
-                                  force=args.force_hrrr or args.reprocess)
-        else:
-            log.info(f"○ HRRR {hrrr_run.strftime('%Y-%m-%d %H:00Z')} already complete")
+    # --- CONUS 10m winds: RRFS by default, HRRR via WIND_MODEL_SOURCE=hrrr ---
+    conus_model = 'RRFS' if WIND_MODEL_SOURCE == 'rrfs' else 'HRRR'
+    log.info(f"Checking for new {conus_model} data...")
+    if WIND_MODEL_SOURCE == 'rrfs':
+        conus_run, conus_key = find_latest_rrfs_cycle()
     else:
-        log.info("○ No HRRR data available")
+        conus_run, conus_key = find_latest_hrrr_cycle()
+    if conus_run:
+        exists = check_existing_forecast(conus_model, conus_run)
+        if args.force_hrrr or args.reprocess or not exists:
+            log.info(f"✓ Processing {conus_model} {conus_run.strftime('%Y-%m-%d %H:00Z')}")
+            if WIND_MODEL_SOURCE == 'rrfs':
+                ctx = mp.get_context('spawn')
+                proc = ctx.Process(target=_rrfs_worker,
+                                    args=(VERBOSE, conus_run, conus_key,
+                                          args.force_hrrr or args.reprocess))
+                proc.start()
+                proc.join()
+                if proc.exitcode != 0:
+                    log.error(f"  [RRFS] worker process exited with code {proc.exitcode}")
+            else:
+                ingest_hrrr_forecasts(conus_run, conus_key,
+                                      force=args.force_hrrr or args.reprocess)
+        else:
+            log.info(f"○ {conus_model} {conus_run.strftime('%Y-%m-%d %H:00Z')} already complete")
+    else:
+        log.info(f"○ No {conus_model} data available")
 
     # --- GFS ---
     log.info("=" * 70)
