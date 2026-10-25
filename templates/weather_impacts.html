@@ -267,14 +267,14 @@
 
         <!-- Legend -->
         <div class="sb-section">
-            <div class="sb-label">Impacts Legend</div>
-            <div class="leg-item"><div class="leg-dot" style="background:#43a047;"></div>Go</div>
-            <div class="leg-item"><div class="leg-dot" style="background:#fdd835;border-color:#888;"></div>Caution</div>
-            <div class="leg-item"><div class="leg-dot" style="background:#e53935;"></div>No-Go</div>
+            <div class="sb-label">Release Authority</div>
+            <div class="leg-item"><div class="leg-dot" style="background:#43a047;"></div>FRO</div>
+            <div class="leg-item"><div class="leg-dot" style="background:#fdd835;border-color:#888;"></div>SFRO</div>
+            <div class="leg-item"><div class="leg-dot" style="background:#e53935;"></div>CAP/DO</div>
             <div class="leg-item"><div class="leg-dot" style="background:#bdbdbd;"></div>No data</div>
             <div style="font-size:10px;color:#888;margin-top:6px;">
                 Worst-parameter-wins per airport<br>
-                Source: NOAA GLMP · CAPR 70-1
+                CAPR 70-1 thresholds · CAPR 70-10 release authority
             </div>
         </div>
 
@@ -415,7 +415,7 @@
 const API_BASE    = '/CAP_WxCOP/api/weather-impacts';
 const METAR_API   = '/CAP_WxCOP/api/weather/station';
 const COLOR_HEX   = { GREEN: '#43a047', YELLOW: '#fdd835', RED: '#e53935', UNKNOWN: '#bdbdbd' };
-const COLOR_LABEL = { GREEN: 'Go', YELLOW: 'Caution', RED: 'No-Go', UNKNOWN: 'No Data' };
+const COLOR_LABEL = { GREEN: 'FRO', YELLOW: 'SFRO', RED: 'CAP/DO', UNKNOWN: 'No Data' };
 const QUICK_HOURS = [1, 3, 6, 9, 12, 18, 24];
 
 // CAPR 70-1 parameter labels for display
@@ -1565,9 +1565,9 @@ async function generatePDF() {
         var ly = yPos + mapH + 3;
         if (ly < PH - M) {
             var legItems = [
-                { color:[67,160,71],   label:'Go' },
-                { color:[253,216,53],  label:'Caution' },
-                { color:[229,57,53],   label:'No-Go' },
+                { color:[67,160,71],   label:'FRO' },
+                { color:[253,216,53],  label:'SFRO' },
+                { color:[229,57,53],   label:'CAP/DO' },
                 { color:[189,189,189], label:'No Data' },
             ];
             var lx = M;
