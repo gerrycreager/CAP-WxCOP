@@ -26,6 +26,63 @@ def calculate_distance(lat1, lon1, lat2, lon2):
     r_nm = 3440.065  # Earth radius in nautical miles
     return c * r_nm
 
+@weather_enhanced_api.route('/taf/nearest', methods=['GET'])
+def get_nearest_taf():
+    """
+    Nearest-station TAF lookup, added 2026-09-22 for EWMC's station-plot
+    click behavior (see project_ewmc_station_plots memory) -- the clicked
+    airfield often has no TAF of its own (most small GA fields don't),
+    so this finds the closest airport that DOES have a currently-valid
+    TAF, using PostGIS's KNN `<->` operator (index-accelerated) to search
+    rather than a full Haversine scan over every airport.
+    URL: /api/weather-enhanced/taf/nearest?lat=<lat>&lon=<lon>&max_nm=<optional>
+    """
+    try:
+        lat = float(request.args.get('lat'))
+        lon = float(request.args.get('lon'))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'lat and lon parameters required'}), 400
+    max_nm = float(request.args.get('max_nm', 150))
+
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT a.station_id, a.name, ST_Y(a.location), ST_X(a.location),
+                   t.raw_text, t.issue_time, t.valid_from, t.valid_to,
+                   ST_Distance(a.location::geography, ST_SetSRID(ST_MakePoint(%(lon)s, %(lat)s), 4326)::geography) / 1852.0 AS dist_nm
+            FROM observations.airports a
+            JOIN observations.taf t ON t.station_id = a.station_id
+            WHERE t.valid_to >= NOW()
+            ORDER BY a.location <-> ST_SetSRID(ST_MakePoint(%(lon)s, %(lat)s), 4326)
+            LIMIT 5
+        """, {'lat': lat, 'lon': lon})
+        rows = cur.fetchall()
+    finally:
+        cur.close()
+        conn.close()
+
+    # The KNN operator orders by an index-friendly approximation; re-sort
+    # the handful of candidates by the real geographic distance already
+    # computed above to guarantee the true nearest one wins.
+    candidates = [r for r in rows if r[8] <= max_nm]
+    if not candidates:
+        return jsonify({'error': f'No station with a valid TAF within {max_nm} nm'}), 404
+    candidates.sort(key=lambda r: r[8])
+    station_id, name, s_lat, s_lon, raw_text, issue_time, valid_from, valid_to, dist_nm = candidates[0]
+
+    return jsonify({
+        'station_id': station_id,
+        'name': name,
+        'lat': float(s_lat), 'lon': float(s_lon),
+        'distance_nm': round(dist_nm, 1),
+        'raw_text': raw_text,
+        'issue_time': issue_time.strftime('%Y-%m-%dT%H:%M:%SZ') if issue_time else None,
+        'valid_from': valid_from.strftime('%Y-%m-%dT%H:%M:%SZ') if valid_from else None,
+        'valid_to': valid_to.strftime('%Y-%m-%dT%H:%M:%SZ') if valid_to else None,
+    })
+
+
 @weather_enhanced_api.route('/metar/recent', methods=['GET'])
 def get_recent_metar_enhanced():
     """
@@ -111,7 +168,7 @@ def get_recent_metar_enhanced():
                         m.location::geometry,
                         {geom}
                       )
-                  AND m.observation_time >= NOW() - INTERVAL '2 hours'
+                  AND m.observation_time >= NOW() - INTERVAL '4 hours'
                   AND m.location IS NOT NULL
                 ORDER BY m.station_id, m.observation_time DESC
             )
