@@ -68,7 +68,7 @@ mdurl==0.1.2
 metar==1.11.0
 MetPy==1.7.1
 mod_wsgi==5.0.2
-msgpack==1.2.1
+msgpack==1.2.3
 multidict==6.7.0
 netCDF4==1.7.3
 numpy==2.4.0
