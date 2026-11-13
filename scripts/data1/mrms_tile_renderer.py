@@ -15,7 +15,7 @@ Tile pyramid: zoom 3–10, written to TILE_ROOT/<product>/<SECTOR>/<timestamp>/{
 Index JSON:   TILE_ROOT/<product>/<SECTOR>/index.json  (rolling 30-frame window)
 """
 
-import sys, os, json, gzip, shutil, tempfile, logging, re, math
+import sys, os, json, gzip, shutil, tempfile, logging, re, math, fcntl, time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -28,6 +28,47 @@ logging.basicConfig(
     filename=LOG_FILE, level=logging.INFO,
     format='%(asctime)s %(levelname)s %(message)s')
 log = logging.getLogger(__name__)
+
+# ── concurrency limiter ─────────────────────────────────────────────────────
+# A burst of MRMS products landing close together (e.g. after an LDM
+# reconnect) spawns one renderer per product/sector at once -- each one
+# pegs a full CPU core for the duration of its render. N_SLOTS=2 caps
+# worst-case CPU contention (vs. the unbounded 5-6-at-once case that
+# motivated this) while still letting two renders run in parallel.
+#
+# This was tried twice before (2026-11-13) and reverted both times -- a
+# hard single-instance lock, then this same 2-slot version -- because
+# back then mrms_render_pipe.sh's own per-(product,sector) lock would
+# give up and silently drop a file (cat > /dev/null) if its predecessor
+# was still queued past a 10s retry budget, and ANY wait added here
+# risked exceeding that. mrms_render_pipe.sh was redesigned the same day
+# to remove that giveup entirely (spool-then-drain, see that script) --
+# it now durably queues every file and never drops one regardless of
+# how long a render takes or waits here. That's what makes this safe to
+# run now: a file can wait for a slot indefinitely without being lost.
+N_SLOTS     = 2
+LOCK_DIR    = '/home/ldm/var/run'
+SLOT_PREFIX = 'mrms_tile_renderer.slot'
+N_SLOTS     = 2
+LOCK_DIR    = '/home/ldm/var/run'
+SLOT_PREFIX = 'mrms_tile_renderer.slot'
+
+
+def acquire_lock(poll_interval=0.5):
+    os.makedirs(LOCK_DIR, exist_ok=True)
+    fhs = [open(os.path.join(LOCK_DIR, f'{SLOT_PREFIX}{i}.lock'), 'w')
+           for i in range(N_SLOTS)]
+    while True:
+        for fh in fhs:
+            try:
+                fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                continue
+            for other in fhs:
+                if other is not fh:
+                    other.close()
+            return fh
+        time.sleep(poll_interval)
 
 # ── paths ─────────────────────────────────────────────────────────────────────
 TILE_ROOT   = Path('/LDM/radar/mrms_tiles')
@@ -594,5 +635,12 @@ if __name__ == '__main__':
         print(f'Usage: {sys.argv[0]} <product_key> <sector> <grib2_gz_path>')
         print(f'Products: {", ".join(PRODUCTS.keys())}')
         sys.exit(1)
-    render(sys.argv[1], sys.argv[2], sys.argv[3])
+
+    lock_fh = acquire_lock()
+    log.info('Lock acquired for %s/%s', sys.argv[1], sys.argv[2])
+    try:
+        render(sys.argv[1], sys.argv[2], sys.argv[3])
+    finally:
+        fcntl.flock(lock_fh, fcntl.LOCK_UN)
+        lock_fh.close()
 
