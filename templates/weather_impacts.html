@@ -458,6 +458,7 @@ var pollTimer      = null;
 // an explicit colored-text flight-category label is included in the full
 // plot so the two color languages on screen at once aren't ambiguous.
 var metarPlotLayer, liveMetars = [], liveMetarTimer = null;
+var liveMetarsByStation = {};  // station_id -> metar, rebuilt alongside liveMetars
 const METAR_RECENT_API = '/CAP_WxCOP/api/weather-enhanced/metar/recent';
 const LIVE_PLOT_ZOOM_OFFSET = 3;  // full plot this many zoom levels past TIER_SYM_ZOOM
 
@@ -870,6 +871,51 @@ function metarTooltipHtml(metar) {
     return header + '<br><span style="font:11px monospace;">' + escapeHtml(metar.raw_text) + '</span>';
 }
 
+// Compact wind/vis/ceiling/temp summary for the live-obs line folded into
+// the main forecast-stoplight marker's tooltip (see updateMarkers()) --
+// deliberately shorter than the full raw_text block below it.
+function liveMetarSummaryLine(metar) {
+    var parts = [];
+    if (metar.wind_dir !== null && metar.wind_dir !== undefined &&
+        metar.wind_speed_kts !== null && metar.wind_speed_kts !== undefined) {
+        parts.push(String(metar.wind_dir).padStart(3, '0') + '@' + Math.round(metar.wind_speed_kts) + 'kt' +
+                   (metar.wind_gust_kts ? 'G' + Math.round(metar.wind_gust_kts) : ''));
+    }
+    if (metar.visibility_sm !== null && metar.visibility_sm !== undefined) {
+        parts.push((metar.visibility_sm >= 10 ? '10' : metar.visibility_sm) + 'SM');
+    }
+    var ceilFt = deriveCeilingFt(metar.sky_conditions);
+    if (ceilFt !== null) parts.push('C' + String(Math.round(ceilFt / 100)).padStart(3, '0'));
+    if (metar.temp_c !== null && metar.temp_c !== undefined) parts.push(Math.round(metar.temp_c) + 'C');
+    return parts.join(' ');
+}
+
+// Live-obs block folded into the main forecast-stoplight marker's own
+// tooltip, per Gerry 2026-11-01: "the idea that the live obs, rather than
+// predicted, should fold into the current time stoplight marker... making
+// that a toggle was a good first step [but] a more casual user might not
+// think to turn it on." Only shown for F01 (currentHour === 1, the nearest-
+// to-now forecast hour this page offers) -- pairing "live" with any other,
+// genuinely future forecast hour's marker would be actively misleading.
+// The separate "Live METAR Station Plots" toggle/layer (updateLivePlots())
+// is left in place too -- its own full wind-barb/sky-cover plot is a
+// different, denser visual some users may still want, this is additive.
+function liveMetarTooltipBlock(stationId) {
+    if (currentHour !== 1) return '';
+    var metar = liveMetarsByStation[stationId];
+    if (!metar) return '';
+    var color = getCategoryColor(metar.flight_category);
+    var line = '<br><span style="color:' + color + ';font-weight:bold;">Live ' +
+               escapeHtml(metar.flight_category) + '</span>' +
+               obsAgeTooltipSuffix(metar.observation_time);
+    var summary = liveMetarSummaryLine(metar);
+    if (summary) line += ' ' + escapeHtml(summary);
+    if (metar.raw_text) {
+        line += '<br><span style="font:11px monospace;">' + escapeHtml(metar.raw_text) + '</span>';
+    }
+    return line;
+}
+
 function windBarbSvg(speedKt, color) {
     var s = Math.round((speedKt || 0) / 5) * 5;
     if (s < 3) {
@@ -1011,7 +1057,12 @@ function loadLiveMetars() {
         .then(function(r) { return r.json(); })
         .then(function(data) {
             liveMetars = data.metars || [];
+            liveMetarsByStation = {};
+            liveMetars.forEach(function(m) { liveMetarsByStation[m.station_id] = m; });
             updateLivePlots();
+            // Keep the main stoplight tooltip's folded-in live-obs line fresh
+            // too, not just the separate toggle layer -- see updateMarkers().
+            updateMarkers();
         })
         .catch(function(err) { console.warn('Live METAR load failed:', err); });
 }
@@ -1052,7 +1103,8 @@ function updateMarkers() {
         var tip = apt.station_id +
                   (apt.name ? ' — ' + apt.name : '') +
                   ' | ' + (COLOR_LABEL[apt.color] || 'Unknown') +
-                  (apt.worst_param ? ' (' + (PARAM_LABELS[apt.worst_param] || apt.worst_param) + ')' : '');
+                  (apt.worst_param ? ' (' + (PARAM_LABELS[apt.worst_param] || apt.worst_param) + ')' : '') +
+                  liveMetarTooltipBlock(apt.station_id);
 
         L.marker([apt.lat, apt.lon], { icon: icon, zIndexOffset: zOff })
             .bindTooltip(tip, { permanent: false, direction: 'top',

@@ -263,7 +263,9 @@ dl.controls dd{margin:0; color:var(--fg); font-size:13.5px; max-width:620px;}
         <dt>Find Airport</dt>
         <dd>Type an ICAO identifier (e.g. <span class="field">KLSF</span>) and click <b>Go</b> to jump straight to it.</dd>
         <dt>Airport labels</dt><dd>Toggle identifier text on the map.</dd>
-        <dt>Live METAR Station Plots</dt><dd>Overlays real observed conditions, so you can compare "what's actually happening right now" against the forecast stoplight for the same hour.</dd>
+        <dt>Hovering a stoplight marker at F01</dt>
+        <dd>At <b>F01</b> ("now"), hovering any airport's marker adds a live-observation line to its tooltip — flight category, how old the observation is, a wind/visibility/ceiling/temperature summary, and the raw METAR text — right alongside the forecast color, so you don't need a separate layer just to sanity-check "what's actually happening right now" against the forecast. This disappears at any other forecast hour, since pairing a live observation with a future prediction would be misleading.</dd>
+        <dt>Live METAR Station Plots</dt><dd>A separate, denser overlay (wind barb, sky-cover symbol, temp/dewpoint) for anyone who wants the fuller station-plot view in addition to the marker tooltip above.</dd>
         <dt>Radar Composite</dt><dd>MRMS radar mosaic overlay.</dd>
         <dt>GLM Lightning</dt><dd>Satellite-observed lightning.</dd>
         <dt>NWS Watches/Warnings</dt><dd>Active watch/warning/advisory polygons.</dd>
