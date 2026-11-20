@@ -88,7 +88,30 @@ log = logging.getLogger(__name__)
 # --file/--dry-run (manual testing/backfill) deliberately bypass all of
 # this and keep the original direct-process behavior -- there's no
 # concurrent pqact invocation to race against in that path.
-MADIS_SPOOL_BASE = '/home/ldm/var/madis_spool'
+#
+# SPOOL_BASE moved to tmpfs 2026-11-18 at Gerry's direction, after the
+# measured mesonet2 backlog (278 files, 82GB, median file 382.9MB
+# uncompressed -- LDM/pqact auto-decompresses before PIPE, confirmed via
+# notifyme showing the real wire size is only ~30MB) made it clear the
+# per-file write path's dominant cost is disk I/O contention, not
+# anything SQL-side (a COPY-based rewrite was tried and reverted the
+# same day -- made things worse, since it added writes on top of an
+# already-saturated disk rather than removing any). r815 has 86GB RAM
+# (post-upgrade) with ~83GB free, so moving the temporary spool off
+# disk entirely removes a real chunk of I/O for the read/decompress/
+# parse cycle, leaving only the final DB write as genuine disk I/O.
+#
+# TRADEOFF, IMPORTANT: this makes the spool VOLATILE -- the comment
+# above ("durably spools... can't fail from contention") no longer
+# means "survives a reboot," only "survives pqact/process-level
+# contention." Anything sitting in tmpfs at the moment of a reboot is
+# gone. Gerry explicitly accepted this trade 2026-11-18. Do NOT resume
+# live traffic into this path (systemctl start ldm) around a planned
+# reboot without flushing/draining first -- the pre-existing disk-based
+# backlog from before this change is NOT affected (different directory,
+# see standalone_drain.py), only NEW arrivals after this change took
+# effect.
+MADIS_SPOOL_BASE = '/mnt/ldm_tmpfs/madis_spool'
 MADIS_LOCK_DIR = '/home/ldm/var/run'
 
 
@@ -117,6 +140,57 @@ def acquire_drain_lock(stream):
     return fh
 
 
+def write_stations(conn, rows):
+    """PHASE 1 of the schema normalization Gerry asked for 2026-11-18:
+    madis_surface_obs stores a full geom/name/provider/elevation on
+    EVERY observation row, even though those are station-level
+    properties that essentially never change between a station's
+    observations -- confirmed live: 26.5M rows, only 14,320 distinct
+    (source_feed, station_id) pairs, i.e. each station's geometry is
+    redundantly stored and GIST-indexed ~1,856x on average. This writes
+    that metadata into the new, small observations.madis_stations
+    table instead (GIST index lives there now, on a few thousand slow-
+    changing rows, not 26M+ fast-growing ones). Phase 1 is additive --
+    madis_surface_obs keeps its own geom/name/provider/elevation
+    columns for now, so any still-running old-code process (e.g. a
+    backlog drainer started before this change) keeps working
+    unchanged. Phase 2 (dropping those columns + the GIST index from
+    madis_surface_obs, where the real I/O win lands) is a deliberate
+    separate step, done only once nothing is still running pre-Phase-1
+    code.
+
+    last_seen is refreshed on every call here (real upsert, same
+    connection as the observation write) -- this does NOT repeat
+    observations.airports.has_reporting's mistake (a one-time import
+    flag nobody ever updated); it can't go stale the same way."""
+    latest = {}
+    for r in rows:
+        key = (r['source_feed'], r['station_id'])
+        prev = latest.get(key)
+        if prev is None or r['observation_time'] > prev['observation_time']:
+            latest[key] = r
+    if not latest:
+        return
+    values = [(
+        r['source_feed'], r['station_id'], r['station_name'], r['data_provider'],
+        r['lon'], r['lat'], r['elevation_m'], r['observation_time'], r['observation_time'],
+    ) for r in latest.values()]
+    sql = """
+        INSERT INTO observations.madis_stations
+            (source_feed, station_id, station_name, data_provider, geom, elevation_m, first_seen, last_seen)
+        VALUES %s
+        ON CONFLICT (source_feed, station_id) DO UPDATE SET
+            station_name = COALESCE(EXCLUDED.station_name, observations.madis_stations.station_name),
+            data_provider = COALESCE(EXCLUDED.data_provider, observations.madis_stations.data_provider),
+            geom = COALESCE(EXCLUDED.geom, observations.madis_stations.geom),
+            elevation_m = COALESCE(EXCLUDED.elevation_m, observations.madis_stations.elevation_m),
+            last_seen = GREATEST(observations.madis_stations.last_seen, EXCLUDED.last_seen)
+    """
+    template = "(%s, %s, %s, %s, ST_SetSRID(ST_MakePoint(%s, %s), 4326), %s, %s, %s)"
+    with conn.cursor() as cur:
+        execute_values(cur, sql, values, template=template, page_size=500)
+
+
 def process_bytes(conn, stream, raw_bytes):
     """Decode + write a single product's bytes against an already-open
     connection. Returns row count written."""
@@ -129,6 +203,7 @@ def process_bytes(conn, stream, raw_bytes):
         ds.close()
     if not rows:
         return 0
+    write_stations(conn, rows)
     write_rows(conn, rows)
     if stream == 'hfmetar':
         write_metar_rows(conn, rows)
@@ -157,6 +232,15 @@ def drain_spool(stream, lock_fh):
                 log.info('drained stream=%s file=%s rows=%d', stream, fname, n)
             except Exception:
                 log.exception('failed processing spooled file %s (stream=%s) -- discarding', fpath, stream)
+                # Without this, one failed file leaves the connection's
+                # transaction aborted, and EVERY subsequent file drained on
+                # this same long-lived connection fails too (psycopg2
+                # InFailedSqlTransaction) until the process exits -- found
+                # 2026-11-19: 46 original failures had cascaded into 425
+                # knock-on failures / 473 discarded files total in this
+                # log's history. Roll back so one bad file costs one file,
+                # not everything drained after it in this session.
+                conn.rollback()
             finally:
                 os.remove(fpath)
     finally:
@@ -168,15 +252,15 @@ def drain_spool(stream, lock_fh):
 ALWAYS_INCLUDE_PROVIDERS = {'APRSWXNET'}
 STANDARD_FIELD_VARS = ('temperature', 'relHumidity', 'windSpeed', 'visibility')
 
+# Station-level identity/location lives in observations.madis_stations
+# (created separately, see write_stations()) -- not repeated here. This
+# table is purely the fast-growing temporal/sequential observation log,
+# normalized 2026-11-18.
 CREATE_TABLE_SQL = """
     CREATE TABLE IF NOT EXISTS observations.madis_surface_obs (
         id                SERIAL PRIMARY KEY,
         source_feed       VARCHAR(16) NOT NULL,
-        data_provider     VARCHAR(24),
         station_id        VARCHAR(16) NOT NULL,
-        station_name      VARCHAR(64),
-        geom              GEOMETRY(POINT, 4326),
-        elevation_m       REAL,
         observation_time  TIMESTAMP NOT NULL,
         received_time     TIMESTAMP,
         temp_c            REAL,
@@ -193,23 +277,24 @@ CREATE_TABLE_SQL = """
     )
 """
 CREATE_INDEX_SQL = [
-    "CREATE INDEX IF NOT EXISTS idx_madis_surface_obs_geom ON observations.madis_surface_obs USING GIST (geom)",
     "CREATE INDEX IF NOT EXISTS idx_madis_surface_obs_time ON observations.madis_surface_obs (observation_time)",
     "CREATE INDEX IF NOT EXISTS idx_madis_surface_obs_station ON observations.madis_surface_obs (station_id)",
 ]
 
+# PHASE 2 of the schema normalization (2026-11-18): source_feed/
+# data_provider/station_name/geom/elevation_m are station-level
+# properties, not observation-level ones -- they now live in
+# observations.madis_stations (written by write_stations(), keyed on
+# (source_feed, station_id)) instead of being redundantly repeated and
+# GIST-indexed on every one of this table's 26M+ rows. See the
+# MADIS_SPOOL_BASE comment block above for the full rationale/numbers.
 UPSERT_SQL = """
     INSERT INTO observations.madis_surface_obs (
-        source_feed, data_provider, station_id, station_name, geom,
-        elevation_m, observation_time, received_time, temp_c, dewpoint_c,
-        relative_humidity, wind_dir, wind_speed_kts, wind_gust_kts,
-        visibility_sm, altimeter_hg, raw_message
+        source_feed, station_id, observation_time, received_time, temp_c,
+        dewpoint_c, relative_humidity, wind_dir, wind_speed_kts,
+        wind_gust_kts, visibility_sm, altimeter_hg, raw_message
     ) VALUES %s
     ON CONFLICT (source_feed, station_id, observation_time) DO UPDATE SET
-        data_provider = EXCLUDED.data_provider,
-        station_name = EXCLUDED.station_name,
-        geom = EXCLUDED.geom,
-        elevation_m = EXCLUDED.elevation_m,
         received_time = EXCLUDED.received_time,
         temp_c = EXCLUDED.temp_c,
         dewpoint_c = EXCLUDED.dewpoint_c,
@@ -222,10 +307,9 @@ UPSERT_SQL = """
         raw_message = EXCLUDED.raw_message
 """
 UPSERT_VALUES_TEMPLATE = """(
-    %s, %s, %s, %s, ST_SetSRID(ST_MakePoint(%s, %s), 4326),
     %s, %s, %s, %s, %s,
     %s, %s, %s, %s,
-    %s, %s, %s
+    %s, %s, %s, %s
 )"""
 
 # hfmetar-only: merge into observations.metar (same table EWMC/Flight Impacts
@@ -524,15 +608,26 @@ def write_rows(conn, rows):
     """Batched via execute_values -- a per-row execute() round trip measured
     at ~37s for 2999 hfmetar rows (network RTT-bound against data2), which
     would be minutes for mesonet2's larger filtered row count. Batching
-    cuts this to a handful of multi-row statements."""
+    cuts this to a handful of multi-row statements.
+
+    De-dup by the ON CONFLICT target key first -- a single execute_values()
+    batch can't apply "ON CONFLICT DO UPDATE" to the same target row twice
+    (psycopg2.errors.CardinalityViolation), which happens whenever the
+    source file itself contains two rows for the same station+time. Found
+    2026-11-19: this was discarding the WHOLE file (not just the duplicate
+    rows), and worse, cascading into every subsequent file drained on the
+    same long-lived connection via drain_spool() -- see the conn.rollback()
+    added there alongside this fix. 46 original failures had cascaded into
+    425 knock-on failures / 473 discarded files in this log's history."""
+    deduped = {}
+    for r in rows:
+        deduped[(r['source_feed'], r['station_id'], r['observation_time'])] = r
     values = [(
-        r['source_feed'], r['data_provider'], r['station_id'], r['station_name'],
-        r['lon'], r['lat'],
-        r['elevation_m'], r['observation_time'], r['received_time'],
+        r['source_feed'], r['station_id'], r['observation_time'], r['received_time'],
         r['temp_c'], r['dewpoint_c'], r['relative_humidity'],
         r['wind_dir'], r['wind_speed_kts'], r['wind_gust_kts'],
         r['visibility_sm'], r['altimeter_hg'], r['raw_message'],
-    ) for r in rows]
+    ) for r in deduped.values()]
     with conn.cursor() as cur:
         execute_values(cur, UPSERT_SQL, values, template=UPSERT_VALUES_TEMPLATE, page_size=1000)
     conn.commit()
@@ -551,7 +646,10 @@ def write_metar_rows(conn, rows):
     but every structured field (temp/dewpoint/wind/vis/ceiling/altimeter)
     is still correct and that's what the EWMC/Flight-Impacts UI displays
     structured, not the raw string itself."""
-    values = []
+    # De-dup by (station_id, observation_time) -- this table's ON CONFLICT
+    # target -- same CardinalityViolation/cascading-failure risk and fix
+    # as write_rows(); see its docstring for the 2026-11-19 finding.
+    deduped = {}
     skipped_long_id = 0
     skipped_no_coords = 0
     for r in rows:
@@ -567,14 +665,15 @@ def write_metar_rows(conn, rows):
         wind_dir = round(r['wind_dir']) if r['wind_dir'] is not None else None
         wind_speed_kts = round(r['wind_speed_kts']) if r['wind_speed_kts'] is not None else None
         wind_gust_kts = round(r['wind_gust_kts']) if r['wind_gust_kts'] is not None else None
-        values.append((
+        deduped[(r['station_id'], r['observation_time'])] = (
             r['station_id'], r['observation_time'], r['raw_message'] or '',
             r['temp_c'], r['dewpoint_c'], wind_dir, wind_speed_kts, wind_gust_kts,
             r['visibility_sm'], r['altimeter_hg'], flight_category,
             sky_json, [],
             r['lon'], r['lat'],
             False,
-        ))
+        )
+    values = list(deduped.values())
     if skipped_long_id:
         log.warning('skipped %d hfmetar row(s) with station_id longer than 4 chars', skipped_long_id)
     if skipped_no_coords:
@@ -628,6 +727,7 @@ def main():
         conn = get_connection()
         try:
             ensure_schema(conn)
+            write_stations(conn, rows)
             write_rows(conn, rows)
             if args.stream == 'hfmetar':
                 write_metar_rows(conn, rows)
