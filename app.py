@@ -122,6 +122,14 @@ try:
 except Exception as e:
     print(f'⚠ Could not load NIDS API: {e}')
 
+# NASR aviation detail - NavAids/fixes/airports/heliports/runways, vector (no zoom ceiling)
+try:
+    from nasr_api import nasr_api
+    app.register_blueprint(nasr_api, url_prefix='/api/nasr')
+    print('✓ NASR API registered at /CAP_WxCOP/api/nasr')
+except Exception as e:
+    print(f'⚠ Could not load NASR API: {e}')
+
 # Animated wind particles (leaflet-velocity / wind-js) - GFS Atlantic basin, TC steering flow
 try:
     from wind_particles_api import wind_particles_api

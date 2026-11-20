@@ -610,6 +610,11 @@
         <label class="checkbox-label"><input type="checkbox" id="tropicalToggle"> Tropical Cyclones</label>
 
         <div class="divider"></div>
+        <h3>Aviation Detail</h3>
+        <label class="checkbox-label"><input type="checkbox" id="nasrToggle"> NavAids / Fixes / Runways</label>
+        <div id="nasrStatus" style="font-size:10px;color:#888;margin-top:3px;margin-left:4px;"></div>
+
+        <div class="divider"></div>
         <h3>Airspace</h3>
         <label class="checkbox-label"><input type="checkbox" id="suaProhibToggle"> Prohibited (P-)</label>
         <label class="checkbox-label"><input type="checkbox" id="suaRestrictToggle"> Restricted (R-)</label>
@@ -2278,6 +2283,9 @@
             var ML_INDEX    = '/CAP_WxCOP/static/mrms_tiles/composite/CONUS/index.json';
             var ML_TILE_BASE= '/CAP_WxCOP/static/mrms_tiles/composite/CONUS/';
             var GLM_API     = '/CAP_WxCOP/api/weather-enhanced/glm/flashes';
+            var NASR_AIRPORTS_API = '/CAP_WxCOP/api/nasr/airports';
+            var NASR_NAVAIDS_API  = '/CAP_WxCOP/api/nasr/navaids';
+            var NASR_FIXES_API    = '/CAP_WxCOP/api/nasr/fixes';
             function getMap() { return window._capMap; }
 
             // ── MRMS Local Loop Player ───────────────────────────────────────
@@ -2601,6 +2609,119 @@
             document.getElementById('glmMinutes').addEventListener('change',function(){
                 if(document.getElementById('glmToggle').checked) loadGLM();
             });
+
+            // ── NASR aviation detail: NavAids / Fixes / Runways ──────────────
+            // Vector data (FAA 28-day NASR subscription, see scripts/ingest_nasr.py)
+            // has no resolution ceiling, unlike the Esri VFR Sectional tile
+            // service (native max zoom 10) -- this is what actually lets you
+            // keep zooming in and still see real detail. Fixes alone are 70k
+            // nationwide, so they're only fetched/drawn at zoom>=10 (same
+            // convention as NIDS' z>9 gate) to avoid clutter and payload size;
+            // navaids (~1.6k) and airports/runways (~19k/23k) are sparse enough
+            // to show at any zoom this toggle is reasonably used at.
+            var nasrLayer = null, nasrMoveTimer = null;
+            var NASR_FIX_MIN_ZOOM = 10;
+
+            var NAVAID_COLOR = {
+                'VOR':'#1565c0','VOR/DME':'#1565c0','VORTAC':'#00838f','TACAN':'#00838f',
+                'NDB':'#8e24aa','NDB/DME':'#8e24aa','MARINE NDB':'#8e24aa','DME':'#555','VOT':'#555','FAN MARKER':'#999'
+            };
+
+            function nasrBoundsParam(m) {
+                var b = m.getBounds();
+                return b.getWest()+','+b.getSouth()+','+b.getEast()+','+b.getNorth();
+            }
+
+            function loadNasr() {
+                var m = getMap(); if (!m) return;
+                var statusEl = document.getElementById('nasrStatus');
+                if (nasrLayer) { m.removeLayer(nasrLayer); }
+                nasrLayer = L.layerGroup();
+                var bp = nasrBoundsParam(m);
+                var zoom = m.getZoom();
+                var pending = 2, counts = {airports:0, navaids:0, fixes:0};
+
+                function done() {
+                    pending--;
+                    if (pending === 0 && document.getElementById('nasrToggle').checked) {
+                        nasrLayer.addTo(m);
+                        if (statusEl) statusEl.textContent = counts.airports+' airfields/heliports · '+
+                            counts.navaids+' navaids'+(zoom>=NASR_FIX_MIN_ZOOM ? ' · '+counts.fixes+' fixes' : ' · zoom in for fixes');
+                    }
+                }
+
+                fetch(NASR_AIRPORTS_API+'?bounds='+bp)
+                    .then(function(r){return r.json();})
+                    .then(function(data){
+                        (data.airports||[]).forEach(function(a){
+                            var isHeli = a.site_type === 'H';
+                            var col = isHeli ? '#e65100' : '#2e7d32';
+                            L.circleMarker([a.lat, a.lon], {
+                                radius: isHeli ? 4 : 5, color: col, weight: 2,
+                                fillColor: '#fff', fillOpacity: 0.85
+                            }).bindTooltip((a.icao_id||a.arpt_id||a.site_no)+(a.name?' — '+a.name:'')+(isHeli?' (Heliport)':''))
+                              .addTo(nasrLayer);
+                            (a.runways||[]).forEach(function(rwy){
+                                if (rwy.ends.length !== 2) return;
+                                var latlngs = [[rwy.ends[0].lat, rwy.ends[0].lon], [rwy.ends[1].lat, rwy.ends[1].lon]];
+                                L.polyline(latlngs, {
+                                    color:'#333', weight: rwy.width_ft ? Math.max(2, Math.min(6, rwy.width_ft/25)) : 3,
+                                    opacity:0.75
+                                }).bindTooltip('Rwy '+rwy.rwy_id+(rwy.length_ft?' — '+rwy.length_ft+'ft':'')+(rwy.surface?' '+rwy.surface:''))
+                                  .addTo(nasrLayer);
+                            });
+                        });
+                        counts.airports = data.count||0;
+                        done();
+                    }).catch(function(e){ console.warn('NASR airports load failed', e); done(); });
+
+                fetch(NASR_NAVAIDS_API+'?bounds='+bp)
+                    .then(function(r){return r.json();})
+                    .then(function(data){
+                        (data.navaids||[]).forEach(function(n){
+                            var col = NAVAID_COLOR[n.nav_type] || '#555';
+                            L.circleMarker([n.lat, n.lon], {
+                                radius: 6, color: col, weight: 2, fillColor: col, fillOpacity: 0.25
+                            }).bindTooltip(n.nav_id+' — '+n.nav_type+(n.name?' ('+n.name+')':'')+(n.freq?' '+n.freq:''))
+                              .addTo(nasrLayer);
+                        });
+                        counts.navaids = data.count||0;
+                        done();
+                    }).catch(function(e){ console.warn('NASR navaids load failed', e); done(); });
+
+                if (zoom >= NASR_FIX_MIN_ZOOM) {
+                    pending++;
+                    fetch(NASR_FIXES_API+'?bounds='+bp)
+                        .then(function(r){return r.json();})
+                        .then(function(data){
+                            (data.fixes||[]).forEach(function(fx){
+                                L.circleMarker([fx.lat, fx.lon], {
+                                    radius: 3, color:'#777', weight:1, fillColor:'#aaa', fillOpacity:0.6
+                                }).bindTooltip(fx.fix_id+(fx.use_code?' ('+fx.use_code.trim()+')':''))
+                                  .addTo(nasrLayer);
+                            });
+                            counts.fixes = data.count||0;
+                            done();
+                        }).catch(function(e){ console.warn('NASR fixes load failed', e); done(); });
+                } else if (statusEl) {
+                    statusEl.textContent = 'zoom in to load fixes/navaids/runways...';
+                }
+            }
+
+            document.getElementById('nasrToggle').addEventListener('change', function(){
+                var m = getMap();
+                if (this.checked) {
+                    loadNasr();
+                    if (m) m.on('moveend', nasrOnMoveEnd);
+                } else {
+                    if (m) { m.off('moveend', nasrOnMoveEnd); if (nasrLayer) m.removeLayer(nasrLayer); }
+                    var statusEl = document.getElementById('nasrStatus'); if (statusEl) statusEl.textContent = '';
+                }
+            });
+            function nasrOnMoveEnd() {
+                clearTimeout(nasrMoveTimer);
+                nasrMoveTimer = setTimeout(loadNasr, 400);
+            }
 
             // ── NWS WWA Watches/Warnings ──────────────────────────────────
             var wwaLayer = null;
