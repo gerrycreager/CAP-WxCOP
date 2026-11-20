@@ -32,24 +32,42 @@ log = logging.getLogger(__name__)
 # ── concurrency limiter ─────────────────────────────────────────────────────
 # A burst of MRMS products landing close together (e.g. after an LDM
 # reconnect) spawns one renderer per product/sector at once -- each one
-# pegs a full CPU core for the duration of its render. N_SLOTS=2 caps
-# worst-case CPU contention (vs. the unbounded 5-6-at-once case that
-# motivated this) while still letting two renders run in parallel.
+# pegs a full CPU core for the duration of its render.
 #
 # This was tried twice before (2026-11-13) and reverted both times -- a
-# hard single-instance lock, then this same 2-slot version -- because
-# back then mrms_render_pipe.sh's own per-(product,sector) lock would
-# give up and silently drop a file (cat > /dev/null) if its predecessor
-# was still queued past a 10s retry budget, and ANY wait added here
-# risked exceeding that. mrms_render_pipe.sh was redesigned the same day
-# to remove that giveup entirely (spool-then-drain, see that script) --
-# it now durably queues every file and never drops one regardless of
-# how long a render takes or waits here. That's what makes this safe to
-# run now: a file can wait for a slot indefinitely without being lost.
-N_SLOTS     = 2
-LOCK_DIR    = '/home/ldm/var/run'
-SLOT_PREFIX = 'mrms_tile_renderer.slot'
-N_SLOTS     = 2
+# hard single-instance lock, then a 2-slot version -- because back then
+# mrms_render_pipe.sh's own per-(product,sector) lock would give up and
+# silently drop a file (cat > /dev/null) if its predecessor was still
+# queued past a 10s retry budget, and ANY wait added here risked
+# exceeding that. mrms_render_pipe.sh was redesigned the same day to
+# remove that giveup entirely (spool-then-drain, see that script) -- it
+# now durably queues every file and never drops one regardless of how
+# long a render takes or waits here. That's what makes any cap here
+# safe: a file can wait for a slot indefinitely without being lost.
+#
+# N_SLOTS=4, set 2026-11-14 after the 2-slot version caused real
+# starvation (confirmed live: 4 of 6 keys idle in this lock's own
+# poll-sleep for minutes at a stretch while the box sat 56-62% CPU
+# idle). Modeled, not guessed: on this 8-core box, 4 is deliberately
+# HALF the cores, not "no cap" (there are only 6 keys, each already
+# self-serialized by mrms_render_pipe.sh's own lock, so N_SLOTS>=6
+# would be a no-op -- identical to no cap at all). Keeping it at 4
+# guarantees at least 4 cores stay free for NEXRAD2's NFS write
+# traffic, the other 5 pqact feeds, ldmd, and OS overhead even in the
+# worst case -- all 6 MRMS keys backlogged at once after an unexpected
+# reboot, which is exactly the scenario that has previously correlated
+# with this host's kernel-level "Corrupted page table" hardware fault
+# under sustained load (see project_data1_hardware_degradation memory).
+#
+# Separately-tracked, NOT solved by this number: per-frame render time
+# measured live on 2026-11-13 shows 5 of 6 products (all but lightning)
+# individually take LONGER than their own 120s arrival cadence --
+# azshear worst at ~253s avg, over double. No slot count fixes that;
+# it's a render-speed problem (single-threaded per frame), and some
+# ongoing lag should be expected even with a generous cap. Worth a
+# render-speed pass later; don't mistake a growing backlog for "the cap
+# is wrong" without first checking per-product render duration again.
+N_SLOTS     = 4
 LOCK_DIR    = '/home/ldm/var/run'
 SLOT_PREFIX = 'mrms_tile_renderer.slot'
 

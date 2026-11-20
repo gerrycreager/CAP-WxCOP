@@ -168,7 +168,6 @@
         <div style="font-size:10px;color:#888;margin-bottom:3px;">MRMS — loop (default)</div>
         <div class="radar-btns">
             <div class="radar-btn active" data-product="composite" data-source="mrms" title="Radar Composite Reflectivity">CMP</div>
-            <div class="radar-btn" data-product="azshear_low" data-source="mrms" title="AzShear 0-2km AGL">AZS</div>
             <div class="radar-btn" data-product="mesh"        data-source="mrms" title="MESH Instantaneous Hail">MESH</div>
         </div>
         <div style="font-size:10px;color:#888;margin-top:6px;margin-bottom:3px;">Single-Site Decode — nearest WSR-88D, live</div>
@@ -322,18 +321,6 @@
                 [100,[255,255,255,250]]
             ]
         },
-        azshear: {
-            title: 'Azimuthal Shear 0-2km AGL (s⁻¹)',
-            vmin: -0.05, vmax: 0.05,
-            labels: ['-.05','-.02','-.01','0','.01','.02','.05'],
-            stops: [
-                [-0.050,[100,0,255,230]],[-0.020,[0,100,255,220]],
-                [-0.010,[0,200,255,160]],[-0.005,[0,0,0,0]],
-                [ 0.000,[0,0,0,0]],     [ 0.005,[0,0,0,0]],
-                [ 0.010,[255,200,0,160]],[ 0.020,[255,100,0,220]],
-                [ 0.030,[255,0,0,230]],  [ 0.050,[255,255,255,240]]
-            ]
-        },
         wv: {
             title: 'Water Vapor Brightness Temp (K) — cold/moist → dry',
             vmin: 190, vmax: 260,
@@ -473,7 +460,6 @@
         if (currentSource === 'nids') return currentProduct === 'n0s' ? 'velocity' : 'base_reflectivity';
         if (currentProduct === 'n0s' || currentProduct === 'n0u') return 'velocity';
         if (currentProduct === 'n0q' || currentProduct === 'n0r') return 'base_reflectivity';
-        if (currentProduct==='azshear_low') return 'azshear';
         if (currentProduct==='mesh') return 'mesh';
         return 'composite';
     }
@@ -516,7 +502,7 @@
     // tiling scheme Leaflet uses by default, so tiles are served straight
     // from disk with no runtime reprojection. Falls straight through to
     // mrms_wms_api.py / satellite_wms_api.py on a cache miss. Tileset names
-    // match the product keys 1:1 (composite, azshear_low, wv_conus, ...).
+    // match the product keys 1:1 (composite, mesh, wv_conus, ...).
     //
     // Uses the WMTS KVP endpoint, NOT the gmaps/TMS service -- discovered
     // the hard way that MapCache's gmaps service silently ignores the
@@ -556,7 +542,6 @@
     // MRMS product config — CONUS and OCONUS sector composites
     var MAPSERVER_LAYERS = {
         'composite':        { title: 'MRMS Composite Reflectivity' },
-        'azshear_low':      { title: 'MRMS AzShear 0-2km AGL' },
         'mesh':             { title: 'MRMS MESH Instantaneous Hail' },
         'composite_alaska': { title: 'MRMS Composite — Alaska' },
         'composite_hawaii': { title: 'MRMS Composite — Hawaii' },
