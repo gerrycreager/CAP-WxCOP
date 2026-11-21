@@ -67,6 +67,16 @@ log = logging.getLogger(__name__)
 HRRR_BASE   = Path('/LDM/models/hrrr')
 LOCKFILE    = '/var/lock/ingest_model_site_wx.lock'
 
+# HRRR->RRFS migration (2026-09-21, Phase 3 -- see
+# /root/.claude/plans/rosy-wobbling-music.md). 'rrfs' is the default: RRFS
+# covers CONUS+AK+HI+PR natively, replacing both the HRRR-CONUS path AND
+# the GFS-OCONUS path in one unified invocation -- this also structurally
+# resolves the OCONUS lock-starvation bug (no more separate infrequent
+# GFS-OCONUS run competing for LOCKFILE against the frequent CONUS run).
+# 'hrrr_gfs' keeps the original HRRR+GFS/AIGFS code paths below as a
+# fallback (all of that code is unchanged and still fully functional).
+MODEL_SOURCE = os.environ.get('MODEL_SITE_WX_SOURCE', 'rrfs')
+
 # HRRR CONUS domain bounds (approximate)
 HRRR_LAT_MIN, HRRR_LAT_MAX =  21.0,  53.0
 HRRR_LON_MIN, HRRR_LON_MAX = -134.0, -60.0
@@ -390,7 +400,7 @@ def ingest_aigfs_cycle(conn, cycle_dt, aigfs_path, sites, verbose=False):
                     return None
                 try:
                     v = float(msg.values.flat[idx])
-                    if v > 9e20:
+                    if v > 9e20 or math.isnan(v):
                         return None
                     return v * scale + offset
                 except Exception:
@@ -550,7 +560,7 @@ def ingest_gfs_cycle(conn, cycle_dt, date_dir, sites, verbose=False):
                     return None
                 try:
                     v = float(msg.values.flat[idx])
-                    if v > 9e20:
+                    if v > 9e20 or math.isnan(v):
                         return None
                     return v * scale + offset
                 except Exception:
@@ -623,6 +633,207 @@ def ingest_gfs_cycle(conn, cycle_dt, date_dir, sites, verbose=False):
              f"{total_inserted} total records upserted across "
              f"{len(sites)} OCONUS sites")
     return total_inserted
+
+
+# ---------------------------------------------------------------------------
+# RRFS ingest -- HRRR->RRFS migration, 2026-09-21 (Phase 3). Replaces BOTH
+# the HRRR-CONUS path above and the GFS-OCONUS path above in one unified
+# invocation, since RRFS provides native CONUS+AK+HI+PR domains. Reuses
+# load_grib_fields()/parse_precip_type()/build_kdtree()/site_grid_index()/
+# upsert_site_wx() completely unchanged -- confirmed 2026-09-21 via a real
+# pygrib decode that RRFS's 2dfld fields resolve to the identical shortNames
+# HRRR uses (including 'ceil'/cloudCeiling, the one HRRR-specific field this
+# whole repoint hinged on), and that the existing dswrf->sdswrf fallback
+# (originally built for GFS) transparently handles RRFS's 'sdswrf' naming
+# too -- no field-mapping changes needed anywhere in the shared helpers.
+# ---------------------------------------------------------------------------
+
+# Approximate domain bounding boxes -- CAP cadet sites are a small, fixed
+# set, so approximate boxes (same precision convention as in_hrrr_domain()
+# above) are sufficient. A site outside all four boxes (e.g. Guam) has no
+# RRFS coverage and falls back to the existing GFS path.
+RRFS_DOMAINS = {
+    'conus': {'resolution': '3km',   'lat': (21.0, 53.0),  'lon': (-134.0, -60.0)},
+    'ak':    {'resolution': '3km',   'lat': (50.0, 72.5),  'lon': (-179.0, -125.0)},
+    'hi':    {'resolution': '2p5km', 'lat': (17.5, 23.5),  'lon': (-161.0, -153.5)},
+    'pr':    {'resolution': '2p5km', 'lat': (16.5, 19.5),  'lon': (-68.5, -64.0)},
+}
+
+
+def classify_rrfs_domain(lat, lon):
+    """Return 'conus'|'ak'|'hi'|'pr', or None if outside all RRFS domains
+    (no RRFS coverage there -- e.g. Guam -- caller should fall back to GFS)."""
+    for domain, spec in RRFS_DOMAINS.items():
+        lat_min, lat_max = spec['lat']
+        lon_min, lon_max = spec['lon']
+        if lat_min <= lat <= lat_max and lon_min <= lon <= lon_max:
+            return domain
+    return None
+
+
+# Confirmed 2026-09-21 via a real .idx pull, identical across all four
+# domains: exact (var, level-string) pairs as they appear in RRFS's 2dfld
+# .idx listing. DSWRF is fetched under its HRRR-matching idx name even
+# though it decodes to pygrib shortName 'sdswrf' -- the existing
+# load_grib_fields() dswrf/sdswrf fallback (built for GFS) already handles
+# that at decode time, no special-casing needed at fetch time.
+RRFS_WANTED_VAR_LEVELS = {
+    ('TMP', '2 m above ground'), ('DPT', '2 m above ground'),
+    ('UGRD', '10 m above ground'), ('VGRD', '10 m above ground'),
+    ('GUST', 'surface'), ('PRATE', 'surface'), ('APCP', 'surface'),
+    ('CAPE', 'surface'), ('DSWRF', 'surface'),
+    ('CRAIN', 'surface'), ('CSNOW', 'surface'), ('CICEP', 'surface'), ('CFRZR', 'surface'),
+    ('VIS', 'surface'), ('CEIL', 'cloud ceiling'),
+}
+
+
+def rrfs_file(date, cycle_num, fhr, domain):
+    """Fetch-and-cache this fhr's curated RRFS 2dfld subset for one domain,
+    reusing rrfs_wind_fetch.py's proven byte-range fetch-and-cache (same
+    module Phase 2's wind-particle scripts use). Returns a local Path
+    (drop-in compatible with load_grib_fields(), unchanged) or None if not
+    posted yet."""
+    import rrfs_wind_fetch as rwf
+    resolution = RRFS_DOMAINS[domain]['resolution']
+    return rwf.fetch_and_cache('2dfld', date, cycle_num, fhr, RRFS_WANTED_VAR_LEVELS,
+                                tag='site_wx', domain=domain, resolution=resolution)
+
+
+def find_latest_rrfs_cycle(domain='conus'):
+    """Real readiness-checked cycle picker (steps backward if the lag-margin
+    guess isn't actually posted yet) -- same rrfs_wind_fetch.find_ready_cycle()
+    Phase 2 already proved catches real posting-delay gaps."""
+    import rrfs_wind_fetch as rwf
+    resolution = RRFS_DOMAINS[domain]['resolution']
+    return rwf.find_ready_cycle(product='2dfld', domain=domain, resolution=resolution)
+
+
+def ingest_rrfs_cycle(conn, cycle_dt, cycle_num, domain, sites, verbose=False):
+    """Ingest F00-F18 for one RRFS domain's sites. Body is a direct copy of
+    ingest_cycle()'s (the HRRR path's) per-fhr loop, swapping only the file
+    source -- same pattern this file already uses for its three existing
+    model pipelines (HRRR/AIGFS/GFS each have their own near-identical
+    loop), not a new duplication style."""
+    model_name = 'RRFS'
+    now_utc = datetime.now(timezone.utc)
+    total_inserted = 0
+
+    f00_path = rrfs_file(cycle_dt.strftime('%Y%m%d'), cycle_num, 0, domain)
+    if not f00_path:
+        log.error(f"RRFS {domain} F00 not available -- cannot build grid tree")
+        return 0
+
+    log.info(f"Building {domain.upper()} grid tree from {f00_path.name}")
+    f00_fields = load_grib_fields(f00_path)
+    ref_msg = next((v for v in f00_fields.values() if v is not None), None)
+    if ref_msg is None:
+        log.error(f"No usable fields in RRFS {domain} F00")
+        return 0
+
+    tree, grid_shape = build_kdtree(ref_msg)
+
+    site_indices = {}
+    for site in sites:
+        idx = site_grid_index(tree, grid_shape, site['lat'], site['lon'])
+        site_indices[site['id']] = idx
+        if verbose:
+            log.info(f"  RRFS {domain} site {site['site_name']}: grid index {idx}")
+
+    for fhour in FCST_HOURS:
+        try:
+            fpath = rrfs_file(cycle_dt.strftime('%Y%m%d'), cycle_num, fhour, domain)
+        except Exception as e:
+            log.error(f"  RRFS {domain} F{fhour:02d}: fetch failed: {e}")
+            continue
+        if not fpath:
+            if verbose:
+                log.info(f"  RRFS {domain} F{fhour:02d}: not available, skipping")
+            continue
+
+        valid_time = cycle_dt + timedelta(hours=fhour)
+        fields = load_grib_fields(fpath)
+        records = []
+
+        for site in sites:
+            idx = site_indices[site['id']]
+
+            def val(key, scale=1.0, offset=0.0):
+                msg = fields.get(key)
+                if msg is None:
+                    return None
+                try:
+                    v = float(msg.values.flat[idx])
+                    if v > 9e20 or math.isnan(v):
+                        return None
+                    return v * scale + offset
+                except Exception:
+                    return None
+
+            tmp_k     = val('2t')
+            dpt_k     = val('2d')
+            u_ms      = val('10u')
+            v_ms      = val('10v')
+            gust_ms   = val('gust')
+            prate_kgs = val('prate')
+            apcp_m    = val('tp')
+            cape      = val('cape')
+            dswrf     = val('dswrf')
+            vis_raw   = val('vis')
+            cb_m      = val('cloudbase')
+            ceil_ft   = round(cb_m * 3.28084) if cb_m is not None else None
+
+            tmp_c_val  = kelvin_to_c(tmp_k)
+            dpt_c_val  = kelvin_to_c(dpt_k)
+            wspd_kts, wdir = uv_to_speed_dir(u_ms, v_ms)
+            gust_kts   = ms_to_kts(gust_ms)
+            prate_mmhr = round(prate_kgs * 3600.0, 3) if prate_kgs is not None else None
+            precip_mm_val = round(apcp_m * 1000.0, 2) if apcp_m is not None else None
+            cape_val   = round(cape, 1) if cape is not None else None
+            dswrf_val  = round(dswrf, 1) if dswrf is not None else None
+            vis_m_val  = round(vis_raw) if vis_raw is not None else None
+
+            ptype = parse_precip_type(fields, idx)
+            hi_c  = heat_index_c(tmp_c_val, dpt_c_val)
+            wc_c  = wind_chill_c(tmp_c_val, wspd_kts)
+            u_ms_val = u_ms or 0
+            v_ms_val = v_ms or 0
+            ws_ms = math.sqrt(u_ms_val**2 + v_ms_val**2)
+            wbgt  = wbgt_liljegren(tmp_c_val, dpt_c_val, dswrf_val, ws_ms)
+
+            records.append({
+                'site_id':          site['id'],
+                'model_name':       model_name,
+                'model_run':        cycle_dt,
+                'valid_time':       valid_time,
+                'forecast_hour':    fhour,
+                'wind_dir':         wdir,
+                'wind_speed_kts':   wspd_kts,
+                'wind_gust_kts':    gust_kts,
+                'tmp_c':            tmp_c_val,
+                'dpt_c':            dpt_c_val,
+                'heat_index_c':     hi_c,
+                'wind_chill_c':     wc_c,
+                'precip_mm':        precip_mm_val,
+                'precip_rate_mmhr': prate_mmhr,
+                'precip_type':      ptype,
+                'dswrf_wm2':        dswrf_val,
+                'wbgt_c':           wbgt,
+                'cape_jkg':         cape_val,
+                'ceil_ft':          ceil_ft,
+                'vis_m':            vis_m_val,
+                'ingested_at':      now_utc,
+            })
+
+        n = upsert_site_wx(conn, records)
+        total_inserted += n
+        if verbose:
+            log.info(f"  RRFS {domain} F{fhour:02d}: {n} site records upserted "
+                     f"(valid {valid_time.strftime('%H:%MZ')})")
+
+    log.info(f"RRFS {domain} cycle {cycle_dt.strftime('%Y-%m-%d %HZ')}: "
+             f"{total_inserted} total records upserted across {len(sites)} sites")
+    return total_inserted
+
 
 # ---------------------------------------------------------------------------
 # Grid index lookup
@@ -919,7 +1130,7 @@ def ingest_cycle(conn, cycle_dt, cycle_dir, sites, verbose=False):
                     return None
                 try:
                     v = float(msg.values.flat[idx])
-                    if v > 9e20:   # grib2 missing value
+                    if v > 9e20 or math.isnan(v):   # grib2 missing value
                         return None
                     return v * scale + offset
                 except Exception:
@@ -1036,57 +1247,99 @@ def main():
             log.warning("No active cadet sites found — nothing to ingest")
             return
 
-        # Split sites by model domain
-        conus_sites  = [s for s in all_sites if in_hrrr_domain(s['lat'], s['lon'])]
-        oconus_sites = [s for s in all_sites if not in_hrrr_domain(s['lat'], s['lon'])]
+        if MODEL_SOURCE == 'rrfs':
+            # ── Unified RRFS ingest: CONUS+AK+HI+PR in one pass ───────────
+            # Replaces the HRRR-CONUS and GFS-OCONUS branches below entirely.
+            # No more separate infrequent OCONUS run competing with the
+            # frequent CONUS run for LOCKFILE -- structurally resolves the
+            # lock-starvation bug, not just consolidates around it.
+            sites_by_domain = {}
+            no_rrfs_sites = []
+            for s in all_sites:
+                d = classify_rrfs_domain(s['lat'], s['lon'])
+                if d:
+                    sites_by_domain.setdefault(d, []).append(s)
+                else:
+                    no_rrfs_sites.append(s)
 
-        log.info(f"  CONUS (HRRR): {len(conus_sites)} sites — "
-                 f"{[s['site_name'] for s in conus_sites]}")
-        log.info(f"  OCONUS (GFS): {len(oconus_sites)} sites — "
-                 f"{[s['site_name'] for s in oconus_sites]}")
-
-        # ── HRRR ingest for CONUS sites ───────────────────────────────────────
-        if conus_sites and not args.oconus_only:
-            if args.cycle:
-                dt = datetime.strptime(args.cycle, '%Y%m%d_%H').replace(
+            for domain, domain_sites in sites_by_domain.items():
+                log.info(f"  RRFS {domain.upper()}: {len(domain_sites)} sites — "
+                         f"{[s['site_name'] for s in domain_sites]}")
+                cycle_date, cycle_num = find_latest_rrfs_cycle(domain)
+                if not cycle_date:
+                    log.error(f"No ready RRFS cycle for domain {domain} "
+                              f"within lookback window")
+                    continue
+                cycle_dt = datetime.strptime(f'{cycle_date}{cycle_num}', '%Y%m%d%H').replace(
                     tzinfo=timezone.utc)
-                date_str  = dt.strftime('%Y%m%d')
-                hour_str  = dt.strftime('%H')
-                cycle_dir = HRRR_BASE / f'hrrr.{date_str}' / f'{hour_str}z'
-                if not cycle_dir.exists():
-                    log.error(f"HRRR cycle directory not found: {cycle_dir}")
-                else:
-                    ingest_cycle(conn, dt, cycle_dir, conus_sites,
-                                 verbose=args.verbose)
-            else:
-                cycle_dt, cycle_dir = find_latest_hrrr_cycle()
-                if cycle_dt is None:
-                    log.error("No complete HRRR cycle available")
-                else:
-                    ingest_cycle(conn, cycle_dt, cycle_dir, conus_sites,
-                                 verbose=args.verbose)
+                ingest_rrfs_cycle(conn, cycle_dt, cycle_num, domain, domain_sites,
+                                  verbose=args.verbose)
 
-        # ── GFS ingest for OCONUS sites ───────────────────────────────────────
-        # GFS used for OCONUS because it has full variable set for personnel
-        # impacts (TMP, DPT, UGRD, VGRD, APCP, CAPE, DSWRF, WBGT).
-        # AIGFS retained for aviation wind constraints but not personnel wx.
-        if oconus_sites and not args.conus_only:
-            if args.gfs_cycle:
-                dt = datetime.strptime(args.gfs_cycle, '%Y%m%d_%H').replace(
-                    tzinfo=timezone.utc)
-                date_dir = GFS_BASE / dt.strftime('%Y%m%d')
-                if not date_dir.exists():
-                    log.error(f"GFS date directory not found: {date_dir}")
-                else:
-                    ingest_gfs_cycle(conn, dt, date_dir, oconus_sites,
-                                     verbose=args.verbose)
-            else:
+            if no_rrfs_sites:
+                # No RRFS coverage for these (e.g. Guam) -- GFS fallback,
+                # same path as the legacy branch below.
+                log.info(f"  No RRFS coverage: {len(no_rrfs_sites)} sites — "
+                         f"{[s['site_name'] for s in no_rrfs_sites]} — falling back to GFS")
                 gfs_dt, gfs_date_dir = find_latest_gfs_cycle()
                 if gfs_dt is None:
-                    log.error("No complete GFS cycle available for OCONUS sites")
+                    log.error("No complete GFS cycle available for non-RRFS sites")
                 else:
-                    ingest_gfs_cycle(conn, gfs_dt, gfs_date_dir, oconus_sites,
+                    ingest_gfs_cycle(conn, gfs_dt, gfs_date_dir, no_rrfs_sites,
                                      verbose=args.verbose)
+
+        else:
+            # ── Legacy HRRR (CONUS) + GFS/AIGFS (OCONUS) fallback ─────────
+            # Split sites by model domain
+            conus_sites  = [s for s in all_sites if in_hrrr_domain(s['lat'], s['lon'])]
+            oconus_sites = [s for s in all_sites if not in_hrrr_domain(s['lat'], s['lon'])]
+
+            log.info(f"  CONUS (HRRR): {len(conus_sites)} sites — "
+                     f"{[s['site_name'] for s in conus_sites]}")
+            log.info(f"  OCONUS (GFS): {len(oconus_sites)} sites — "
+                     f"{[s['site_name'] for s in oconus_sites]}")
+
+            # ── HRRR ingest for CONUS sites ───────────────────────────────
+            if conus_sites and not args.oconus_only:
+                if args.cycle:
+                    dt = datetime.strptime(args.cycle, '%Y%m%d_%H').replace(
+                        tzinfo=timezone.utc)
+                    date_str  = dt.strftime('%Y%m%d')
+                    hour_str  = dt.strftime('%H')
+                    cycle_dir = HRRR_BASE / f'hrrr.{date_str}' / f'{hour_str}z'
+                    if not cycle_dir.exists():
+                        log.error(f"HRRR cycle directory not found: {cycle_dir}")
+                    else:
+                        ingest_cycle(conn, dt, cycle_dir, conus_sites,
+                                     verbose=args.verbose)
+                else:
+                    cycle_dt, cycle_dir = find_latest_hrrr_cycle()
+                    if cycle_dt is None:
+                        log.error("No complete HRRR cycle available")
+                    else:
+                        ingest_cycle(conn, cycle_dt, cycle_dir, conus_sites,
+                                     verbose=args.verbose)
+
+            # ── GFS ingest for OCONUS sites ───────────────────────────────
+            # GFS used for OCONUS because it has full variable set for personnel
+            # impacts (TMP, DPT, UGRD, VGRD, APCP, CAPE, DSWRF, WBGT).
+            # AIGFS retained for aviation wind constraints but not personnel wx.
+            if oconus_sites and not args.conus_only:
+                if args.gfs_cycle:
+                    dt = datetime.strptime(args.gfs_cycle, '%Y%m%d_%H').replace(
+                        tzinfo=timezone.utc)
+                    date_dir = GFS_BASE / dt.strftime('%Y%m%d')
+                    if not date_dir.exists():
+                        log.error(f"GFS date directory not found: {date_dir}")
+                    else:
+                        ingest_gfs_cycle(conn, dt, date_dir, oconus_sites,
+                                         verbose=args.verbose)
+                else:
+                    gfs_dt, gfs_date_dir = find_latest_gfs_cycle()
+                    if gfs_dt is None:
+                        log.error("No complete GFS cycle available for OCONUS sites")
+                    else:
+                        ingest_gfs_cycle(conn, gfs_dt, gfs_date_dir, oconus_sites,
+                                         verbose=args.verbose)
 
     except Exception as e:
         log.error(f"Ingest failed: {e}", exc_info=True)

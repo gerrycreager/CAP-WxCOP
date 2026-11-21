@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<!-- PWA -->
+    <link rel="manifest" href="/CAP_WxCOP/static/manifest.json">
+    <meta name="theme-color" content="#1a3a2a">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="WxCOP">
+    <link rel="apple-touch-icon" href="/CAP_WxCOP/static/icons/icon-192x192.png">
+    <script>if('serviceWorker' in navigator){navigator.serviceWorker.register('/CAP_WxCOP/static/sw.js',{scope:'/CAP_WxCOP/'});}</script>
+<head>
+    <meta charset="UTF-8">
+    <link rel="icon" href="data:,">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CAP Upper-Air Soundings</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; overflow: hidden; height: 100vh; display: flex; flex-direction: column; }
+
+        /* ── Title bar ── */
+        #titleBar {
+            position: fixed; top: 0; left: 0; right: 0; height: 44px;
+            background: linear-gradient(135deg, #1a3a2a, #2c5f41);
+            color: white; display: flex; align-items: center;
+            padding: 0 16px; z-index: 1100; gap: 16px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+        }
+        #titleBar .tb-home { color: white; text-decoration: none; font-size: 18px; opacity: 0.85; flex-shrink: 0; }
+        #titleBar .tb-home:hover { opacity: 1; }
+        #titleBar .tb-title { font-size: 16px; font-weight: 700; letter-spacing: 0.03em; flex: 1; }
+        #titleBar .tb-utc { font-size: 13px; font-family: 'Courier New', monospace; opacity: 0.85; flex-shrink: 0; }
+
+        /* ── Main layout ── */
+        #main { display: flex; position: fixed; top: 44px; left: 0; right: 0; bottom: 0; }
+
+        /* ── Left sidebar ── */
+        #sidebar {
+            width: 260px; background: #f8f8f8; border-right: 1px solid #ddd;
+            display: flex; flex-direction: column; flex-shrink: 0; overflow-y: auto;
+            z-index: 500;
+        }
+        .sb-section { padding: 12px; border-bottom: 1px solid #e0e0e0; }
+        .sb-label { font-size: 11px; font-weight: 700; color: #666; text-transform: uppercase;
+                    letter-spacing: 0.05em; margin-bottom: 8px; }
+        .sb-hint { font-size: 11px; color: #888; margin-top: 6px; line-height: 1.4; }
+
+        select, input[type=text], input[type=number] {
+            width: 100%; padding: 6px 7px; border: 1px solid #ccc; border-radius: 4px;
+            font-size: 12px; font-family: inherit; background: white; color: #222;
+        }
+        .field-row { display: flex; gap: 6px; margin-top: 6px; }
+        .field-row select, .field-row input { flex: 1; }
+
+        button.go-btn {
+            width: 100%; margin-top: 8px; padding: 7px; background: #2c5f41; color: white;
+            border: none; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600;
+        }
+        button.go-btn:hover { background: #4a7c59; }
+        button.go-btn:disabled { background: #aaa; cursor: default; }
+
+        .src-toggle { display: flex; gap: 4px; }
+        .src-btn {
+            flex: 1; padding: 8px 4px; border: 2px solid #ccc; border-radius: 4px;
+            background: white; cursor: pointer; font-size: 12px; font-weight: 600;
+            color: #555; text-align: center; transition: all 0.15s; user-select: none;
+        }
+        .src-btn:hover { border-color: #888; }
+        .src-btn.active { border-color: #2c5f41; background: #2c5f41; color: white; }
+
+        .latlon-readout {
+            font-family: 'Courier New', monospace; font-size: 12px; color: #1a3a2a;
+            background: #eef5ee; border: 1px solid #cde3cf; border-radius: 4px;
+            padding: 6px 8px; margin-top: 8px; text-align: center;
+        }
+
+        #statusBar { font-size: 10px; color: #888; padding: 6px 12px;
+                     border-top: 1px solid #e0e0e0; margin-top: auto; }
+
+        /* ── Map ── */
+        #map { flex: 1; }
+
+        /* ── Right detail panel ── */
+        #detailPanel {
+            width: 480px; background: white; border-left: 1px solid #ddd;
+            display: flex; flex-direction: column; flex-shrink: 0; overflow-y: auto;
+            z-index: 500;
+        }
+        #detailHeader { padding: 12px 14px; border-bottom: 1px solid #eee; background: #f8f8f8; }
+        #detailTitle { font-size: 14px; font-weight: 700; color: #1a3a2a; }
+        #detailSub { font-size: 11px; color: #666; margin-top: 2px; }
+
+        #detailBody { flex: 1; display: flex; flex-direction: column; align-items: center;
+                      padding: 14px; gap: 10px; }
+        #skewtImg { width: 100%; max-width: 460px; border: 1px solid #eee; border-radius: 4px; display: none;
+                    cursor: zoom-in; }
+        #fullscreenBtn {
+            display: none; align-self: flex-end; background: none; border: 1px solid #ccc;
+            border-radius: 4px; color: #2c5f41; font-size: 11px; padding: 4px 9px;
+            cursor: pointer; margin-top: -4px;
+        }
+        #fullscreenBtn:hover { background: #eef5ee; border-color: #2c5f41; }
+
+        /* ── Fullscreen viewer ── */
+        #fsOverlay {
+            display: none; position: fixed; inset: 0; background: rgba(10,15,12,0.95);
+            z-index: 2000; align-items: center; justify-content: center; cursor: zoom-out;
+        }
+        #fsOverlay.visible { display: flex; }
+        #fsOverlay img {
+            max-width: 96vw; max-height: 92vh; object-fit: contain;
+            box-shadow: 0 4px 30px rgba(0,0,0,0.5); background: white;
+        }
+        #fsClose {
+            position: fixed; top: 16px; right: 22px; color: white; font-size: 30px;
+            font-weight: 300; cursor: pointer; line-height: 1; opacity: 0.8;
+        }
+        #fsClose:hover { opacity: 1; }
+        #placeholder { color: #999; font-size: 13px; text-align: center; padding: 40px 20px; line-height: 1.6; }
+        #loading { display: none; color: #2c5f41; font-size: 13px; text-align: center; padding: 40px 20px; }
+        #loading .spinner {
+            width: 28px; height: 28px; border: 3px solid #cde3cf; border-top-color: #2c5f41;
+            border-radius: 50%; margin: 0 auto 10px; animation: spin 0.9s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        #errorMsg { display: none; color: #b71c1c; background: #ffebee; border: 1px solid #ef9a9a;
+                    border-radius: 4px; padding: 10px 12px; font-size: 12px; width: 100%; }
+        #latencyNote { font-size: 10.5px; color: #999; text-align: center; line-height: 1.4; }
+    </style>
+</head>
+<body>
+
+<div id="titleBar">
+    <a class="tb-home" href="/CAP_WxCOP/" title="Home">&#8962;</a>
+    <div class="tb-title">Upper-Air Soundings — Skew-T / Hodograph</div>
+    <div class="tb-utc" id="tbUtc">--:--:-- UTC</div>
+</div>
+
+<div id="main">
+
+    <div id="sidebar">
+
+        <div class="sb-section">
+            <div class="sb-label">Data Source</div>
+            <div class="src-toggle">
+                <div class="src-btn active" id="srcObservedBtn">Latest Observed</div>
+                <div class="src-btn" id="srcForecastBtn">Model Forecast</div>
+            </div>
+        </div>
+
+        <div class="sb-section" id="observedSection">
+            <div class="sb-hint" style="margin-top:0;">Decoded from the single most recent WMO TTAA/TTBB radiosonde bulletin received (surface to 100mb). Not a picker — just whatever's freshest right now.</div>
+            <button class="go-btn" id="refreshObservedBtn">Refresh Latest</button>
+        </div>
+
+        <div class="sb-section" id="forecastSection" style="display:none;">
+            <div class="field-row">
+                <input type="text" id="siteInput" placeholder="Site ID, e.g. KBAK" maxlength="4" style="text-transform:uppercase;">
+                <button class="go-btn" id="siteGoBtn" style="margin-top:0; width:auto; padding:6px 12px;">Go</button>
+            </div>
+            <div id="siteMsg" class="sb-hint" style="min-height: 14px;"></div>
+            <div class="field-row" style="margin-top:10px;">
+                <select id="modelSelect" style="flex:0 0 90px;">
+                    <option value="rrfs" selected>RRFS</option>
+                    <option value="hrrr">HRRR</option>
+                </select>
+                <select id="fhrSelect">
+                    <option value="0">F00 (now)</option>
+                    <option value="1">F01</option>
+                    <option value="2">F02</option>
+                    <option value="3">F03</option>
+                    <option value="6">F06</option>
+                    <option value="9">F09</option>
+                    <option value="12">F12</option>
+                    <option value="18">F18</option>
+                    <option value="24">F24</option>
+                    <option value="30">F30</option>
+                    <option value="36">F36</option>
+                    <option value="42">F42</option>
+                    <option value="48">F48</option>
+                    <option value="60">F60</option>
+                    <option value="72">F72</option>
+                    <option value="84">F84</option>
+                </select>
+            </div>
+            <div class="sb-hint">Enter a site ID above, or click any point on the map. Not every site has a nearby balloon launch — any site can get a model-based sounding for now (F00) or any forecast hour (hours past F18 only exist on the 00/06/12/18Z cycles; HRRR tops out at F48, RRFS goes to F84). Changing model or forecast hour re-renders for the last point picked.</div>
+            <div id="modelLatencyNote" class="sb-hint" style="margin-top:4px;"></div>
+            <div class="latlon-readout" id="latlonReadout">Click map or enter a site to select a point</div>
+        </div>
+
+        <div id="statusBar">CAP WxCOP · Upper-Air Soundings</div>
+    </div>
+
+    <div id="map"></div>
+
+    <div id="detailPanel">
+        <div id="detailHeader">
+            <div id="detailTitle">No sounding selected</div>
+            <div id="detailSub">Pick a data source to begin</div>
+        </div>
+        <div id="detailBody">
+            <div id="placeholder">
+                Choose "Latest Observed" for the most recent real radiosonde launch, or "Model Forecast" (RRFS or HRRR) to generate an on-demand sounding for any site or map point, now or at any available forecast hour.
+                <br><br>
+                Full 100–1000mb Skew-T is the primary view; the lower-right inset zooms surface–700mb with the LCL marked, for a quick read on ceiling and low-level wind.
+            </div>
+            <div id="loading"><div class="spinner"></div>Rendering sounding…</div>
+            <div id="errorMsg"></div>
+            <button id="fullscreenBtn">⛶ Full Screen</button>
+            <img id="skewtImg" alt="Skew-T log-P diagram" title="Click to view full screen">
+            <div id="latencyNote"></div>
+        </div>
+    </div>
+
+</div>
+
+<div id="fsOverlay">
+    <span id="fsClose">&times;</span>
+    <img id="fsImg" alt="Skew-T log-P diagram, full screen">
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const API_BASE = '/CAP_WxCOP/api/soundings';
+
+function updateClock() {
+    document.getElementById('tbUtc').textContent = new Date().toISOString().slice(11, 19) + ' UTC';
+}
+updateClock();
+setInterval(updateClock, 1000);
+
+// ── Map ──
+const map = L.map('map').setView([39.5, -98.5], 5);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors', maxZoom: 12
+}).addTo(map);
+
+let clickMarker = null;
+let lastPoint = null;  // {lat, lon, label} -- last point picked, by click or site search
+
+function selectPoint(lat, lon, label) {
+    lastPoint = { lat, lon, label };
+    document.getElementById('latlonReadout').textContent = label ? `${label} — ${lat.toFixed(4)}, ${lon.toFixed(4)}` : `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+    if (clickMarker) map.removeLayer(clickMarker);
+    clickMarker = L.marker([lat, lon]).addTo(map);
+    map.panTo([lat, lon]);
+    loadForecastSounding(lat, lon, label);
+}
+
+map.on('click', (e) => {
+    selectPoint(e.latlng.lat, e.latlng.lng, null);
+});
+
+// Re-render for the same point when the forecast hour changes, so a picked
+// site can be stepped through F00-F18 without re-searching or re-clicking.
+document.getElementById('fhrSelect').addEventListener('change', () => {
+    if (lastPoint) loadForecastSounding(lastPoint.lat, lastPoint.lon, lastPoint.label);
+});
+
+async function goToSite() {
+    const siteId = document.getElementById('siteInput').value.trim().toUpperCase();
+    const msgEl = document.getElementById('siteMsg');
+    if (!siteId) return;
+    msgEl.textContent = 'Looking up ' + siteId + '…';
+    msgEl.style.color = '#888';
+    try {
+        const resp = await fetch(`${API_BASE}/site/${encodeURIComponent(siteId)}`);
+        const data = await resp.json();
+        if (!resp.ok) {
+            msgEl.textContent = data.error || `Site "${siteId}" not found`;
+            msgEl.style.color = '#b71c1c';
+            return;
+        }
+        msgEl.textContent = data.name ? `${data.name} (${data.station_id})` : data.station_id;
+        msgEl.style.color = '#2c5f41';
+        map.setView([data.lat, data.lon], 9);
+        selectPoint(data.lat, data.lon, data.station_id);
+    } catch (e) {
+        msgEl.textContent = 'Lookup failed';
+        msgEl.style.color = '#b71c1c';
+    }
+}
+document.getElementById('siteGoBtn').addEventListener('click', goToSite);
+document.getElementById('siteInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') goToSite();
+});
+
+// ── Detail panel state helpers ──
+function showLoading() {
+    document.getElementById('placeholder').style.display = 'none';
+    document.getElementById('errorMsg').style.display = 'none';
+    document.getElementById('skewtImg').style.display = 'none';
+    document.getElementById('fullscreenBtn').style.display = 'none';
+    document.getElementById('loading').style.display = 'block';
+    document.getElementById('latencyNote').textContent = '';
+}
+function showError(msg) {
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('skewtImg').style.display = 'none';
+    document.getElementById('fullscreenBtn').style.display = 'none';
+    document.getElementById('placeholder').style.display = 'none';
+    const el = document.getElementById('errorMsg');
+    el.textContent = msg;
+    el.style.display = 'block';
+}
+function showImage(url, note) {
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('placeholder').style.display = 'none';
+    document.getElementById('errorMsg').style.display = 'none';
+    const img = document.getElementById('skewtImg');
+    img.src = url;
+    img.style.display = 'block';
+    document.getElementById('fullscreenBtn').style.display = 'block';
+    document.getElementById('latencyNote').textContent = note || '';
+}
+
+// ── Fullscreen viewer ──
+function openFullscreen() {
+    const src = document.getElementById('skewtImg').src;
+    if (!src) return;
+    document.getElementById('fsImg').src = src;
+    document.getElementById('fsOverlay').classList.add('visible');
+}
+function closeFullscreen() {
+    document.getElementById('fsOverlay').classList.remove('visible');
+}
+document.getElementById('skewtImg').addEventListener('click', openFullscreen);
+document.getElementById('fullscreenBtn').addEventListener('click', openFullscreen);
+document.getElementById('fsOverlay').addEventListener('click', closeFullscreen);
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeFullscreen();
+});
+
+// ── Data source toggle ──
+function setSource(src) {
+    const observedOn = src === 'observed';
+    document.getElementById('srcObservedBtn').classList.toggle('active', observedOn);
+    document.getElementById('srcForecastBtn').classList.toggle('active', !observedOn);
+    document.getElementById('observedSection').style.display = observedOn ? 'block' : 'none';
+    document.getElementById('forecastSection').style.display = observedOn ? 'none' : 'block';
+    if (forecastPollTimer) { clearInterval(forecastPollTimer); forecastPollTimer = null; }
+    if (observedOn) {
+        loadLatestObserved();
+    } else {
+        document.getElementById('detailTitle').textContent = 'No sounding selected';
+        document.getElementById('detailSub').textContent = 'Enter a site ID or click the map';
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('errorMsg').style.display = 'none';
+        document.getElementById('skewtImg').style.display = 'none';
+        document.getElementById('placeholder').style.display = 'block';
+    }
+}
+document.getElementById('srcObservedBtn').addEventListener('click', () => setSource('observed'));
+document.getElementById('srcForecastBtn').addEventListener('click', () => setSource('forecast'));
+
+// ── Observed soundings — latest available only, no picker ──
+function loadLatestObserved() {
+    document.getElementById('detailTitle').textContent = 'Latest Observed Sounding';
+    document.getElementById('detailSub').textContent = 'Loading…';
+    showLoading();
+    const url = `${API_BASE}/observed/latest/skewt.png?_=${Date.now()}`;
+    const img = new Image();
+    img.onload = () => {
+        showImage(url, '');
+        fetch(`${API_BASE}/observed/latest`).then(r => r.json()).then(d => {
+            document.getElementById('detailTitle').textContent = `Observed — ${d.station_id}`;
+            document.getElementById('detailSub').textContent = `${d.report_type} ${d.obs_time.slice(0, 16).replace('T', ' ')}Z`;
+        }).catch(() => {});
+    };
+    img.onerror = async () => {
+        try {
+            const r = await fetch(`${API_BASE}/observed/latest`);
+            const d = await r.json();
+            document.getElementById('detailSub').textContent = '';
+            showError(d.error || 'Failed to load latest observed sounding');
+        } catch (e) {
+            showError('Failed to load latest observed sounding');
+        }
+    };
+    img.src = url;
+}
+document.getElementById('refreshObservedBtn').addEventListener('click', loadLatestObserved);
+loadLatestObserved();
+
+// ── Forecast soundings ──
+// Uses the async job endpoints (start/status/result), not a plain <img src>,
+// because a real extraction takes ~30-90s for HRRR, 3-5+ min for RRFS (via
+// NOMADS -- no S3 mirror exists yet), and the server's own socket-timeout
+// (60s) would otherwise kill a single long-lived request.
+let forecastPollTimer = null;
+
+const MODEL_LATENCY_HINT = {
+    rrfs: 'RRFS via NOMADS: first request per forecast hour typically takes 2–5 minutes (no S3 mirror exists yet for RRFS).',
+    hrrr: 'HRRR via S3: first request per forecast hour typically takes 30–90s.',
+};
+
+function updateModelLatencyNote() {
+    const model = document.getElementById('modelSelect').value;
+    document.getElementById('modelLatencyNote').textContent = MODEL_LATENCY_HINT[model] || '';
+}
+updateModelLatencyNote();
+document.getElementById('modelSelect').addEventListener('change', () => {
+    updateModelLatencyNote();
+    if (lastPoint) loadForecastSounding(lastPoint.lat, lastPoint.lon, lastPoint.label);
+});
+
+function loadForecastSounding(lat, lon) {
+    if (forecastPollTimer) { clearInterval(forecastPollTimer); forecastPollTimer = null; }
+    const fhr = document.getElementById('fhrSelect').value;
+    const model = document.getElementById('modelSelect').value;
+    const modelLabel = model === 'hrrr' ? 'HRRR' : 'RRFS';
+    document.getElementById('detailTitle').textContent = `${modelLabel} Forecast — F${fhr.padStart(2, '0')}`;
+    document.getElementById('detailSub').textContent = `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+    showLoading();
+
+    const startedAt = Date.now();
+    const loadingEl = document.getElementById('loading');
+    const baseLoadingHtml = '<div class="spinner"></div>Rendering sounding…';
+    const elapsedHint = MODEL_LATENCY_HINT[model] || '';
+
+    fetch(`${API_BASE}/forecast/start?lat=${lat}&lon=${lon}&fhr=${fhr}&source=${model}`)
+        .then(r => r.json())
+        .then(d => {
+            if (d.error) { showError(d.error); return; }
+            forecastPollTimer = setInterval(async () => {
+                const elapsed = Math.round((Date.now() - startedAt) / 1000);
+                loadingEl.innerHTML = baseLoadingHtml + `<br><span style="font-size:11px;color:#999;">${elapsed}s elapsed — ${elapsedHint}</span>`;
+                try {
+                    const sr = await fetch(`${API_BASE}/forecast/status/${d.job_id}`);
+                    const sd = await sr.json();
+                    if (sd.status === 'done') {
+                        clearInterval(forecastPollTimer);
+                        forecastPollTimer = null;
+                        showImage(`${API_BASE}/forecast/result/${d.job_id}.png`, 'Later points in the same forecast cycle/hour render faster (served from cache).');
+                    } else if (sd.status === 'error') {
+                        clearInterval(forecastPollTimer);
+                        forecastPollTimer = null;
+                        showError(sd.error || 'Failed to render sounding');
+                    }
+                    // else still pending -- keep polling
+                } catch (e) {
+                    clearInterval(forecastPollTimer);
+                    forecastPollTimer = null;
+                    showError('Lost contact with server while waiting for sounding');
+                }
+            }, 2000);
+        })
+        .catch(() => showError('Failed to start forecast sounding request'));
+}
+</script>
+
+</body>
+</html>

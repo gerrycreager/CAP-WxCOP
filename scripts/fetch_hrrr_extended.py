@@ -64,6 +64,20 @@ LOG_FILE     = '/home/ldm/var/logs/hrrr_extended_fetch.log'
 # entry's VAR:LEVEL text exactly). Mirrors ingest_model_site_wx.py's field
 # list minus PRATE/APCP (accumulation-window bookkeeping isn't worth the
 # complexity here -- add back if a consumer needs it).
+#
+# VIS/PRES:surface/HGT:cloud ceiling/LCDC/MCDC/HCDC added 2026-10-10 --
+# found live, during an ad hoc mission-forecast pull past F18, that the
+# extended-hour cache this script maintains couldn't support
+# rrfs_model_taf.py's hourly_condition()/hrrr_hourly_condition() (ceiling,
+# visibility, altimeter all came back None for F19+ hours) even though
+# that function works fine against the LDM-delivered F00-F18 files. Root
+# cause: 'HGT:cloud base' (the field already pulled here) is a different
+# GRIB field than 'HGT:cloud ceiling' -- HRRR_CLOUD_SPECS in
+# rrfs_model_taf.py needs shortName='gh' at typeOfLevel='cloudCeiling'
+# specifically (confirmed live 2026-09-22, see that file's own comment),
+# and VIS/PRES/LCDC/MCDC/HCDC were simply never in this list at all.
+# 'HGT:cloud base' is left in place (harmless, and NAM/GFS-style ceiling
+# fallbacks elsewhere in this codebase use it), not replaced.
 FIELDS = [
     'GUST:surface',
     'TMP:2 m above ground',
@@ -76,6 +90,12 @@ FIELDS = [
     'CFRZR:surface',
     'CAPE:surface',
     'HGT:cloud base',
+    'HGT:cloud ceiling',
+    'VIS:surface',
+    'PRES:surface',
+    'LCDC:low cloud layer',
+    'MCDC:middle cloud layer',
+    'HCDC:high cloud layer',
     'DSWRF:surface',
 ]
 

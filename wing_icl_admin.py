@@ -122,18 +122,18 @@ ICL_PARAMETERS = {
         'unit':     'ft',
         'group':    'Ceiling / Visibility',
         'caution':  True,
-        'national': 800,
+        'national': 2000,
         'conservative': 'higher',  # more conservative = flag at higher ceiling
-        'hint':     'CAPF 70-1A: <800ft = SFRO approval required (default 800ft) — MORE conservative only',
+        'hint':     'CAPF 70-1A: <2000ft = SFRO approval required (default 2000ft) — MORE conservative only',
     },
     'ceil_vfr_red': {
         'label':    'Ceiling VFR — No-Go threshold',
         'unit':     'ft',
         'group':    'Ceiling / Visibility',
         'caution':  False,
-        'national': 500,
+        'national': 1000,
         'conservative': 'higher',
-        'hint':     'CAPF 70-1A: <500ft requires Wing DO approval (default 500ft) — MORE conservative only',
+        'hint':     'CAPF 70-1A: <1000ft requires Wing DO approval (default 1000ft) — MORE conservative only',
     },
     # ── Visibility VFR ────────────────────────────────────────────────────
     'vis_vfr_yellow': {
@@ -141,9 +141,9 @@ ICL_PARAMETERS = {
         'unit':     'SM',
         'group':    'Ceiling / Visibility',
         'caution':  True,
-        'national': 2.0,
+        'national': 3.0,
         'conservative': 'higher',
-        'hint':     'CAPF 70-1A: <2SM = SFRO approval required (default 2.0 SM) — MORE conservative only',
+        'hint':     'CAPF 70-1A: <3SM = SFRO approval required (default 3.0 SM) — MORE conservative only',
     },
     'vis_vfr_red': {
         'label':    'Visibility VFR — No-Go threshold',

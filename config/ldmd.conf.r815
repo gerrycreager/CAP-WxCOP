@@ -28,6 +28,7 @@ EXEC	"pqact -f IDS|DDPLUS /home/ldm/etc/pqact_fire.conf"
 EXEC	"pqact -f HDS /home/ldm/etc/pqact_hds_tpw.conf"
 #EXEC	"pqact -f EXP /home/ldm/etc/pqact_mrms.conf"
 #EXEC	"pqact -f DIFAX /home/ldm/etc/pqact_satellite.conf"
+EXEC	"pqact -f FSL2 /home/ldm/etc/pqact_madis.conf"
 
 # rtstats uses the LDM to send product latency statistics to the UPC.
 EXEC	"rtstats -h rtstats.unidata.ucar.edu"
@@ -109,6 +110,12 @@ REQUEST		CONDUIT	".*nam\.t[01][0-8]\.hawaiinest\.hires.*" 	idd.aos.wisc.edu
 REQUEST		CONDUIT	".*nam\.t[01][0-8]\.alaskanest\.hires.*" 	idd.aos.wisc.edu
 REQUEST		CONDUIT	".*nam\.t[01][0-8]\.afwa.*" 	idd.aos.wisc.edu
 REQUEST		CONDUIT	".*nam\.t[01][0-8]\.priconest.*"	idd.aos.wisc.edu
+
+# MADIS from NCO (direct, not via idd.aos.wisc.edu relay) -- authorized
+# 2026-10-27 for our IP 209.248.90.253. feedtype FSL2 is MADIS's LDM
+# name. Scoped to HFMETAR (5-min ASOS) + mesonet2 (broader multi-network
+# surface) only -- conventional METAR already arrives via IDS|DDPLUS above.
+REQUEST		FSL2	"^FSL\.CompressedNetCDF\.MADIS\.(hfmetar|mesonet2)\."	ldm.madis.ncep.noaa.gov
 
 ###############################################################################
 # Allow Entries

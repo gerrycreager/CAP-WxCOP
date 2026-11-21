@@ -22,10 +22,11 @@ hrrr_winds_api = Blueprint('hrrr_winds_api', __name__)
 
 OUTPUT_BASE = '/LDM/models/hrrr_winds'
 
-VALID_LEVELS = {'SFC', '925', '850', '700', '600', '500'}
+VALID_LEVELS = {'SFC', 'AGL1000', '925', '850', '700', '600', '500'}
 
 LEVEL_LABELS = {
     'SFC': 'Surface (10m AGL)',
+    'AGL1000': '1,000 ft AGL (terrain-relative)',
     '925': '~3,000 ft MSL',
     '850': '~6,000 ft MSL',
     '700': '~10,000 ft MSL',

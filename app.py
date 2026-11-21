@@ -122,6 +122,14 @@ try:
 except Exception as e:
     print(f'⚠ Could not load NIDS API: {e}')
 
+# NASR aviation detail - NavAids/fixes/airports/heliports/runways, vector (no zoom ceiling)
+try:
+    from nasr_api import nasr_api
+    app.register_blueprint(nasr_api, url_prefix='/api/nasr')
+    print('✓ NASR API registered at /CAP_WxCOP/api/nasr')
+except Exception as e:
+    print(f'⚠ Could not load NASR API: {e}')
+
 # Animated wind particles (leaflet-velocity / wind-js) - GFS Atlantic basin, TC steering flow
 try:
     from wind_particles_api import wind_particles_api
@@ -235,6 +243,31 @@ try:
 except Exception as e:
     print(f"⚠ Could not load Cadet WX API: {e}")
 
+# Upper-air Soundings API — observed TTAA/TTBB + on-demand HRRR forecast Skew-T/hodograph
+try:
+    from soundings_api import soundings_api
+    app.register_blueprint(soundings_api, url_prefix='/api/soundings')
+    print("✓ Soundings API registered at /CAP_WxCOP/api/soundings")
+except Exception as e:
+    print(f"⚠ Could not load Soundings API: {e}")
+
+# Mission-window model TAFs (KBAK cluster) — scraped by Gerry's laptop MEF tool
+try:
+    from mission_taf_api import mission_taf_api
+    app.register_blueprint(mission_taf_api, url_prefix='/api/mission-taf')
+    print("✓ Mission TAF API registered at /CAP_WxCOP/api/mission-taf")
+except Exception as e:
+    print(f"⚠ Could not load Mission TAF API: {e}")
+
+# General-purpose model TAFs (any station, RRFS-primary/HRRR-fallback,
+# multi-layer clouds, BECMG) — feeds the MEF, no homepage link by design
+try:
+    from model_taf_api import model_taf_api
+    app.register_blueprint(model_taf_api, url_prefix='/api/modeltaf')
+    print("✓ Model TAF API registered at /CAP_WxCOP/api/modeltaf")
+except Exception as e:
+    print(f"⚠ Could not load Model TAF API: {e}")
+
 # ============================================================================
 # MAIN ROUTES - Professional Production Interface
 # ============================================================================
@@ -275,9 +308,18 @@ def enhanced_weather_map_html_legacy():
 def weather_impacts():
     return render_template('weather_impacts.html')
 
+@app.route('/user-guide')
+def user_guide():
+    """Tool-by-tool WxCOP user guide, mirrored from the claude.ai artifact"""
+    return render_template('user_guide.html')
+
 @app.route('/wbgt')
 def wbgt_calculator():
     return render_template('wbgt_calculator.html')
+
+@app.route('/soundings')
+def soundings_page():
+    return render_template('soundings.html')
 
 @app.route('/cadet-wx')
 def cadet_wx_map():

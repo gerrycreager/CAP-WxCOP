@@ -10,13 +10,18 @@ This module just reads and returns the JSON from disk — no cfgrib, no numpy.
 GFS was dropped as a source (too CPU-heavy to regenerate every 20 min for
 the load it put on r815). ECMWF IFS/AIFS were dropped 2026-09-19 at Gerry's
 direction -- another resource sink, and the positive user feedback was
-specifically about HRRR; that source (and DLM, which came along with ECMWF
-for Atlantic-basin TC track analysis this app never actually reaches with
-HRRR's CONUS domain) may get rebuilt on cosp1 for personal use, just not on
-this webpage. HRRR is nearest-neighbor regridded from its native curvilinear
-grid -- "best effort", not a precision product; see render_hrrr_particles.py's
-docstring -- and only ever has SFC/850/700/500 -- no native 200 hPa level,
-so source=hrrr&level=200 404s like any other not-yet-rendered combo.
+specifically about HRRR; that source may get rebuilt on cosp1 for personal
+use, just not on this webpage (as of 2026-10-08, Gerry wants it back here
+too, for a tropical-systems map -- not yet done, see render_hrrr_particles.py
+and this module's VALID_SOURCES). HRRR is nearest-neighbor regridded from
+its native curvilinear grid -- "best effort", not a precision product; see
+render_hrrr_particles.py's docstring -- and only ever has SFC/850/700/500
+plus synthetic DLM -- no native 200 hPa level, so source=hrrr&level=200
+404s like any other not-yet-rendered combo. DLM (Deep-Layer Mean,
+850-700-500 hPa steering flow) was dropped alongside ECMWF 2026-09-19 (this
+domain didn't reach anywhere TC steering mattered) and re-enabled
+2026-10-08 for Hurricane Isaias in the Gulf of Mexico, which sits well
+inside HRRR/RRFS's CONUS domain.
 
 Endpoints:
   GET /api/wind-particles?source=hrrr&level=SFC&fhr=0  — wind-js grid for level/fhr
@@ -39,20 +44,19 @@ OUTPUT_ROOT = '/LDM/models/wind_particles'
 # uncommenting here and in enhanced_weather_map_complete.html's SOURCES.
 VALID_SOURCES = {'hrrr'}  # was {'ecmwf-ifs', 'ecmwf-aifs', 'hrrr'}
 
-# DLM (Deep-Layer Mean, 850-700-500 hPa steering flow) and 200 hPa commented
-# out 2026-09-19 -- DLM was for Atlantic-basin TC track analysis HRRR's CONUS
-# domain never actually reached; 200 hPa was ECMWF-only. Re-enable by
-# uncommenting here and in render_hrrr_particles.py's DLM block (200 hPa
-# would need ECMWF re-enabled too, HRRR has no native 200 hPa level).
-VALID_LEVELS = {'SFC', '850', '700', '500'}  # was {..., '200', 'DLM'}
+# 200 hPa was ECMWF-only (HRRR has no native 200 hPa level); still commented
+# out since ECMWF remains disabled above. DLM re-enabled 2026-10-08 -- see
+# module docstring.
+VALID_LEVELS = {'SFC', 'AGL1000', '850', '700', '500', 'DLM'}  # was {..., '200'} too, pending ECMWF
 
 LEVEL_LABELS = {
     'SFC': 'Surface (10m AGL)',
+    'AGL1000': '1,000 ft AGL (terrain-relative)',
     '850': '850 hPa',
     '700': '700 hPa',
     '500': '500 hPa',
+    'DLM': 'Deep-Layer Mean (850-700-500 hPa steering flow)',
     # '200': '200 hPa',
-    # 'DLM': 'Deep-Layer Mean (850-700-500 hPa steering flow)',
 }
 
 

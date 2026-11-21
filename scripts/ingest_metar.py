@@ -134,24 +134,41 @@ def parse_metar(metar_text, is_speci=False):
     """
     Parse METAR/SPECI text into structured data
     Handles partial data gracefully - will insert even if missing dewpoint/altimeter
+
+    Two fallback layers, added 2026-10-10 after Hurricane Isaias knocked out
+    individual ASOS sensors at several Gulf Coast stations (KVPS, KCEW) and
+    those stations silently vanished from EWMC instead of showing degraded
+    data -- a METWATCH tool needs to show what IS available, not drop the
+    whole report because one field is missing:
+    1. Temperature is no longer a hard requirement (below) -- a station
+       reporting wind/altimeter/remarks but no temp (sensor down) now gets
+       stored with temp_c=NULL, same treatment dewpoint already got.
+    2. If python-metar's own grammar can't parse the report at all (e.g. a
+       literal 'M' in a field position it doesn't expect -- FMH-1's standard
+       placeholder for a failed sensor, not something python-metar's parser
+       recognizes), parse_metar_minimal() below does a bare regex extraction
+       of just station_id + observation time, so the report still produces
+       a visible, clickable marker with raw_text intact instead of nothing.
     """
     try:
         obs = Metar.Metar(metar_text)
-        
+    except Exception as e:
+        log.warning(f"python-metar parse failed, falling back to minimal extraction: {metar_text[:80]}... - {e}")
+        return parse_metar_minimal(metar_text, is_speci)
+
+    try:
         # Get coordinates
         coords = get_airport_coordinates(obs.station_id)
         if not coords:
             log.debug(f"No coordinates found for {obs.station_id}")
             return None
-        
+
         lat, lon = coords
-        
-        # Extract temperature (required)
-        if not obs.temp:
-            log.debug(f"No temperature in METAR: {metar_text[:80]}")
-            return None
-        
-        temp_c = obs.temp.value('C')
+
+        # Extract temperature (may be missing -- sensor failure, e.g. storm
+        # damage; stored as NULL rather than dropping the whole report, same
+        # treatment as dewpoint/altimeter below)
+        temp_c = obs.temp.value('C') if obs.temp else None
         
         # Extract dewpoint (may be missing in some reports)
         dewpoint_c = None
@@ -257,9 +274,66 @@ def parse_metar(metar_text, is_speci=False):
         }
         
     except Exception as e:
-        # Only log first 80 chars to avoid spam
-        log.debug(f"Failed to parse METAR: {metar_text[:80]}... - {e}")
+        # obs parsed OK but field extraction hit something unexpected --
+        # same minimal fallback as a full parser failure, see docstring above.
+        log.warning(f"Failed to extract METAR fields, falling back to minimal extraction: {metar_text[:80]}... - {e}")
+        return parse_metar_minimal(metar_text, is_speci)
+
+
+def parse_metar_minimal(metar_text, is_speci=False):
+    """
+    Fallback when python-metar can't produce a usable observation at all.
+    Extracts just station_id + observation time via regex -- the one thing
+    guaranteed present in any real METAR/SPECI line -- so the station still
+    gets a visible row (raw_text intact, flight_category UNKNOWN) instead of
+    vanishing outright. See parse_metar()'s docstring for why this matters.
+    """
+    m = re.search(r'\b([A-Z]{4})\s+(\d{2})(\d{2})(\d{2})Z', metar_text)
+    if not m:
+        log.debug(f"Minimal extraction also failed, no station/time found: {metar_text[:80]}")
         return None
+
+    station_id, day, hour, minute = m.groups()
+    coords = get_airport_coordinates(station_id)
+    if not coords:
+        log.debug(f"No coordinates found for {station_id}")
+        return None
+    lat, lon = coords
+
+    # Month/year aren't in the METAR itself -- infer from current wall clock,
+    # same assumption Metar.Metar() itself makes when not given explicit
+    # month/year kwargs. Roll back a month if the day-of-month implies a
+    # report from the future (i.e. we're early in a new month, report is
+    # from the tail of the previous one).
+    now = datetime.utcnow()
+    try:
+        obs_time = now.replace(day=int(day), hour=int(hour), minute=int(minute),
+                                second=0, microsecond=0)
+    except ValueError:
+        log.debug(f"Minimal extraction: invalid day/hour/minute in {metar_text[:80]}")
+        return None
+    if obs_time > now + timedelta(hours=1):
+        prev_month_end = obs_time.replace(day=1) - timedelta(days=1)
+        obs_time = obs_time.replace(year=prev_month_end.year, month=prev_month_end.month)
+
+    return {
+        'station_id': station_id,
+        'observation_time': obs_time,
+        'raw_text': metar_text,
+        'temp_c': None,
+        'dewpoint_c': None,
+        'wind_dir': None,
+        'wind_speed_kts': None,
+        'wind_gust_kts': None,
+        'visibility_sm': None,
+        'altimeter_hg': None,
+        'flight_category': 'UNKNOWN',
+        'sky_conditions': [],
+        'present_weather': [],
+        'latitude': lat,
+        'longitude': lon,
+        'is_speci': is_speci,
+    }
 
 def get_ceiling(obs):
     """

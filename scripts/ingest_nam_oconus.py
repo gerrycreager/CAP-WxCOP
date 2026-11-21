@@ -1,21 +1,38 @@
 #!/var/www/cap_winds_app/venv/bin/python3
 """
-ingest_nam_oconus.py — CAP WxCOP NAM OCONUS Airport Impacts Ingest
+ingest_nam_oconus.py — CAP WxCOP OCONUS Airport Impacts Ingest
 ===================================================================
-Reads NAM OCONUS grib2 files (awak3d/afwahi/afwaca) and ingests
-airport weather impacts into observations.airport_wx_impacts on data2.
+Reads OCONUS grib2 data and ingests airport weather impacts into
+observations.airport_wx_impacts on data2, for AK/HI/PR-Caribbean.
 
-Uses PostGIS raster for spatial extraction — ST_Value() handles CRS
-transforms natively including AK polar stereographic projection.
-No KDTree, no grid index table needed.
+RRFS->NAM migration (2026-09-21): NOAA is retiring NAM (SCN 26-48, same
+notice driving this app's broader HRRR->RRFS migration -- see
+/root/.claude/plans/rosy-wobbling-music.md, "Phase 5"). DATA_SOURCE below
+(env var NAM_OCONUS_SOURCE) defaults to 'rrfs'; 'nam' remains a full
+fallback with the original code path completely unchanged.
 
-Domains:
+Real mechanism (corrected -- the previous version of this docstring
+described a PostGIS-raster design that was never actually implemented):
+uses `rasterio` (Python GDAL bindings) to open the grib2 file directly and
+read band arrays with `src.read()`; `rasterio.warp.transform` handles the
+CRS-aware reprojection (AK's polar stereographic, RRFS's Lambert Conformal)
+and an inverse affine transform converts projected coords to pixel row/col.
+No PostGIS raster table exists anywhere in this pipeline. No KDTree either
+-- one point lookup per airport, not a full-grid regrid.
+
+Domains (NAM path):
     AK    — awak3d   → airports with iso_region='US-AK' or station_id~'^PA'
     HI    — afwahi   → airports with iso_region='US-HI'
     CARIB — afwaca   → airports with iso_region IN ('US-PR','US-VI')
-
-Band map (consistent across all domains, confirmed from awak3d00):
-    14  REFC  entire atm   dBZ      composite reflectivity
+NAM band map (verified against nam.t00z.awak3d00.tm00.grib2, hardcoded band
+index -- fragile/NAM-specific, see RRFS_WANTED_FIELDS below for why the
+RRFS path matches by GRIB_ELEMENT name instead):
+    14  REFC  entire atm   dBZ      composite reflectivity (decoded, NEVER
+                                     used downstream -- confirmed 2026-09-21,
+                                     not in build_impact_row/INSERT_SQL/the
+                                     live schema/the API -- dropped entirely
+                                     from the RRFS field list below, not
+                                     ported forward as dead weight)
     15  VIS   surface      m        visibility
     21  GUST  surface      m/s      wind gust
     296 TMP   2m AGL       degC     temperature
@@ -25,18 +42,32 @@ Band map (consistent across all domains, confirmed from awak3d00):
     301 VGRD  10m AGL      m/s      V-wind component
     306 PRATE surface      kg/m2/s  precipitation rate
     335 CAPE  surface      J/kg     CAPE
-    350 HGT   ceiling      gpm      cloud ceiling height
+    350 HGT   ceiling      gpm      cloud ceiling height (clear-sky fill
+                                     value clamped >50000ft -> 30000ft)
+
+RRFS domains: 'carib' maps to RRFS's 'pr' domain (RRFS has no separate VI
+domain per SCN 26-48) -- geographic grid-extent coverage of PR-domain VI
+airports (TIST/TISX) is UNVERIFIED, confirm during testing, don't assume
+it's fine by analogy to ak/hi. RRFS's dedicated CEIL field (meters, real
+physical values even for clear sky -- confirmed 2026-09-21, e.g. 11885m at
+one AK point) numerically survives the *same* `*3.28084` + `>50000ft` clamp
+formula NAM's HGT-based ceiling hack uses -- confirmed no code change
+needed there, the existing arithmetic works for both sources unmodified.
 
 Usage:
-    ingest_nam_oconus.py --domain ak --cycle 12 --fhour 0
-    ingest_nam_oconus.py --domain hi --cycle 12 --fhour 3
+    ingest_nam_oconus.py --domain ak --cycle 12 --fhour 0      # NAM path (NAM_OCONUS_SOURCE=nam)
+    ingest_nam_oconus.py --domain hi --all-fhours              # RRFS path (default): --cycle ignored,
+                                                                # resolves the latest ready RRFS cycle itself
     ingest_nam_oconus.py --domain carib --cycle 00 --fhour 0
 
-Called by fetch_nam_oconus.py after each successful file download,
-or run manually for backfill.
+Called by fetch_nam_oconus.py after each successful file download for the
+NAM path; for the RRFS path (default), fetch is inline via
+rrfs_wind_fetch.py's byte-range fetch-and-cache, no separate fetch step.
 
-Run on: data1 (192.168.0.61) — has access to /LDM/models/nam/ via NFS
-        and connects to data2 PostgreSQL for upsert.
+Run on: data1 (192.168.0.61) — local disk (LDM-fed, NOT actually NFS
+        despite what an earlier version of this docstring claimed --
+        /LDM on data1 is a symlink to a local LVM volume) for the NAM path;
+        connects to data2 PostgreSQL for upsert either way.
 """
 
 import os
@@ -54,6 +85,8 @@ import numpy as np
 import psycopg2
 from psycopg2.extras import execute_values
 
+import rrfs_wind_fetch as rwf
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -61,6 +94,41 @@ DB_DSN   = "dbname=avwx_data user=avwx_user host=192.168.0.60"
 NAM_BASE = Path('/LDM/models/nam')
 
 LOG_FILE = '/var/log/ingest_nam_oconus.log'
+
+DATA_SOURCE = os.environ.get('NAM_OCONUS_SOURCE', 'rrfs')  # 'rrfs' (default) or 'nam'
+
+# RRFS domain/resolution mapping -- see module docstring for the 'carib'->'pr'
+# note and the unverified VI-coverage caveat.
+RRFS_DOMAIN     = {'ak': 'ak', 'hi': 'hi', 'carib': 'pr'}
+RRFS_RESOLUTION = {'ak': '3km', 'hi': '2p5km', 'carib': '2p5km'}
+RRFS_MODEL_SOURCE = {'ak': 'RRFS_AK', 'hi': 'RRFS_HI', 'carib': 'RRFS_PR'}
+
+# RRFS 2dfld field wanted-set for the byte-range fetch. REFC deliberately
+# dropped (decoded but never used downstream -- see module docstring).
+RRFS_WANTED_FIELDS = {
+    ('VIS', 'surface'), ('GUST', 'surface'),
+    ('TMP', '2 m above ground'), ('DPT', '2 m above ground'), ('RH', '2 m above ground'),
+    ('UGRD', '10 m above ground'), ('VGRD', '10 m above ground'),
+    ('PRATE', 'surface'), ('CAPE', 'surface'),
+    ('HGT', 'cloud ceiling'),
+}
+# Real bug found+fixed 2026-09-23: the module docstring's claim that
+# GRIB_ELEMENT=CEIL is a clean, reliable field (no known cfgrib/pygrib-style
+# issues) turned out to be only half true -- GDAL DOES resolve it cleanly,
+# but the field's own VALUES are a genuine RRFS artifact. At KBAK, 00z
+# 2026-09-23, CEIL alternated 1795->3468->1798->3346ft hour to hour while
+# low cloud cover sat at a rock-steady 100% the whole time -- physically
+# impossible for a real ceiling under an unbroken overcast layer.
+# GRIB_ELEMENT=HGT at typeOfLevel='cloud ceiling' (same file, same hours)
+# was smooth: 1650->1644->1644->1854ft. Switched to HGT; see
+# HGT_SHORT_NAME_KEYS below for why this needs its own disambiguation.
+# Same bug, same fix, also applied to rrfs_model_taf.py and
+# mission_taf_extract.py. NOT YET DEPLOYED to data1 (this script's actual
+# production host) -- confirm before copying over, per the cross-host
+# deploy discipline used throughout the RRFS migration.
+HGT_SHORT_NAME_KEYS = {
+    '0-CEIL': 'ceil',
+}
 
 # Band numbers — verified against nam.t00z.awak3d00.tm00.grib2
 BANDS = {
@@ -209,6 +277,44 @@ def load_bands(grib_path: Path) -> dict:
             arrays['_shape']     = (src.height, src.width)
     except Exception as e:
         log.error(f'Error reading {grib_path}: {e}')
+        return {}
+    return arrays
+
+def load_rrfs_bands(grib_path: Path) -> dict:
+    """
+    Same shape/return value as load_bands() (keyed by the same lowercase
+    field names -- vis/gust/tmp/dpt/rh/ugrd/vgrd/prate/cape/ceil -- so
+    build_impact_row() works completely unchanged regardless of source),
+    but for an RRFS 2dfld curated subset. Matches fields by GRIB_ELEMENT
+    tag instead of NAM's hardcoded band index, since RRFS's message
+    ordering is unrelated to NAM's (confirmed 2026-09-21: RRFS puts REFC
+    at message 1, not band 14 -- a fixed-index table would be wrong).
+    GDAL's GRIB driver was confirmed (2026-09-21) to resolve every field
+    this pipeline needs cleanly, including REFC/CEIL which have known
+    issues under cfgrib/pygrib -- not relevant here since this path never
+    uses either library.
+    """
+    arrays = {}
+    try:
+        with rasterio.open(grib_path) as src:
+            for i in range(1, src.count + 1):
+                tags = src.tags(i)
+                elem = (tags.get('GRIB_ELEMENT') or '').lower()
+                if elem == 'hgt':
+                    # Ambiguous by itself -- RRFS's 2dfld has several
+                    # distinct HGT fields; disambiguate via GRIB_SHORT_NAME.
+                    key = HGT_SHORT_NAME_KEYS.get(tags.get('GRIB_SHORT_NAME'))
+                    if key is None:
+                        continue
+                else:
+                    key = elem
+                if key and key not in arrays:  # first match wins on any dup
+                    arrays[key] = src.read(i).astype(np.float32)
+            arrays['_transform'] = src.transform
+            arrays['_crs']       = src.crs
+            arrays['_shape']     = (src.height, src.width)
+    except Exception as e:
+        log.error(f'Error reading RRFS {grib_path}: {e}')
         return {}
     return arrays
 
@@ -427,6 +533,57 @@ def upsert_impacts(cur, rows):
 # Main ingest for one file
 # ---------------------------------------------------------------------------
 
+def _ingest_common(bands, domain, model_source, model_run, valid_time, fhour, priority) -> bool:
+    """Shared tail end of ingest_file()/ingest_file_rrfs() -- airport lookup,
+    pixel projection, row-building, upsert. Source-agnostic: bands just
+    needs the standard lowercase keys either loader produces."""
+    raster_crs = bands['_crs']
+    transform  = bands['_transform']
+    shape      = bands['_shape']
+
+    try:
+        conn = psycopg2.connect(DB_DSN)
+        conn.autocommit = False
+        cur = conn.cursor()
+    except Exception as e:
+        log.error(f'DB connection failed: {e}')
+        return False
+
+    try:
+        airports = get_airports(cur, domain)
+        if not airports:
+            log.warning(f'No airports found for domain {domain}')
+            conn.close()
+            return True
+
+        log.info(f'Processing {len(airports)} airports for {domain}')
+
+        grid_pts = airport_grid_coords(airports, raster_crs, transform, shape)
+        log.info(f'{len(grid_pts)} airports within grid bounds')
+
+        rows = []
+        for airport_id, station_id, row, col, runway_hdg in grid_pts:
+            impact = build_impact_row(
+                airport_id, station_id, runway_hdg,
+                bands, row, col,
+                model_source, model_run, valid_time, fhour,
+                priority
+            )
+            rows.append(impact)
+
+        n = upsert_impacts(cur, rows)
+        conn.commit()
+        log.info(f'Upserted {n} rows for {domain} {model_source} F{fhour:02d}')
+        conn.close()
+        return True
+
+    except Exception as e:
+        log.error(f'Ingest error: {e}', exc_info=True)
+        conn.rollback()
+        conn.close()
+        return False
+
+
 def ingest_file(domain: str, cycle: int, fhour: int) -> bool:
     """Ingest one NAM OCONUS grib2 file for given domain/cycle/fhour."""
 
@@ -448,96 +605,108 @@ def ingest_file(domain: str, cycle: int, fhour: int) -> bool:
     model_run  = run_dt
     valid_time = run_dt + timedelta(hours=fhour)
 
-    # Load raster bands
     bands = load_bands(grib_path)
     if not bands:
         return False
 
-    raster_crs = bands['_crs']
-    transform  = bands['_transform']
-    shape      = bands['_shape']
+    return _ingest_common(bands, domain, MODEL_SOURCE[domain], model_run,
+                           valid_time, fhour, SOURCE_PRIORITY[domain])
 
-    # Connect to DB
-    try:
-        conn = psycopg2.connect(DB_DSN)
-        conn.autocommit = False
-        cur = conn.cursor()
-    except Exception as e:
-        log.error(f'DB connection failed: {e}')
+
+def fetch_rrfs_file(domain: str, date: str, cycle: str, fhour: int):
+    """Fetch-and-cache one RRFS 2dfld curated subset for this domain/fhour
+    via rrfs_wind_fetch.py's existing byte-range technique. Returns the
+    local path, or None if not posted."""
+    return rwf.fetch_and_cache(
+        '2dfld', date, cycle, fhour, RRFS_WANTED_FIELDS, tag='namoconus',
+        domain=RRFS_DOMAIN[domain], resolution=RRFS_RESOLUTION[domain],
+    )
+
+
+def ingest_file_rrfs(domain: str, date: str, cycle: str, fhour: int) -> bool:
+    """RRFS counterpart to ingest_file() -- same shape, different source."""
+    grib_path = fetch_rrfs_file(domain, date, cycle, fhour)
+    if not grib_path:
+        log.warning(f'RRFS not available for {domain} {date} {cycle}z F{fhour:03d}')
         return False
 
-    try:
-        # Get airports for this domain
-        airports = get_airports(cur, domain)
-        if not airports:
-            log.warning(f'No airports found for domain {domain}')
-            conn.close()
-            return True
+    model_run  = datetime.strptime(f'{date}{cycle}', '%Y%m%d%H').replace(tzinfo=timezone.utc)
+    valid_time = model_run + timedelta(hours=fhour)
 
-        log.info(f'Processing {len(airports)} airports for {domain}')
-
-        # Project airport coords to raster pixel indices
-        grid_pts = airport_grid_coords(
-            airports, raster_crs, transform, shape
-        )
-        log.info(f'{len(grid_pts)} airports within grid bounds')
-
-        # Build impact rows
-        model_source = MODEL_SOURCE[domain]
-        priority     = SOURCE_PRIORITY[domain]
-        rows = []
-
-        for airport_id, station_id, row, col, runway_hdg in grid_pts:
-            impact = build_impact_row(
-                airport_id, station_id, runway_hdg,
-                bands, row, col,
-                model_source, model_run, valid_time, fhour,
-                priority
-            )
-            rows.append(impact)
-
-        # Upsert
-        n = upsert_impacts(cur, rows)
-        conn.commit()
-        log.info(f'Upserted {n} rows for {domain} {cycle:02d}Z F{fhour:02d}')
-        conn.close()
-        return True
-
-    except Exception as e:
-        log.error(f'Ingest error: {e}', exc_info=True)
-        conn.rollback()
-        conn.close()
+    bands = load_rrfs_bands(grib_path)
+    if not bands:
         return False
+
+    return _ingest_common(bands, domain, RRFS_MODEL_SOURCE[domain], model_run,
+                           valid_time, fhour, SOURCE_PRIORITY[domain])
 
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
+MAX_FHOUR = {'ak': 42, 'hi': 27, 'carib': 27}  # same ceiling for both sources -- see module docstring
+
+
 def main():
-    ap = argparse.ArgumentParser(description='Ingest NAM OCONUS airport impacts')
+    ap = argparse.ArgumentParser(description='Ingest OCONUS airport impacts (RRFS default, NAM fallback)')
     ap.add_argument('--domain', required=True, choices=['ak','hi','carib'],
                     help='Domain: ak, hi, or carib')
     ap.add_argument('--cycle', required=True, type=int, choices=[0,6,12,18],
-                    help='NAM cycle hour (0/6/12/18)')
+                    help='Cycle hour (0/6/12/18) -- NAM path only; ignored for '
+                         'RRFS (resolves the latest ready cycle itself), kept '
+                         'required so the existing cron invocation needs no change')
     ap.add_argument('--fhour', required=False, type=int, default=0,
-                    help='Forecast hour (0,3,6,...)')
+                    help='Forecast hour')
     ap.add_argument('--all-fhours', action='store_true',
                     help='Ingest all available forecast hours for domain/cycle')
     args = ap.parse_args()
 
-    if args.all_fhours:
-        max_fh = {'ak': 42, 'hi': 27, 'carib': 27}[args.domain]
-        ok = fail = 0
-        for fh in range(0, max_fh + 1, 3):
-            if ingest_file(args.domain, args.cycle, fh):
-                ok += 1
-            else:
-                fail += 1
-        log.info(f'Batch complete: {ok} OK, {fail} failed')
-        sys.exit(1 if fail > 0 else 0)
+    log.info(f'DATA_SOURCE={DATA_SOURCE} domain={args.domain}')
+
+    if DATA_SOURCE == 'rrfs':
+        date, cycle = rwf.find_ready_cycle(
+            product='2dfld', domain=RRFS_DOMAIN[args.domain],
+            resolution=RRFS_RESOLUTION[args.domain],
+        )
+        if not date:
+            log.error(f'No ready RRFS cycle found for domain {args.domain} within lookback window')
+            sys.exit(1)
+        log.info(f'RRFS cycle: {date} {cycle}z')
+
+        if args.all_fhours:
+            # RRFS only extends past F18 on the 4 synoptic cycles (00/06/12/18Z)
+            # -- an hourly off-cycle run (e.g. 21z) genuinely has nothing beyond
+            # F18. Cap this run's ceiling to what the resolved cycle actually
+            # has rather than looping into guaranteed "not posted" warnings
+            # for every non-synoptic cycle (most of them).
+            max_fh = MAX_FHOUR[args.domain]
+            if cycle not in ('00', '06', '12', '18'):
+                max_fh = min(max_fh, 18)
+            ok = fail = 0
+            for fh in range(0, max_fh + 1):  # hourly steps -- RRFS is hourly-native, unlike NAM's 3-hourly
+                if ingest_file_rrfs(args.domain, date, cycle, fh):
+                    ok += 1
+                else:
+                    fail += 1
+            log.info(f'Batch complete: {ok} OK, {fail} failed')
+            sys.exit(1 if fail > 0 else 0)
+        else:
+            success = ingest_file_rrfs(args.domain, date, cycle, args.fhour)
+            sys.exit(0 if success else 1)
     else:
-        success = ingest_file(args.domain, args.cycle, args.fhour)
-        sys.exit(0 if success else 1)
+        if args.all_fhours:
+            max_fh = MAX_FHOUR[args.domain]
+            ok = fail = 0
+            for fh in range(0, max_fh + 1, 3):
+                if ingest_file(args.domain, args.cycle, fh):
+                    ok += 1
+                else:
+                    fail += 1
+            log.info(f'Batch complete: {ok} OK, {fail} failed')
+            sys.exit(1 if fail > 0 else 0)
+        else:
+            success = ingest_file(args.domain, args.cycle, args.fhour)
+            sys.exit(0 if success else 1)
 
 if __name__ == '__main__':
     main()

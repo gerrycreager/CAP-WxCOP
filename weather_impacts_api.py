@@ -34,8 +34,8 @@ def parse_bounds(s):
         return None
 
 def color_label(c):
-    return {'GREEN': 'Go', 'YELLOW': 'Caution — Marginal',
-            'RED': 'No-Go / Req. Auth.'}.get(c, 'Unknown')
+    return {'GREEN': 'FRO', 'YELLOW': 'SFRO',
+            'RED': 'CAP/DO'}.get(c, 'Unknown')
 
 def fmt_ceil(ft):
     if ft is None: return None
