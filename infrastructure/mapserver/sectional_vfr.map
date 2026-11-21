@@ -1,0 +1,55 @@
+MAP
+  NAME "Sectional_VFR"
+  STATUS ON
+  SIZE 800 600
+  EXTENT -20037508.34 -20037508.34 20037508.34 20037508.34
+  UNITS METERS
+  IMAGECOLOR 255 255 255
+
+  PROJECTION
+    "init=epsg:3857"
+  END
+
+  WEB
+    METADATA
+      "wms_title"           "FAA VFR Sectional Charts"
+      "wms_onlineresource"  "http://209.248.90.253/wms/sectional_vfr"
+      "wms_srs"             "EPSG:3857 EPSG:4326 EPSG:900913"
+      "wms_enable_request"  "*"
+      "wms_encoding"        "UTF-8"
+      "wms_allow_getmap_without_styles" "true"
+    END
+  END
+
+  OUTPUTFORMAT
+    NAME "png"
+    DRIVER "AGG/PNG"
+    MIMETYPE "image/png"
+    IMAGEMODE RGB
+    EXTENSION "png"
+    TRANSPARENT OFF
+  END
+
+  # Full-color FAA chart raster (already palette-expanded to RGB and
+  # reprojected to EPSG:3857, see scripts/warp_sectional_charts.sh),
+  # mosaicked across all 55 charts via GDAL VRT, see
+  # scripts/build_sectional_vrt.sh. MapServer renders the 3 bands
+  # directly, no CLASS/PROCESSING needed since this isn't a value
+  # field like MRMS, it's already a finished chart image.
+  # Credit: Charlie Jackson/capgrids.com, see data/sectionals/README.md
+  LAYER
+    NAME "sectional_vfr"
+    TYPE RASTER
+    STATUS ON
+    DATA "/var/www/cap_winds_app/data/sectionals/sectional_mosaic.vrt"
+
+    PROJECTION
+      "init=epsg:3857"
+    END
+
+    METADATA
+      "wms_title" "FAA VFR Sectional Charts"
+      "wms_srs"   "EPSG:3857 EPSG:4326"
+    END
+  END
+END

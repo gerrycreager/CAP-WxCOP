@@ -26,6 +26,14 @@ git_init_sequence.sh
 *.grib2.gz
 hrrr_data/
 # HRRR data directory
+data/sectionals/raw/
+data/sectionals/manifest.json
+data/sectionals/warped_3857/
+data/sectionals/sectional_mosaic.vrt
+data/sectionals/.warp.lock
+# FAA sectional raw/derived chart data -- large binary, fully
+# re-derivable from FAA's servers via the scripts in scripts/;
+# data/sectionals/README.md (credit) IS committed
 # IDE
 .idea/
 instance/

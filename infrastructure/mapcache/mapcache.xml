@@ -184,6 +184,15 @@
     </params></getmap>
   </source>
 
+  <source name="hrrr_smoke" type="wms">
+    <http><url>http://127.0.0.1/CAP_WxCOP/api/hrrr-smoke/wms?</url></http>
+    <getmap><params>
+      <FORMAT>image/png</FORMAT>
+      <LAYERS>hrrr_smoke</LAYERS>
+      <TRANSPARENT>true</TRANSPARENT>
+    </params></getmap>
+  </source>
+
   <!-- ═══ Tilesets ═══
        ts dimension: "current" (live frame) or an explicit YYYYMMDD-HHMMSS
        frame timestamp, passed straight through to the backend's own ts=
@@ -513,6 +522,46 @@
         <list_query>SELECT ts FROM frames WHERE tileset = :tileset ORDER BY ts</list_query>
       </dimension>
     </dimensions>
+  </tileset>
+
+  <tileset name="hrrr_smoke">
+    <metadata><title>HRRR near-surface smoke (MASSDEN) — PM2.5-equivalent</title></metadata>
+    <source>hrrr_smoke</source>
+    <cache>disk</cache>
+    <format>PNG</format>
+    <grid>WGS84</grid>
+    <grid>GoogleMapsCompatible</grid>
+    <expires>900</expires>
+    <dimensions>
+      <dimension name="ts" type="sqlite" default="current">
+        <dbfile>/var/cache/mapcache/dims.sqlite</dbfile>
+        <validate_query>SELECT ts FROM frames WHERE tileset = :tileset AND ts = :dim</validate_query>
+        <list_query>SELECT ts FROM frames WHERE tileset = :tileset ORDER BY ts</list_query>
+      </dimension>
+    </dimensions>
+  </tileset>
+
+  <!-- FAA VFR Sectional: static raster, no ts dimension.
+       Source mechanism/credit: Charlie Jackson/capgrids.com, see
+       /var/www/cap_winds_app/data/sectionals/README.md -->
+
+  <source name="sectional_vfr" type="wms">
+    <http><url>http://127.0.0.1:8080/wms/sectional_vfr?</url></http>
+    <getmap><params>
+      <FORMAT>image/png</FORMAT>
+      <LAYERS>sectional_vfr</LAYERS>
+      <TRANSPARENT>false</TRANSPARENT>
+    </params></getmap>
+  </source>
+
+  <tileset name="sectional_vfr">
+    <metadata><title>FAA VFR Sectional Charts</title></metadata>
+    <source>sectional_vfr</source>
+    <cache>disk</cache>
+    <format>PNG</format>
+    <grid>WGS84</grid>
+    <grid>GoogleMapsCompatible</grid>
+    <expires>604800</expires>
   </tileset>
 
   <default_format>PNG</default_format>
