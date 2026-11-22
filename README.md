@@ -4,6 +4,11 @@ A web-based weather operations system for Civil Air Patrol, providing real-time
 weather data, radar visualization, and wind constraint analysis for aviation
 and search-and-rescue mission planning.
 
+New here? [`OVERVIEW.md`](OVERVIEW.md) explains what this is and why it
+exists in plain language; [`ARCHITECTURE.md`](ARCHITECTURE.md) is the
+technical map of how it's put together. This README is deployment/ops
+reference for working on it day to day.
+
 **Production:** http://209.248.90.253/CAP_WxCOP/  
 **Development:** http://209.248.90.253/CAP_WxCOP_DEV/
 
@@ -39,8 +44,14 @@ LDM Pipeline
 |-----|-------------|
 | `/CAP_WxCOP/` | Landing page |
 | `/CAP_WxCOP/weather-map` | Weather COP — METARs, flight categories, TFRs, MRMS overlay |
+| `/CAP_WxCOP/enhanced-weather-map` | EWMC — full operational picture: everything below plus WPC fronts/pressure centers, NHC tropical, NASR aviation layer, self-hosted VFR sectionals, station plots |
+| `/CAP_WxCOP/weather-impacts` | Flight Ops Impacts — VFR/IFR stoplight, HRRR/RRFS wind + smoke forecast, sectional/NASR layers, TFRs |
+| `/CAP_WxCOP/cadet-wx` | Cadet Weather Impacts — deliberately reduced subset of Flight Ops Impacts for cadet-facing use |
 | `/CAP_WxCOP/wind-map` | Wind constraint map — HRRR-based airport wind analysis |
 | `/CAP_WxCOP/mrms` | MRMS radar — composite reflectivity, MESH, lightning, azimuthal shear |
+
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for how each of these subsystems
+(sectional self-hosting, WPC/NHC overlays, HRRR/RRFS tools) actually works.
 
 ---
 
