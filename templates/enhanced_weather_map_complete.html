@@ -2829,11 +2829,25 @@
             var wpcFrontsTimer = null;
 
             // Front pip icon: shape bulges along local -y (side=-1) or +y
-            // (side=1) in the icon's own coordinate frame. L.Symbol.marker's
-            // rotate:true then rotates that frame so local +x aligns with
-            // the line's tangent direction -- so a -y/+y bulge ends up
-            // perpendicular to the line (i.e. to one side of it), which is
-            // the standard way front pips are drawn relative to the line.
+            // (side=1) in the icon's own coordinate frame.
+            //
+            // BUG FOUND 2026-11-21 (Gerry: "90 degrees off"): the comment
+            // that used to be here claimed rotate:true aligns local +x with
+            // the line's tangent, so a y-axis bulge would end up
+            // perpendicular. That's wrong -- traced the actual plugin
+            // source (leaflet-polylinedecorator's Symbol.Marker.buildSymbol,
+            // rotationAngle = heading + angleCorrection, where heading =
+            // atan2(dy,dx)+90 is a compass bearing) and confirmed it aligns
+            // the icon's default "up" (local -y, heading=0 reference) with
+            // the line's own direction of travel -- i.e. a -y/+y bulge was
+            // ending up PARALLEL to the line (pointing forward/backward
+            // along it), not perpendicular/to one side. angleCorrection:-90
+            // rotates that back onto the correct perpendicular axis.
+            // Verified against a real NOAA WPC surface analysis chart (a
+            // west-to-east warm front over FL/GA, 2026-11-21 00Z): with
+            // this correction, side=-1 lands on the left-hand side of the
+            // line's own digitized point order, which for that real front
+            // put the semicircles on its north side, matching NOAA's chart.
             function frontPipIcon(shape, color, side) {
                 var vbY = side < 0 ? -10 : 0;
                 var tip = side < 0 ? -9 : 9;
@@ -2855,6 +2869,7 @@
             function pipSymbol(shape, color, side) {
                 return L.Symbol.marker({
                     rotate: true,
+                    angleCorrection: -90,  // see frontPipIcon's comment -- fixes the 90-degree bug
                     markerOptions: { icon: frontPipIcon(shape, color, side) }
                 });
             }

@@ -28,8 +28,10 @@ hrrr_data/
 # HRRR data directory
 data/sectionals/raw/
 data/sectionals/manifest.json
+data/sectionals/cropped/
 data/sectionals/warped_3857/
 data/sectionals/sectional_mosaic.vrt
+data/sectionals/sectional_mosaic.vrt.ovr
 data/sectionals/.warp.lock
 # FAA sectional raw/derived chart data -- large binary, fully
 # re-derivable from FAA's servers via the scripts in scripts/;

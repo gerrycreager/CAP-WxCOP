@@ -55,18 +55,43 @@ own so the credit above is visible on GitHub.
    and AvTrack all point at — one tile source, several consuming apps.
    (Deliberately not added to Cadet Weather Impacts, per Gerry.)
 
-## Known limitation: legend/marginalia bleed at chart overlaps
+## Fixed: legend/marginalia bleed at chart overlaps
 
-Adjacent FAA charts physically overlap, and each chart's raster
-includes its own legend/marginalia box baked into the image (not
-cropped to pure terrain). The VRT mosaic picks whichever chart is
-listed last wherever charts overlap, so a thin band near some chart
-boundaries can show a neighboring chart's legend box instead of
-terrain. This is cosmetic, not a correctness bug — verified the core
-chart content (interior of any single chart) renders cleanly at full
-color fidelity. A real fix would need per-chart cutline polygons
-clipping each raster to its true mapped extent before mosaicking;
-not attempted yet (FAA doesn't publish exact crop boundaries, so
-this would need either image-based legend detection or manually
-sourced crop geometry). Revisit if this proves visually disruptive
-in practice.
+FAA's own digital-chart product documentation confirms why this
+happened and that cropping it out is the officially-sanctioned fix,
+not a workaround:
+
+> "An Aeronautical Raster Chart is a digital image of an FAA VFR
+> Chart. All information that is part of the paper chart is included
+> in the file. The area inside the neat line is georeferenced to the
+> surface of the earth. **Only the main body of the chart is
+> accurately georeferenced.**"
+
+Each chart's raster includes its own legend/title panel baked into
+the same pixel grid as the real map — technically inside the same
+affine transform, but not "accurately georeferenced" per FAA's own
+statement above, i.e. not real cartographic data. Left uncropped, the
+VRT mosaic would pick whichever chart's panel happened to be listed
+last wherever charts overlap, showing a legend box instead of terrain
+in a thin band near some chart boundaries.
+
+`scripts/crop_sectional_margins.py` detects and removes this panel
+on **all four edges** (the neatline is a rectangle, not just a west-
+edge legend column — margins measured 2026-11-21 across all 55
+charts: left 6.7%-17.2%, top 0%-7.1%, right 0%, bottom up to ~9% of
+image size, so this isn't a fixed crop on any side) before
+reprojection. Detection: downsample, then independently scan inward
+from each of the four edges for where a sustained run of "page
+background" rows/columns (bright + low-saturation, i.e.
+white/cream/light-blue) gives way to dense chart content — that's
+the real chart's neatline on that side. Per FAA's own documentation
+(quoted above), the neatline is the trim line: only what's inside it
+is accurately georeferenced. Validated visually against charts with
+very different backgrounds (tan terrain, mountainous Alaska,
+blue-ocean Caribbean) before being applied pipeline-wide. Runs as a
+step before `warp_sectional_charts.sh`, which reads from `cropped/`
+rather than `raw/`.
+
+No known residual limitation from this crop as of 2026-11-22 — all
+four edges are now trimmed per chart, not just the west legend
+column.

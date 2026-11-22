@@ -1,9 +1,10 @@
 #!/bin/bash
-# Reprojects every fetched FAA sectional GeoTIFF (each in its own native
-# Lambert Conformal Conic, per-chart parameters embedded in the file --
-# see data/sectionals/README.md) into a common EPSG:3857, so they can be
-# mosaicked into one VRT for MapServer/MapCache to serve as a single tile
-# layer.
+# Reprojects every margin-cropped FAA sectional GeoTIFF (see
+# crop_sectional_margins.py, which strips each chart's own baked-in
+# legend/title panel first -- this script runs AFTER that, reading
+# data/sectionals/cropped/, not raw/) from its native per-chart Lambert
+# Conformal Conic into a common EPSG:3857, so they can be mosaicked into
+# one VRT for MapServer/MapCache to serve as a single tile layer.
 #
 # -expand rgb converts the source's palette/indexed color to real RGB
 # BEFORE warping -- without it, bilinear/cubic resampling blends palette
@@ -23,7 +24,7 @@ if ! flock -n 9; then
     exit 1
 fi
 
-RAW_BASE=/var/www/cap_winds_app/data/sectionals/raw
+RAW_BASE=/var/www/cap_winds_app/data/sectionals/cropped
 OUT_BASE=/var/www/cap_winds_app/data/sectionals/warped_3857
 LOG=/var/www/cap_winds_app/logs/warp_sectional_charts.log
 PARALLEL=3
@@ -40,13 +41,8 @@ mkdir -p "$OUT_BASE"
 : > "$LOG"
 
 warp_one() {
-    dir="$1"
-    name=$(basename "$dir")
-    tif=$(find "$dir" -maxdepth 1 -iname "*.tif" | head -1)
-    if [ -z "$tif" ]; then
-        echo "SKIP $name -- no .tif found in $dir" >> "$LOG"
-        return 1
-    fi
+    tif="$1"
+    name=$(basename "$tif" .tif)
     out="$OUT_BASE/${name}.tif"
     if [ -f "$out" ] && [ "$out" -nt "$tif" ]; then
         echo "SKIP $name -- already warped, newer than source" >> "$LOG"
@@ -73,7 +69,7 @@ warp_one() {
 export -f warp_one
 export OUT_BASE LOG
 
-find "$RAW_BASE" -mindepth 1 -maxdepth 1 -type d | sort | \
+find "$RAW_BASE" -mindepth 1 -maxdepth 1 -iname "*.tif" | sort | \
     xargs -P "$PARALLEL" -I{} bash -c 'warp_one "$@"' _ {}
 
 echo "=== warp pass done ===" >> "$LOG"
