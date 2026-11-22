@@ -1126,8 +1126,20 @@
             baseLayers = {
                 'street':    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
                                  { attribution: '&copy; OpenStreetMap contributors', maxZoom: 18 }),
-                'sectional': L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Specialty/World_Navigation_Charts/MapServer/tile/{z}/{y}/{x}',
-                                 { attribution: 'VFR Sectional Charts &copy; FAA, Esri', maxZoom: 12, minZoom: 7 }),
+                // Self-hosted real FAA sectional raster (2026-11-21) --
+                // replaces the Esri World_Navigation_Charts tile source,
+                // which only had native zoom levels 0-10 and caused the
+                // "won't zoom in" complaint that started this work (see
+                // project_ewmc_vfr_sectional_zoom_cap memory). Fetch/
+                // reprojection pipeline credit: Charlie Jackson, Capt,
+                // PCR-WA-068, creator of capgrids.com -- see
+                // data/sectionals/README.md for the full writeup.
+                // maxNativeZoom matches this data's real ~42m/px source
+                // resolution (500,000:1 chart scale); maxZoom beyond that
+                // is Leaflet upscaling the last real tile, same tradeoff
+                // every other raster layer here already makes.
+                'sectional': L.tileLayer('/mapcache/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=sectional_vfr&STYLE=&TILEMATRIXSET=GoogleMapsCompatible&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image/png',
+                                 { attribution: 'VFR Sectional Charts &copy; FAA &mdash; chart automation by capgrids.com', maxNativeZoom: 12, maxZoom: 15, minZoom: 7 }),
                 'satellite': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
                                  { attribution: 'Tiles &copy; Esri', maxZoom: 18 }),
                 'dark':      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
@@ -2817,11 +2829,25 @@
             var wpcFrontsTimer = null;
 
             // Front pip icon: shape bulges along local -y (side=-1) or +y
-            // (side=1) in the icon's own coordinate frame. L.Symbol.marker's
-            // rotate:true then rotates that frame so local +x aligns with
-            // the line's tangent direction -- so a -y/+y bulge ends up
-            // perpendicular to the line (i.e. to one side of it), which is
-            // the standard way front pips are drawn relative to the line.
+            // (side=1) in the icon's own coordinate frame.
+            //
+            // BUG FOUND 2026-11-21 (Gerry: "90 degrees off"): the comment
+            // that used to be here claimed rotate:true aligns local +x with
+            // the line's tangent, so a y-axis bulge would end up
+            // perpendicular. That's wrong -- traced the actual plugin
+            // source (leaflet-polylinedecorator's Symbol.Marker.buildSymbol,
+            // rotationAngle = heading + angleCorrection, where heading =
+            // atan2(dy,dx)+90 is a compass bearing) and confirmed it aligns
+            // the icon's default "up" (local -y, heading=0 reference) with
+            // the line's own direction of travel -- i.e. a -y/+y bulge was
+            // ending up PARALLEL to the line (pointing forward/backward
+            // along it), not perpendicular/to one side. angleCorrection:-90
+            // rotates that back onto the correct perpendicular axis.
+            // Verified against a real NOAA WPC surface analysis chart (a
+            // west-to-east warm front over FL/GA, 2026-11-21 00Z): with
+            // this correction, side=-1 lands on the left-hand side of the
+            // line's own digitized point order, which for that real front
+            // put the semicircles on its north side, matching NOAA's chart.
             function frontPipIcon(shape, color, side) {
                 var vbY = side < 0 ? -10 : 0;
                 var tip = side < 0 ? -9 : 9;
@@ -2843,6 +2869,7 @@
             function pipSymbol(shape, color, side) {
                 return L.Symbol.marker({
                     rotate: true,
+                    angleCorrection: -90,  // see frontPipIcon's comment -- fixes the 90-degree bug
                     markerOptions: { icon: frontPipIcon(shape, color, side) }
                 });
             }

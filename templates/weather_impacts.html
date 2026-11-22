@@ -1444,6 +1444,12 @@ function initMap() {
                     { attribution: '&copy; OSM/CARTO', subdomains: 'abcd', maxZoom: 18 }),
         topo:      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
                     { attribution: '&copy; Esri', maxZoom: 18 }),
+        // Self-hosted real FAA sectional raster -- same source/pipeline
+        // as EWMC's VFR Sectional layer (2026-11-21). Fetch/reprojection
+        // credit: Charlie Jackson, Capt, PCR-WA-068, creator of
+        // capgrids.com -- see data/sectionals/README.md.
+        sectional: L.tileLayer('/mapcache/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=sectional_vfr&STYLE=&TILEMATRIXSET=GoogleMapsCompatible&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image/png',
+                    { attribution: 'VFR Sectional Charts &copy; FAA &mdash; chart automation by capgrids.com', maxNativeZoom: 12, maxZoom: 15, minZoom: 7 }),
     };
     baseLayers.street.addTo(map);
     L.control.layers({
@@ -1451,6 +1457,7 @@ function initMap() {
         'Satellite': baseLayers.satellite,
         'Dark':      baseLayers.dark,
         'Topo':      baseLayers.topo,
+        'VFR Sectional': baseLayers.sectional,
     }, {}, { position: 'topright' }).addTo(map);
 
     L.control.scale({ position: 'bottomleft', imperial: true, metric: false }).addTo(map);
