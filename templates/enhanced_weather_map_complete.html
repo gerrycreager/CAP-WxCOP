@@ -613,6 +613,7 @@
         <h3>Aviation Detail</h3>
         <label class="checkbox-label"><input type="checkbox" id="nasrToggle"> NavAids / Fixes / Runways</label>
         <div id="nasrStatus" style="font-size:10px;color:#888;margin-top:3px;margin-left:4px;"></div>
+        <div id="navaidsLegend" style="font-size:10px;color:#555;margin:2px 0 2px 4px;"></div>
         <label class="checkbox-label"><input type="checkbox" id="obstructionsToggle"> Obstructions (Towers)</label>
         <div id="obstructionsStatus" style="font-size:10px;color:#888;margin-top:3px;margin-left:4px;"></div>
 
@@ -2854,6 +2855,79 @@
                 'NDB':'#8e24aa','NDB/DME':'#8e24aa','MARINE NDB':'#8e24aa','DME':'#555','VOT':'#555','FAN MARKER':'#999'
             };
 
+            // NavAid icon shapes (per Gerry, 2026-11-23: "A circle is confusing vs
+            // an airfield") -- pulled from the real FAA Chart Users' Guide VFR
+            // Symbology section (RADIO AIDS TO NAVIGATION, pg. 25 of the
+            // 2026-07-09 edition): VOR-family is a hexagon w/ center dot,
+            // DME-equipped gets side tabs, DME/TACAN is a square, NDB-family is a
+            // dotted "coverage" ring. Pure-SVG (not clip-path, like the
+            // obstruction triangles above) since the dashed-circle needs
+            // stroke-dasharray. Same vocabulary used on AvTrack (MapLibre canvas
+            // icons) -- keep both in sync if this changes.
+            var NAVAID_SHAPE = {
+                'VORTAC': {shape:'hexagon', filled:true, label:'VORTAC'},
+                'VOR/DME': {shape:'hexagon-dme', filled:false, label:'VOR/DME'},
+                'VOR': {shape:'hexagon', filled:false, label:'VOR'},
+                'TACAN': {shape:'square', filled:true, label:'TACAN'},
+                'NDB': {shape:'dashed-circle', filled:false, label:'NDB / NDB-DME'},
+                'NDB/DME': {shape:'dashed-circle', filled:false, label:'NDB / NDB-DME'},
+                'MARINE NDB': {shape:'dashed-circle', filled:false, label:'NDB / NDB-DME'},
+                'DME': {shape:'square', filled:false, label:'DME / VOT / Fan Marker'},
+                'VOT': {shape:'square', filled:false, label:'DME / VOT / Fan Marker'},
+                'FAN MARKER': {shape:'square', filled:false, label:'DME / VOT / Fan Marker'}
+            };
+
+            function hexPoints(cx, cy, r) {
+                var pts = [];
+                for (var i = 0; i < 6; i++) {
+                    var angle = Math.PI / 180 * (60 * i - 90);
+                    pts.push((cx + r * Math.cos(angle)).toFixed(1) + ',' + (cy + r * Math.sin(angle)).toFixed(1));
+                }
+                return pts.join(' ');
+            }
+
+            function navaidIconSvg(shape, color, filled) {
+                var size = 18, cx = size / 2, cy = size / 2, r = 6.5;
+                var fill = filled ? color : 'none';
+                var fillOpacity = filled ? 0.85 : 1;
+                var extra = '';
+                if (shape === 'hexagon' || shape === 'hexagon-dme') {
+                    extra = '<polygon points="' + hexPoints(cx, cy, r) + '" fill="' + fill + '" fill-opacity="' + fillOpacity +
+                            '" stroke="' + color + '" stroke-width="1.5"/>' +
+                            '<circle cx="' + cx + '" cy="' + cy + '" r="1.2" fill="' + color + '"/>';
+                    if (shape === 'hexagon-dme') {
+                        extra += '<line x1="' + (cx - r - 3.5) + '" y1="' + cy + '" x2="' + (cx - r + 1) + '" y2="' + cy +
+                                 '" stroke="' + color + '" stroke-width="1.5"/>' +
+                                 '<line x1="' + (cx + r - 1) + '" y1="' + cy + '" x2="' + (cx + r + 3.5) + '" y2="' + cy +
+                                 '" stroke="' + color + '" stroke-width="1.5"/>';
+                    }
+                } else if (shape === 'square') {
+                    var s = 6.5;
+                    extra = '<rect x="' + (cx - s / 2) + '" y="' + (cy - s / 2) + '" width="' + s + '" height="' + s +
+                            '" fill="' + fill + '" fill-opacity="' + fillOpacity + '" stroke="' + color + '" stroke-width="1.5"/>';
+                } else if (shape === 'dashed-circle') {
+                    extra = '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="' + color +
+                            '" stroke-width="1.3" stroke-dasharray="2,2"/>' +
+                            '<circle cx="' + cx + '" cy="' + cy + '" r="1.2" fill="' + color + '"/>';
+                }
+                return '<svg width="' + size + '" height="' + size + '" viewBox="0 0 ' + size + ' ' + size + '">' + extra + '</svg>';
+            }
+
+            (function buildNavaidLegend() {
+                var el = document.getElementById('navaidsLegend');
+                if (!el) return;
+                var seen = {}, rows = [];
+                Object.keys(NAVAID_SHAPE).forEach(function(navType) {
+                    var sh = NAVAID_SHAPE[navType];
+                    if (seen[sh.label]) return;
+                    seen[sh.label] = true;
+                    rows.push('<div style="display:flex;align-items:center;gap:4px;margin:1px 0;">' +
+                        navaidIconSvg(sh.shape, NAVAID_COLOR[navType] || '#555', sh.filled) +
+                        '<span>' + sh.label + '</span></div>');
+                });
+                el.innerHTML = rows.join('');
+            })();
+
             // NavAid zoom tiering (per Gerry, 2026-11-23): "Prioritize HIGH VORTAC on
             // 0-3 and then start bringing in more, including the low altitude NAVAIDs
             // at higher zoom levels" -- found live that "navaids are sparse enough to
@@ -2937,8 +3011,13 @@
                             if (navaidMinZoom(n.nav_type, n.alt_code) > zoom) return;
                             shown++;
                             var col = NAVAID_COLOR[n.nav_type] || '#555';
-                            L.circleMarker([n.lat, n.lon], {
-                                radius: 6, color: col, weight: 2, fillColor: col, fillOpacity: 0.25
+                            var sh = NAVAID_SHAPE[n.nav_type] || {shape:'square', filled:false};
+                            L.marker([n.lat, n.lon], {
+                                icon: L.divIcon({
+                                    className: '',
+                                    html: navaidIconSvg(sh.shape, col, sh.filled),
+                                    iconSize: [18, 18], iconAnchor: [9, 9]
+                                })
                             }).bindTooltip(n.nav_id+' — '+n.nav_type+(n.name?' ('+n.name+')':'')+(n.freq?' '+n.freq:''))
                               .addTo(nasrLayer);
                         });
