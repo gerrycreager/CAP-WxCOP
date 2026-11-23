@@ -571,7 +571,7 @@
         </div>
         <select id="layerSelector" class="layer-selector">
             <option value="street">Street Map</option>
-            <option value="sectional">VFR Sectional (zoom &gt;5 mi)</option>
+            <option value="aviation">Aviation Chart (resolves to Sectional)</option>
             <option value="satellite">Satellite</option>
             <option value="dark">Dark Mode</option>
             <option value="topo">Topographic</option>
@@ -613,6 +613,8 @@
         <h3>Aviation Detail</h3>
         <label class="checkbox-label"><input type="checkbox" id="nasrToggle"> NavAids / Fixes / Runways</label>
         <div id="nasrStatus" style="font-size:10px;color:#888;margin-top:3px;margin-left:4px;"></div>
+        <label class="checkbox-label"><input type="checkbox" id="obstructionsToggle"> Obstructions (Towers)</label>
+        <div id="obstructionsStatus" style="font-size:10px;color:#888;margin-top:3px;margin-left:4px;"></div>
 
         <div class="divider"></div>
         <h3>Airspace</h3>
@@ -620,12 +622,16 @@
         <label class="checkbox-label"><input type="checkbox" id="suaRestrictToggle"> Restricted (R-)</label>
         <label class="checkbox-label"><input type="checkbox" id="suaMoaToggle"> MOA / Warning / Alert</label>
         <label class="checkbox-label"><input type="checkbox" id="mtrToggle"> Mil Training Routes (MTR)</label>
+        <label class="checkbox-label"><input type="checkbox" id="classBcdToggle"> Class B/C/D (Controlled)</label>
+        <label class="checkbox-label"><input type="checkbox" id="classEToggle"> Class E (Surface)</label>
         <div id="airspaceStatus" style="font-size:10px;color:#888;margin-top:3px;margin-left:4px;"></div>
         <div style="margin-top:4px;margin-left:4px;font-size:10px;line-height:1.8;">
             <span style="display:inline-block;width:12px;height:4px;background:rgba(180,0,0,0.7);margin-right:4px;vertical-align:middle;"></span>Prohibited &nbsp;
             <span style="display:inline-block;width:12px;height:4px;background:rgba(220,100,0,0.6);margin-right:4px;vertical-align:middle;"></span>Restricted<br>
             <span style="display:inline-block;width:12px;height:4px;background:rgba(80,0,200,0.5);margin-right:4px;vertical-align:middle;"></span>MOA/Warn/Alert &nbsp;
-            <span style="display:inline-block;width:12px;height:4px;background:rgba(0,100,180,0.6);margin-right:4px;vertical-align:middle;"></span>MTR
+            <span style="display:inline-block;width:12px;height:4px;background:rgba(0,100,180,0.6);margin-right:4px;vertical-align:middle;"></span>MTR<br>
+            <span style="display:inline-block;width:12px;height:4px;background:rgba(0,70,220,0.9);margin-right:4px;vertical-align:middle;"></span>Class B/C/D &nbsp;
+            <span style="display:inline-block;width:12px;height:4px;background:rgba(120,120,0,0.6);margin-right:4px;vertical-align:middle;"></span>Class E
         </div>
         <div id="glmSubControls" style="display:none; margin-top:4px; margin-left:20px;">
             <div style="font-size:11px;color:#555;margin-bottom:3px;">Time window</div>
@@ -1086,6 +1092,49 @@
             return 3;   // unknown runway → treat as regional so it shows by default
         }
 
+        // Same tier scheme as runwayTier(), for the NASR airports/heliports
+        // overlay (loadNasr() below) -- reuses the SAME MEF_PRIORITY_AIRPORTS/
+        // airportTiers/tier-checkbox machinery as the primary METAR marker
+        // layer, so "Small Airfields" etc. filters both consistently. Added
+        // 2026-11-23: at CONUS zoom, NASR's ~19k airports+heliports (vs. the
+        // few hundred METAR stations the primary layer deals with) swamped
+        // the map with no filtering at all. Unlike runwayTier()'s "unknown
+        // runway → regional" default (reasonable when a METAR station's
+        // runway data is merely missing), a NASR airport/heliport with no
+        // recorded runway length is usually genuinely a small private strip
+        // or a heliport (which has no fixed-wing runway at all, by design,
+        // not by data gap) -- defaults to small (5) instead, since
+        // "regional" would otherwise still clutter the CONUS view by default.
+        function nasrAirportTier(a) {
+            if (a.icao_id && MEF_PRIORITY_AIRPORTS[a.icao_id] === 1) return 0;
+            if (/^(MA|MN|MR|CG)$/.test(a.ownership || '')) return 1;
+            if (a.icao_id && airportTiers[a.icao_id]) return airportTiers[a.icao_id];
+            if (a.site_type === 'H') return 5;
+            var longestRwy = 0;
+            (a.runways || []).forEach(function(r) {
+                if (r.length_ft && r.length_ft > longestRwy) longestRwy = r.length_ft;
+            });
+            if (!longestRwy) return 5;
+            if (longestRwy >= 7000) return 3;
+            if (longestRwy >= 5000) return 4;
+            return 5;
+        }
+
+        function nasrTierVisible(tier, zoom) {
+            var showMilitary = document.getElementById('showMilitary').checked;
+            var showHubs     = document.getElementById('showHubs').checked;
+            var showRegional = document.getElementById('showRegional').checked;
+            var showLocal    = document.getElementById('showLocal').checked;
+            var showSmall    = document.getElementById('showSmall').checked;
+            var toggleOn = (tier === 0) ||
+                           (tier === 1 && showMilitary) ||
+                           (tier === 2 && showHubs)     ||
+                           (tier === 3 && showRegional) ||
+                           (tier === 4 && showLocal)    ||
+                           (tier === 5 && showSmall);
+            return toggleOn && zoom >= TIER_MIN_ZOOM[tier];
+        }
+
         function initMap() {
             // zoomSnap/zoomDelta (added 2026-09-25 per Gerry: "It's about
             // precision for pan and zoom ops" -- 0.25 tried first, still
@@ -1140,6 +1189,17 @@
                 // every other raster layer here already makes.
                 'sectional': L.tileLayer('/mapcache/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=sectional_vfr&STYLE=&TILEMATRIXSET=GoogleMapsCompatible&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image/png',
                                  { attribution: 'VFR Sectional Charts &copy; FAA &mdash; chart automation by capgrids.com', maxNativeZoom: 12, maxZoom: 15, minZoom: 7 }),
+                // Vector "master" base for the 'aviation' mode's low-zoom side
+                // (2026-11-22) -- a plain topo base (Gerry's choice) with the
+                // NASR/Class Airspace/Obstructions overlays auto-enabled on
+                // top of it, swapped for real 'sectional' raster at zoom 12
+                // (AVIATION_CROSSOVER_ZOOM below) -- chosen because that's
+                // where the raster's own maxNativeZoom tops out, so sectional
+                // only takes over once it has genuine extra detail to offer
+                // over the vector rendering, never before. See the zoom
+                // calibration in project_nasr_sectional_rendering_idea.
+                'master':    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
+                                 { attribution: 'Tiles &copy; Esri', maxZoom: 18 }),
                 'satellite': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
                                  { attribution: 'Tiles &copy; Esri', maxZoom: 18 }),
                 'dark':      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
@@ -1173,6 +1233,7 @@
                 filterMarkers();
                 updateLabels();
                 updateStationPlots();
+                applyAviationLayer();
                 // Reload weather data for new bounds after pan/zoom settles
                 clearTimeout(_loadTimer);
                 _loadTimer = setTimeout(loadWeatherData, 800);
@@ -1182,6 +1243,33 @@
             if (typeof initAirspaceLayers === 'function') initAirspaceLayers();
         }
 
+        // ── Aviation mode: vector "master" at low zoom, real sectional ──────
+        // raster at high zoom, auto-crossing over at AVIATION_CROSSOVER_ZOOM.
+        // See the 'master' baseLayer comment above for why zoom 12.
+        var AVIATION_CROSSOVER_ZOOM = 12;
+        var aviationModeActive = false;
+
+        function setAviationOverlays(show) {
+            ['nasrToggle', 'classBcdToggle', 'classEToggle', 'obstructionsToggle'].forEach(function(id) {
+                var el = document.getElementById(id);
+                if (el && el.checked !== show) {
+                    el.checked = show;
+                    el.dispatchEvent(new Event('change'));
+                }
+            });
+        }
+
+        function applyAviationLayer() {
+            if (!aviationModeActive) return;
+            var wantSectional = map.getZoom() >= AVIATION_CROSSOVER_ZOOM;
+            var wantKey = wantSectional ? 'sectional' : 'master';
+            if (currentLayerName === wantKey) return;  // already showing the right one
+            if (map.hasLayer(baseLayers[currentLayerName])) map.removeLayer(baseLayers[currentLayerName]);
+            baseLayers[wantKey].addTo(map);
+            currentLayerName = wantKey;
+            setAviationOverlays(!wantSectional);  // overlays on under master, off under real raster
+        }
+
         function setupControls() {
             document.getElementById('layerSelector').addEventListener('change', function(e) {
                 var newLayer = e.target.value;
@@ -1189,26 +1277,39 @@
                     Object.values(baseLayers).forEach(function(layer) {
                         if (map.hasLayer(layer)) map.removeLayer(layer);
                     });
-                    if (newLayer === 'sectional' && map.getZoom() < 7) {
-                        alert('VFR Sectional charts are only available at zoom levels showing areas less than 10 miles across.');
-                        baseLayers['street'].addTo(map);
-                        this.value = 'street';
+                    if (newLayer === 'aviation') {
+                        aviationModeActive = true;
+                        var wantSectional = map.getZoom() >= AVIATION_CROSSOVER_ZOOM;
+                        currentLayerName = wantSectional ? 'sectional' : 'master';
+                        baseLayers[currentLayerName].addTo(map);
+                        setAviationOverlays(!wantSectional);
                     } else if (baseLayers[newLayer]) {
+                        if (aviationModeActive) { aviationModeActive = false; setAviationOverlays(false); }
                         baseLayers[newLayer].addTo(map);
                         currentLayerName = newLayer;
                     } else {
+                        aviationModeActive = false;
                         baseLayers['street'].addTo(map);
                         this.value = 'street';
+                        currentLayerName = 'street';
                     }
                 } catch (error) {
+                    aviationModeActive = false;
                     baseLayers['street'].addTo(map);
                     this.value = 'street';
+                    currentLayerName = 'street';
                 }
             });
 
-            // All five airport-tier checkboxes drive filterMarkers
+            // All five airport-tier checkboxes drive filterMarkers, and (if
+            // the NASR overlay is on) also refresh its airports/heliports --
+            // see nasrAirportTier()/nasrTierVisible() for why that overlay
+            // needs the same tier filter.
             ['Military', 'Hubs', 'Regional', 'Local', 'Small'].forEach(function(type) {
-                document.getElementById('show' + type).addEventListener('change', filterMarkers);
+                document.getElementById('show' + type).addEventListener('change', function() {
+                    filterMarkers();
+                    if (document.getElementById('nasrToggle').checked && typeof loadNasr === 'function') loadNasr();
+                });
             });
 
             document.getElementById('stationPlotToggle').addEventListener('change', updateStationPlots);
@@ -2019,12 +2120,16 @@
         var suaRestrictLayer = null; // Restricted (R-)
         var suaMoaLayer = null;      // MOA / Warning / Alert
         var mtrLayer = null;         // Military Training Routes
+        var classBcdLayer = null;    // Class B/C/D (controlled airport airspace)
+        var classELayer = null;      // Class E (surface)
 
         // GeoJSON data cache (loaded once, toggled on/off)
         var _suaData = null;
         var _mtrData = null;
+        var _classAirspaceData = null;
         var _suaLoading = false;
         var _mtrLoading = false;
+        var _classAirspaceLoading = false;
 
         // ── Styling ──────────────────────────────────────────────────────────
         function suaStyle(feature) {
@@ -2061,6 +2166,21 @@
         // Wider invisible hit buffer layer for MTR click tolerance
         function mtrHitStyle() {
             return { color: 'transparent', weight: 12, opacity: 0, fillOpacity: 0 };
+        }
+
+        function classAirspaceStyle(feature) {
+            var cls = (feature.properties.CLASS || '').toUpperCase();
+            if (cls === 'B') {
+                return { color: '#0046dc', weight: 2, opacity: 0.9, fillColor: '#0046dc', fillOpacity: 0.06 };
+            } else if (cls === 'C') {
+                return { color: '#0046dc', weight: 1.5, opacity: 0.8, fillColor: '#0046dc', fillOpacity: 0.05,
+                         dashArray: '8,4' };
+            } else if (cls === 'D') {
+                return { color: '#0046dc', weight: 1, opacity: 0.7, fillColor: '#0046dc', fillOpacity: 0.04,
+                         dashArray: '4,4' };
+            }
+            // E (surface) and anything else
+            return { color: '#787800', weight: 1, opacity: 0.5, fillOpacity: 0, dashArray: '2,4' };
         }
 
         // ── Popup content ────────────────────────────────────────────────────
@@ -2137,6 +2257,22 @@
                    '</div>';
         }
 
+        function classAirspacePopup(feature) {
+            var p = feature.properties;
+            var cls = (p.CLASS || '').toUpperCase();
+            var name = p.NAME || p.IDENT || '';
+            var floor = (p.LOWER_CODE === 'SFC') ? 'SFC' :
+                        (p.LOWER_VAL !== null && p.LOWER_VAL !== undefined) ? p.LOWER_VAL + ' ' + (p.LOWER_UOM || 'ft') : '?';
+            var ceiling = (p.UPPER_VAL !== null && p.UPPER_VAL !== undefined) ? p.UPPER_VAL + ' ' + (p.UPPER_UOM || 'ft') : '?';
+            var hours = p.WKHR_CODE === 'H24' ? 'Continuous' : (p.WKHR_RMK || 'See chart/NOTAMs');
+            return '<div style="font-size:13px;min-width:180px;">' +
+                   '<strong>' + name + '</strong><br>' +
+                   '<span style="color:#555;">Class ' + cls + '</span><br>' +
+                   'Alt: ' + floor + ' – ' + ceiling + '<br>' +
+                   '<span style="font-size:11px;">⏱ ' + hours + '</span>' +
+                   '</div>';
+        }
+
         // ── Layer builders ───────────────────────────────────────────────────
         function buildSuaLayers(data) {
             var prohibFeatures = { type:'FeatureCollection', features:[] };
@@ -2177,6 +2313,28 @@
             });
             // Group both so they add/remove together
             mtrLayer = L.layerGroup([mtrLayer, mtrHitLayer]);
+        }
+
+        function buildClassAirspaceLayers(data) {
+            var bcdFeatures = { type:'FeatureCollection', features:[] };
+            var eFeatures = { type:'FeatureCollection', features:[] };
+
+            data.features.forEach(function(f) {
+                var cls = (f.properties.CLASS || '').toUpperCase();
+                if (cls === 'B' || cls === 'C' || cls === 'D') bcdFeatures.features.push(f);
+                else if (cls === 'E') eFeatures.features.push(f);
+                // A/Other/G/unclassified dropped for now -- negligible count (11/5/2
+                // of 6041), not worth a third toggle category
+            });
+
+            classBcdLayer = L.geoJSON(bcdFeatures, {
+                style: classAirspaceStyle,
+                onEachFeature: function(f, l) { l.bindPopup(classAirspacePopup(f)); }
+            });
+            classELayer = L.geoJSON(eFeatures, {
+                style: classAirspaceStyle,
+                onEachFeature: function(f, l) { l.bindPopup(classAirspacePopup(f)); }
+            });
         }
 
         // ── Load and toggle helpers ──────────────────────────────────────────
@@ -2228,6 +2386,29 @@
                     _mtrLoading = false;
                     setAirspaceStatus('MTR unavailable');
                     console.error('Airspace MTR load error:', e);
+                });
+        }
+
+        function loadClassAirspace(callback) {
+            if (_classAirspaceData) { callback(_classAirspaceData); return; }
+            if (_classAirspaceLoading) { setTimeout(function(){loadClassAirspace(callback);}, 500); return; }
+            _classAirspaceLoading = true;
+            setAirspaceStatus('Loading Class Airspace…');
+            fetch('/CAP_WxCOP/static/geo/class_airspace.geojson')
+                .then(function(r) {
+                    if (!r.ok) throw new Error('Class Airspace fetch failed: ' + r.status);
+                    return r.json();
+                })
+                .then(function(data) {
+                    _classAirspaceData = data;
+                    _classAirspaceLoading = false;
+                    setAirspaceStatus('');
+                    callback(data);
+                })
+                .catch(function(e) {
+                    _classAirspaceLoading = false;
+                    setAirspaceStatus('Class Airspace unavailable');
+                    console.error('Airspace Class load error:', e);
                 });
         }
 
@@ -2284,6 +2465,28 @@
                 if (mtrLayer && map.hasLayer(mtrLayer)) map.removeLayer(mtrLayer);
             }
         }); // end mtrToggle
+
+        document.getElementById('classBcdToggle').addEventListener('change', function() {
+            if (this.checked) {
+                loadClassAirspace(function(data) {
+                    if (!classBcdLayer) buildClassAirspaceLayers(data);
+                    toggleSuaLayer(classBcdLayer, true);
+                });
+            } else {
+                toggleSuaLayer(classBcdLayer, false);
+            }
+        });
+
+        document.getElementById('classEToggle').addEventListener('change', function() {
+            if (this.checked) {
+                loadClassAirspace(function(data) {
+                    if (!classELayer) buildClassAirspaceLayers(data);
+                    toggleSuaLayer(classELayer, true);
+                });
+            } else {
+                toggleSuaLayer(classELayer, false);
+            }
+        });
         } // end initAirspaceLayers
         window.initAirspaceLayers = initAirspaceLayers;
 
@@ -2298,6 +2501,7 @@
             var NASR_AIRPORTS_API = '/CAP_WxCOP/api/nasr/airports';
             var NASR_NAVAIDS_API  = '/CAP_WxCOP/api/nasr/navaids';
             var NASR_FIXES_API    = '/CAP_WxCOP/api/nasr/fixes';
+            var NASR_OBSTRUCTIONS_API = '/CAP_WxCOP/api/nasr/obstructions';
             function getMap() { return window._capMap; }
 
             // ── MRMS Local Loop Player ───────────────────────────────────────
@@ -2629,8 +2833,14 @@
             // keep zooming in and still see real detail. Fixes alone are 70k
             // nationwide, so they're only fetched/drawn at zoom>=10 (same
             // convention as NIDS' z>9 gate) to avoid clutter and payload size;
-            // navaids (~1.6k) and airports/runways (~19k/23k) are sparse enough
-            // to show at any zoom this toggle is reasonably used at.
+            // navaids (~1.6k) are sparse enough to show at any zoom this
+            // toggle is reasonably used at. Airports/heliports (~19k) are
+            // NOT sparse enough for that -- found 2026-11-23 they swamped
+            // the CONUS view with no filtering at all. Now reuse the same
+            // tier/zoom/checkbox scheme as the primary METAR marker layer
+            // (nasrAirportTier()/nasrTierVisible(), see the comment on
+            // nasrAirportTier above for why heliports/unclassified strips
+            // default to "small" rather than runwayTier()'s "regional").
             var nasrLayer = null, nasrMoveTimer = null;
             var NASR_FIX_MIN_ZOOM = 10;
 
@@ -2665,7 +2875,11 @@
                 fetch(NASR_AIRPORTS_API+'?bounds='+bp)
                     .then(function(r){return r.json();})
                     .then(function(data){
+                        var shown = 0;
                         (data.airports||[]).forEach(function(a){
+                            var tier = nasrAirportTier(a);
+                            if (!nasrTierVisible(tier, zoom)) return;
+                            shown++;
                             var isHeli = a.site_type === 'H';
                             var col = isHeli ? '#e65100' : '#2e7d32';
                             L.circleMarker([a.lat, a.lon], {
@@ -2683,7 +2897,7 @@
                                   .addTo(nasrLayer);
                             });
                         });
-                        counts.airports = data.count||0;
+                        counts.airports = shown;
                         done();
                     }).catch(function(e){ console.warn('NASR airports load failed', e); done(); });
 
@@ -2719,6 +2933,10 @@
                     statusEl.textContent = 'zoom in to load fixes/navaids/runways...';
                 }
             }
+            // Exposed so the tier checkboxes' listener (a different IIFE,
+            // in setupControls) can refresh this overlay too -- same
+            // pattern as window.initAirspaceLayers above.
+            window.loadNasr = loadNasr;
 
             document.getElementById('nasrToggle').addEventListener('change', function(){
                 var m = getMap();
@@ -2733,6 +2951,75 @@
             function nasrOnMoveEnd() {
                 clearTimeout(nasrMoveTimer);
                 nasrMoveTimer = setTimeout(loadNasr, 400);
+            }
+
+            // ── Obstructions (FAA Digital Obstacle File) ────────────────────
+            // 656k nationwide, denser than even fixes -- gated the same way
+            // (zoom>=10) plus the API's own min_agl_ft=200 default server-side
+            // filter (see nasr_api.py get_obstructions docstring).
+            var obstructionsLayer = null, obstructionsMoveTimer = null;
+            var OBSTRUCTIONS_MIN_ZOOM = 10;
+
+            function loadObstructions() {
+                var m = getMap(); if (!m) return;
+                var statusEl = document.getElementById('obstructionsStatus');
+                var zoom = m.getZoom();
+                if (zoom < OBSTRUCTIONS_MIN_ZOOM) {
+                    if (obstructionsLayer) m.removeLayer(obstructionsLayer);
+                    if (statusEl) statusEl.textContent = 'zoom in to load obstructions...';
+                    return;
+                }
+                if (obstructionsLayer) m.removeLayer(obstructionsLayer);
+                obstructionsLayer = L.layerGroup();
+                var bp = nasrBoundsParam(m);
+                fetch(NASR_OBSTRUCTIONS_API+'?bounds='+bp)
+                    .then(function(r){return r.json();})
+                    .then(function(data){
+                        (data.obstructions||[]).forEach(function(o){
+                            var agl = o.agl_ft || 0;
+                            // Triangle glyph (2026-11-23, Gerry's preference) --
+                            // matches the real FAA sectional symbol for
+                            // obstructions, rather than a generic circle.
+                            // Pure-CSS triangle via clip-path, same technique
+                            // already used for GLM lightning/VTEC stoplight
+                            // glyphs elsewhere on this page.
+                            var w = Math.max(8, Math.min(20, agl/60));
+                            var h = w * 1.1;
+                            var isLit = o.lighting && o.lighting !== 'N';
+                            var color = isLit ? '#ff3030' : '#a00000';
+                            L.marker([o.lat, o.lon], {
+                                icon: L.divIcon({
+                                    className: '',
+                                    html: '<div style="width:'+w+'px;height:'+h+'px;background:'+color+
+                                          ';opacity:0.85;clip-path:polygon(50% 0%,100% 100%,0% 100%);"></div>',
+                                    iconSize: [w, h],
+                                    iconAnchor: [w/2, h]
+                                })
+                            }).bindTooltip((o.obstacle_type||'Obstruction').trim()+' — '+agl+'ft AGL'+
+                                           (isLit ? ' (lighted)' : ''))
+                              .addTo(obstructionsLayer);
+                        });
+                        if (document.getElementById('obstructionsToggle').checked) {
+                            obstructionsLayer.addTo(m);
+                            if (statusEl) statusEl.textContent = (data.count||0)+' obstructions ≥200ft AGL'+
+                                (data.count >= 2000 ? ' (capped, zoom in for more)' : '');
+                        }
+                    }).catch(function(e){ console.warn('Obstructions load failed', e); });
+            }
+
+            document.getElementById('obstructionsToggle').addEventListener('change', function(){
+                var m = getMap();
+                if (this.checked) {
+                    loadObstructions();
+                    if (m) m.on('moveend', obstructionsOnMoveEnd);
+                } else {
+                    if (m) { m.off('moveend', obstructionsOnMoveEnd); if (obstructionsLayer) m.removeLayer(obstructionsLayer); }
+                    var statusEl = document.getElementById('obstructionsStatus'); if (statusEl) statusEl.textContent = '';
+                }
+            });
+            function obstructionsOnMoveEnd() {
+                clearTimeout(obstructionsMoveTimer);
+                obstructionsMoveTimer = setTimeout(loadObstructions, 400);
             }
 
             // ── NWS WWA Watches/Warnings ──────────────────────────────────

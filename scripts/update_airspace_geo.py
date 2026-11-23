@@ -17,13 +17,23 @@ Datasets:
         IR (Instrument), VR (Visual), SR (Slow) route segments
         Covers CONUS, Puerto Rico, Virgin Islands
 
+  CLASS_AIRSPACE - Controlled airspace boundaries (Class B/C/D/E surface)
+        FAA ADDS item: c6a62360338e408cb1512366ad61559e_0
+        Added 2026-11-22 for the vector "master" low-zoom map layer
+        (real sectionals only kick in at 7.5/5 nm; see
+        project_nasr_sectional_rendering_idea memory) -- this was the
+        one controlled-airspace gap SUA/MTR don't cover (those are
+        special-use, not the standard Class B/C/D/E rings).
+        ~6,000 records. Covers CONUS, Puerto Rico, Virgin Islands.
+
 Cron (r815, run as www-data or root):
   30 3 * * 0  /var/www/cap_winds_app/scripts/update_airspace_geo.py \
               >> /var/log/airspace_geo_update.log 2>&1
 
 Output:
-  /var/www/cap_winds_app/static/geo/sua.geojson   (~500 KB)
-  /var/www/cap_winds_app/static/geo/mtr.geojson   (~2 MB)
+  /var/www/cap_winds_app/static/geo/sua.geojson             (~500 KB)
+  /var/www/cap_winds_app/static/geo/mtr.geojson              (~2 MB)
+  /var/www/cap_winds_app/static/geo/class_airspace.geojson  (~1 MB)
 
 Note: FAA ADDS uses hub.arcgis.com since June 2024 (Esri migration).
       Old opendata.arcgis.com URLs will redirect but may be slower.
@@ -35,6 +45,7 @@ import json
 import time
 import logging
 import requests
+import subprocess
 import tempfile
 import shutil
 from datetime import datetime
@@ -69,6 +80,24 @@ DATASETS = {
         'output': 'mtr.geojson',
         'description': 'Military Training Routes (IR/VR/SR segments)',
     },
+    'class_airspace': {
+        'url': ('https://hub.arcgis.com/api/v3/datasets/'
+                'c6a62360338e408cb1512366ad61559e_0/'
+                'downloads/data?format=geojson&spatialRefId=4326&where=1=1'),
+        'output': 'class_airspace.geojson',
+        'description': 'Controlled Airspace Boundaries (Class B/C/D/E)',
+        # Esri's raw export densifies circular boundaries (Mode C veils,
+        # Class B/C/D rings) into thousands of straight-line vertices per
+        # feature, each a 3D coordinate (useless Z=0.0) at ~16 significant
+        # digits -- found 2026-11-22 to balloon this to 542MB for only
+        # 6,041 features (vs. 32MB for SUA's 1,545). ogr2ogr -dim XY drops
+        # the Z, COORDINATE_PRECISION rounds to ~11cm (plenty for airspace
+        # display), and -simplify at ~5.5m tolerance cuts a 3,143-vertex
+        # ring down to 265 with no visible change at any zoom this map
+        # uses. Result: 28.5MB, same ballpark as SUA. SUA/MTR don't need
+        # this (no comparable circular-boundary vertex explosion).
+        'simplify_tolerance': 0.00005,
+    },
 }
 
 TIMEOUT_SECS  = 300   # 5 minutes per download (files can be large)
@@ -79,7 +108,28 @@ RETRY_DELAY   = 30    # seconds between retries
 # Download helpers
 # ---------------------------------------------------------------------------
 
-def download_geojson(name, url, output_path, description):
+def simplify_geojson(tmp_path, output_path, tolerance):
+    """
+    Run the downloaded GeoJSON through ogr2ogr to drop the Z dimension,
+    round coordinate precision, and simplify vertex-dense geometry (see
+    the 'simplify_tolerance' comment on the class_airspace dataset config
+    for why this exists). Writes to a second temp file in the same
+    directory as output_path, so the caller's atomic rename still applies.
+    Returns the new temp path, or raises on failure.
+    """
+    simplified_fd, simplified_path = tempfile.mkstemp(
+        dir=output_path.parent, suffix='.geojson.simplified.tmp')
+    os.close(simplified_fd)
+    os.unlink(simplified_path)  # ogr2ogr must create this itself
+    subprocess.run([
+        'ogr2ogr', '-f', 'GeoJSON', simplified_path, tmp_path,
+        '-dim', 'XY', '-lco', 'COORDINATE_PRECISION=6',
+        '-simplify', str(tolerance),
+    ], check=True, capture_output=True, text=True)
+    return simplified_path
+
+
+def download_geojson(name, url, output_path, description, simplify_tolerance=None):
     """
     Download a GeoJSON file from the FAA AIS hub with retry logic.
     Writes to a temp file first, then atomically moves to output_path
@@ -112,8 +162,15 @@ def download_geojson(name, url, output_path, description):
             if feature_count == 0:
                 raise ValueError(f"GeoJSON has 0 features — likely a bad response")
 
+            final_path = tmp_path
+            if simplify_tolerance:
+                log.info(f"[{name}] Simplifying ({bytes_written/1024/1024:.0f} MB raw)...")
+                final_path = simplify_geojson(tmp_path, output_path, simplify_tolerance)
+                os.unlink(tmp_path)
+                bytes_written = os.path.getsize(final_path)
+
             # Atomic replace
-            shutil.move(tmp_path, output_path)
+            shutil.move(final_path, output_path)
             log.info(f"[{name}] OK: {feature_count} features, "
                      f"{bytes_written/1024:.0f} KB in {elapsed:.1f}s -> {output_path}")
             return True
@@ -122,6 +179,8 @@ def download_geojson(name, url, output_path, description):
             log.error(f"[{name}] Attempt {attempt}/{RETRY_LIMIT} failed: {e}")
             if 'tmp_path' in locals() and os.path.exists(tmp_path):
                 os.unlink(tmp_path)
+            if 'final_path' in locals() and final_path != tmp_path and os.path.exists(final_path):
+                os.unlink(final_path)
             if attempt < RETRY_LIMIT:
                 log.info(f"[{name}] Retrying in {RETRY_DELAY}s...")
                 time.sleep(RETRY_DELAY)
@@ -174,7 +233,8 @@ def main():
     for name, cfg in DATASETS.items():
         output_path = OUTPUT_DIR / cfg['output']
         results[name] = download_geojson(
-            name, cfg['url'], output_path, cfg['description']
+            name, cfg['url'], output_path, cfg['description'],
+            simplify_tolerance=cfg.get('simplify_tolerance'),
         )
 
     write_metadata(OUTPUT_DIR, results)

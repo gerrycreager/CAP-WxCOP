@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Keeps observations.airports.has_reporting in sync with reality for the
-general (non-military) airport population.
+Keeps observations.airports.has_reporting in sync with reality for every
+airport EXCEPT kq_admin.py's own CAP custom/temporary stations.
 
 Root cause this fixes (found 2026-11-14): has_reporting defaults to
 false on every row and was only ever set true by kq_admin.py's KQ
@@ -16,6 +16,20 @@ logic (radar_api.py's reporting-only layer requires it true outright;
 airport_tiers_endpoint.py's Tier-2 "Major Hub" classification requires
 it true), so this wasn't cosmetic -- it silently hid thousands of
 actively-reporting stations from the map.
+
+UPDATE 2026-11-23: the original fix here excluded every is_military=true
+row, on the mistaken assumption that ALL of them came from kq_admin.py's
+sync (and were therefore already being kept correct by it). Wrong --
+is_military=true is also set on ~hundreds of GENUINE military airfields
+from the original bulk import's name-pattern match (e.g. KAFF, USAF
+Academy Davis Airfield), which kq_admin.py never touches at all (it only
+ever writes rows that are in observations.custom_stations). Found live:
+KAFF has a working AWOS with METAR rows landing every ~20min, yet
+has_reporting sat permanently false because this script skipped it --
+same bug as the 2026-11-14 fix, just for real military bases instead of
+civilian ones (155 confirmed affected). Fixed by excluding specifically
+rows present in observations.custom_stations (what kq_admin.py actually
+owns), not the whole is_military population.
 
 Fix: drive the flag from observations.metar activity instead of a
 static import value. A station counts as reporting if it has ANY METAR
@@ -50,7 +64,7 @@ UPDATE_SQL = """
         WHERE m.station_id = a.station_id
           AND m.observation_time > now() - interval '%s days'
     )
-    WHERE a.is_military IS NOT TRUE
+    WHERE a.station_id NOT IN (SELECT station_id FROM observations.custom_stations)
       AND a.has_reporting IS DISTINCT FROM EXISTS (
         SELECT 1 FROM observations.metar m
         WHERE m.station_id = a.station_id

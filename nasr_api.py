@@ -46,7 +46,8 @@ def get_airports():
         cur = conn.cursor()
         cur.execute("""
             SELECT a.site_no, a.site_type_code, a.arpt_id, a.icao_id, a.arpt_name,
-                   ST_X(a.geom) AS lon, ST_Y(a.geom) AS lat, a.elevation_ft
+                   ST_X(a.geom) AS lon, ST_Y(a.geom) AS lat, a.elevation_ft,
+                   a.ownership_code
             FROM nasr.airports a
             WHERE a.geom && ST_MakeEnvelope(%s, %s, %s, %s, 4326)
               AND a.site_type_code = ANY(%s)
@@ -58,7 +59,7 @@ def get_airports():
             airports.append({
                 'site_no': row[0], 'site_type': row[1], 'arpt_id': row[2],
                 'icao_id': row[3], 'name': row[4], 'lon': row[5], 'lat': row[6],
-                'elevation_ft': row[7], 'runways': [],
+                'elevation_ft': row[7], 'ownership': row[8], 'runways': [],
             })
         by_site = {a['site_no']: a for a in airports}
 
@@ -109,6 +110,42 @@ def get_navaids():
         } for r in cur.fetchall()]
         cur.close()
         return jsonify({'count': len(navaids), 'navaids': navaids})
+    finally:
+        conn.close()
+
+
+@nasr_api.route('/obstructions')
+def get_obstructions():
+    """FAA Digital Obstacle File (656k nationwide as of the 2026-09-27
+    cycle; see scripts/ingest_dof.py). Much denser than fixes, so this
+    defaults min_agl_ft to 200ft -- the standard FAA sectional charting
+    threshold -- rather than returning everything; pass min_agl_ft=0 to
+    get the full table for a bbox. Same limit-cap pattern as /fixes."""
+    b = _parse_bounds()
+    if not b:
+        return jsonify({'error': 'bounds parameter required (west,south,east,north)'}), 400
+    west, south, east, north = b
+    min_agl_ft = int(request.args.get('min_agl_ft', 200))
+    limit = min(int(request.args.get('limit', 2000)), 5000)
+
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT oas_number, ST_X(geom), ST_Y(geom), obstacle_type,
+                   agl_ft, amsl_ft, lighting
+            FROM nasr.obstructions
+            WHERE geom && ST_MakeEnvelope(%s, %s, %s, %s, 4326)
+              AND (agl_ft IS NULL OR agl_ft >= %s)
+            ORDER BY agl_ft DESC NULLS LAST
+            LIMIT %s
+        """, (west, south, east, north, min_agl_ft, limit))
+        obstructions = [{
+            'oas_number': r[0], 'lon': r[1], 'lat': r[2], 'obstacle_type': r[3],
+            'agl_ft': r[4], 'amsl_ft': r[5], 'lighting': r[6],
+        } for r in cur.fetchall()]
+        cur.close()
+        return jsonify({'count': len(obstructions), 'obstructions': obstructions})
     finally:
         conn.close()
 

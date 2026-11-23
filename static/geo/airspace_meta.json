@@ -1,16 +1,22 @@
 {
-  "updated": "2026-03-27T04:23:09Z",
+  "updated": "2026-11-22T21:32:12Z",
   "datasets": {
     "sua": {
-      "features": 1539,
-      "size_kb": 28406.5,
-      "last_download": "2026-03-27T04:23:10Z",
+      "features": 1545,
+      "size_kb": 32873.8,
+      "last_download": "2026-11-22T21:32:13Z",
       "success": true
     },
     "mtr": {
-      "features": 3658,
-      "size_kb": 2212.1,
-      "last_download": "2026-03-27T04:23:10Z",
+      "features": 4194,
+      "size_kb": 2266.0,
+      "last_download": "2026-11-22T21:32:14Z",
+      "success": true
+    },
+    "class_airspace": {
+      "features": 6041,
+      "size_kb": 27859.4,
+      "last_download": "2026-11-22T21:32:15Z",
       "success": true
     }
   }
