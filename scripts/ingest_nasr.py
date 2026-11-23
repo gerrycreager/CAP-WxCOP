@@ -128,15 +128,15 @@ def load_navaids(conn, csv_dir):
             continue
         values.append((
             r['NAV_ID'].strip(), r['NAV_TYPE'].strip(), nz(r['NAME']), nz(r['STATE_CODE']),
-            lon, lat, nz(r['FREQ']), nz(r['CHAN']), nf(r['ELEV']),
+            lon, lat, nz(r['FREQ']), nz(r['CHAN']), nf(r['ELEV']), nz(r.get('ALT_CODE')),
         ))
     with conn.cursor() as cur:
         cur.execute("TRUNCATE nasr.navaids")
         execute_values(cur, """
-            INSERT INTO nasr.navaids (nav_id, nav_type, name, state_code, geom, freq, chan, elevation_ft)
+            INSERT INTO nasr.navaids (nav_id, nav_type, name, state_code, geom, freq, chan, elevation_ft, alt_code)
             VALUES %s ON CONFLICT (nav_id, nav_type) DO NOTHING
         """, values, template="""(
-            %s, %s, %s, %s, ST_SetSRID(ST_MakePoint(%s, %s), 4326), %s, %s, %s
+            %s, %s, %s, %s, ST_SetSRID(ST_MakePoint(%s, %s), 4326), %s, %s, %s, %s
         )""", page_size=1000)
     conn.commit()
     log.info('loaded %d navaids', len(values))

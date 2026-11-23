@@ -1250,7 +1250,12 @@
         var aviationModeActive = false;
 
         function setAviationOverlays(show) {
-            ['nasrToggle', 'classBcdToggle', 'classEToggle', 'obstructionsToggle'].forEach(function(id) {
+            // NavAids deliberately excluded (per Gerry, 2026-11-23): "NAVAIDS does
+            // not need to be default checked 'On' on any of the maps" -- it was the
+            // single biggest contributor to the full-CONUS density complaint (1.5k+
+            // unfiltered markers), so unlike Class B/C/D/E and Obstructions, it now
+            // stays off unless the user explicitly checks it, even in aviation mode.
+            ['classBcdToggle', 'classEToggle', 'obstructionsToggle'].forEach(function(id) {
                 var el = document.getElementById(id);
                 if (el && el.checked !== show) {
                     el.checked = show;
@@ -2849,6 +2854,27 @@
                 'NDB':'#8e24aa','NDB/DME':'#8e24aa','MARINE NDB':'#8e24aa','DME':'#555','VOT':'#555','FAN MARKER':'#999'
             };
 
+            // NavAid zoom tiering (per Gerry, 2026-11-23): "Prioritize HIGH VORTAC on
+            // 0-3 and then start bringing in more, including the low altitude NAVAIDs
+            // at higher zoom levels" -- found live that "navaids are sparse enough to
+            // show at any zoom" (comment above) wasn't true once seen at the full-CONUS
+            // startup view (1.5k+ unfiltered markers). Driven by FAA's own ALT_CODE
+            // field on nasr.navaids (backfilled from NAV_BASE.csv, same day -- see
+            // [[project_nasr_schema_table_ownership]]): VH/H = high altitude, VL/L =
+            // low altitude, T = terminal; blank for navaid types with no altitude
+            // structure of their own (NDB/NDB-DME/DME/VOT/FAN MARKER/MARINE NDB),
+            // which land in the lowest, most-numerous tier alongside Terminal-class
+            // VOR/VORTAC/VOR-DME and TACAN.
+            function navaidMinZoom(navType, altCode) {
+                var alt = (altCode || '').toUpperCase();
+                var isVorFamily = navType === 'VORTAC' || navType === 'VOR/DME' || navType === 'VOR';
+                if (navType === 'VORTAC' && (alt === 'H' || alt === 'VH')) return 0;
+                if (isVorFamily && (alt === 'H' || alt === 'VH')) return 3;
+                if (isVorFamily && (alt === 'L' || alt === 'VL')) return 6;
+                if ((isVorFamily && alt === 'T') || navType === 'TACAN') return 8;
+                return NASR_FIX_MIN_ZOOM;
+            }
+
             function nasrBoundsParam(m) {
                 var b = m.getBounds();
                 return b.getWest()+','+b.getSouth()+','+b.getEast()+','+b.getNorth();
@@ -2861,14 +2887,16 @@
                 nasrLayer = L.layerGroup();
                 var bp = nasrBoundsParam(m);
                 var zoom = m.getZoom();
-                var pending = 2, counts = {airports:0, navaids:0, fixes:0};
+                var pending = 2, counts = {airports:0, navaids:0, navaidsTotal:0, fixes:0};
 
                 function done() {
                     pending--;
                     if (pending === 0 && document.getElementById('nasrToggle').checked) {
                         nasrLayer.addTo(m);
+                        var navaidsLabel = counts.navaids < counts.navaidsTotal
+                            ? counts.navaids+'/'+counts.navaidsTotal+' navaids' : counts.navaids+' navaids';
                         if (statusEl) statusEl.textContent = counts.airports+' airfields/heliports · '+
-                            counts.navaids+' navaids'+(zoom>=NASR_FIX_MIN_ZOOM ? ' · '+counts.fixes+' fixes' : ' · zoom in for fixes');
+                            navaidsLabel+(zoom>=NASR_FIX_MIN_ZOOM ? ' · '+counts.fixes+' fixes' : ' · zoom in for fixes');
                     }
                 }
 
@@ -2904,14 +2932,18 @@
                 fetch(NASR_NAVAIDS_API+'?bounds='+bp)
                     .then(function(r){return r.json();})
                     .then(function(data){
+                        var shown = 0;
                         (data.navaids||[]).forEach(function(n){
+                            if (navaidMinZoom(n.nav_type, n.alt_code) > zoom) return;
+                            shown++;
                             var col = NAVAID_COLOR[n.nav_type] || '#555';
                             L.circleMarker([n.lat, n.lon], {
                                 radius: 6, color: col, weight: 2, fillColor: col, fillOpacity: 0.25
                             }).bindTooltip(n.nav_id+' — '+n.nav_type+(n.name?' ('+n.name+')':'')+(n.freq?' '+n.freq:''))
                               .addTo(nasrLayer);
                         });
-                        counts.navaids = data.count||0;
+                        counts.navaids = shown;
+                        counts.navaidsTotal = data.count||0;
                         done();
                     }).catch(function(e){ console.warn('NASR navaids load failed', e); done(); });
 

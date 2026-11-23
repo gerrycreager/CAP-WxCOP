@@ -100,13 +100,13 @@ def get_navaids():
     try:
         cur = conn.cursor()
         cur.execute("""
-            SELECT nav_id, nav_type, name, ST_X(geom), ST_Y(geom), freq, chan
+            SELECT nav_id, nav_type, name, ST_X(geom), ST_Y(geom), freq, chan, alt_code
             FROM nasr.navaids
             WHERE geom && ST_MakeEnvelope(%s, %s, %s, %s, 4326)
         """, (west, south, east, north))
         navaids = [{
             'nav_id': r[0], 'nav_type': r[1], 'name': r[2],
-            'lon': r[3], 'lat': r[4], 'freq': r[5], 'chan': r[6],
+            'lon': r[3], 'lat': r[4], 'freq': r[5], 'chan': r[6], 'alt_code': r[7],
         } for r in cur.fetchall()]
         cur.close()
         return jsonify({'count': len(navaids), 'navaids': navaids})
