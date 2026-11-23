@@ -33,6 +33,39 @@ side (most charts only need the west trim; the heuristic doesn't force
 a crop where there's nothing to remove). Validated visually against
 charts with very different backgrounds (tan terrain, mountainous AK,
 blue-ocean Caribbean) before being applied pipeline-wide.
+
+UPDATE 2026-11-23: the above was still leaving a buffer short of the
+true neatline on some charts, not the neatline itself (Gerry, live on
+AvTrack: "poorly clipped sectionals because you're not cropping on the
+neat line but on its buffer"). Root cause, confirmed visually on the
+Chicago chart: each chart's margin usually contains small, LOCALIZED
+graphics near its corners (an inset scale bar, a locator index map, a
+date/QR box) that are dense/non-background enough to flip a single
+row's or column's AGGREGATE background fraction below threshold well
+before the real chart body starts -- a one-off, pixel-exact artifact
+of mixing 2-D content into a 1-D row/column scan, not a tuning
+mistake. (A from-the-metadata shortcut was also tried and rejected:
+each chart's own .htm "Bounding_Coordinates" turned out to describe
+the FULL raster's geographic extent, margin included, not the inner
+neatline -- confirmed by gdalwarp'ing straight to that bbox and still
+seeing the whole legend panel.) Two targeted fixes, not a rewrite:
+
+1. SAFETY_PAD_FRAC -- after the scan finds a boundary, push it further
+   in by a small fraction of that dimension. This is deliberately a
+   blunt instrument: it sacrifices a thin sliver of real edge content
+   to guarantee no corner artifact survives, rather than trying to
+   model every possible small margin graphic. Confirmed cheap: FAA
+   sectionals overlap their neighbors generously by design (checked
+   Chicago's west edge against Omaha's east edge via their published
+   Bounding_Coordinates -- padding this much still leaves roughly a
+   quarter-degree of real overlap, so the mosaic has no gap).
+2. A relaxed-threshold fallback ladder for the opposite failure (seen
+   on Lake_Huron, which detected NO margin on any edge and fell back
+   to the fully-uncropped source, legend and all): pale/low-contrast
+   terrain near the legend can keep a column's background fraction
+   hovering right at the threshold long enough that the strict scan
+   never confirms. Retried at progressively looser thresholds instead
+   of giving up outright.
 """
 import logging
 import os
@@ -50,6 +83,19 @@ WINDOW = 40
 BG_THRESHOLD = 0.25
 TAIL_LEN = 300
 MAX_SEARCH_FRACTION = 0.45
+# Extra crop pushed past the detected boundary, as a fraction of that edge's
+# full dimension -- swallows small corner artifacts the scan's 1-D view
+# can't see coming (see module docstring, 2026-11-23 update).
+SAFETY_PAD_FRAC = 0.04
+# Fallback ladder when the strict (WINDOW, BG_THRESHOLD, TAIL_LEN) scan finds
+# nothing at all on an edge -- each tuple is (bg_threshold, window, tail_len),
+# tried in order until one finds a boundary.
+FALLBACK_LADDER = [
+    (0.30, 30, 250),
+    (0.35, 25, 200),
+    (0.40, 20, 150),
+    (0.45, 15, 120),
+]
 
 logging.basicConfig(
     level=logging.INFO,
@@ -59,17 +105,33 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 
-def _find_boundary(bg_frac):
-    """Scans an 1-D background-fraction array from index 0 inward for
-    where a sustained low-background (real chart content) run begins.
-    Returns an offset from index 0, or None if nothing confident found."""
+def _find_boundary_at(bg_frac, bg_threshold, window, tail_len):
     n = len(bg_frac)
-    limit = int(n * MAX_SEARCH_FRACTION) - WINDOW
+    limit = int(n * MAX_SEARCH_FRACTION) - window
     for x in range(0, max(limit, 0)):
-        if bg_frac[x:x + WINDOW].mean() < BG_THRESHOLD:
-            tail = bg_frac[x:min(x + TAIL_LEN, n)]
-            if tail.mean() < BG_THRESHOLD + 0.1:
+        if bg_frac[x:x + window].mean() < bg_threshold:
+            tail = bg_frac[x:min(x + tail_len, n)]
+            if tail.mean() < bg_threshold + 0.1:
                 return x
+    return None
+
+
+def _find_boundary(bg_frac):
+    """Scans a 1-D background-fraction array from index 0 inward for
+    where a sustained low-background (real chart content) run begins,
+    at the strict default threshold first, then progressively looser
+    ones (FALLBACK_LADDER) if that finds nothing -- a chart with pale,
+    low-contrast terrain near its margin (e.g. Lake_Huron) can otherwise
+    never confirm a boundary at all and fall back to fully uncropped.
+    Returns an offset from index 0, or None if nothing found even at
+    the loosest setting."""
+    boundary = _find_boundary_at(bg_frac, BG_THRESHOLD, WINDOW, TAIL_LEN)
+    if boundary is not None:
+        return boundary
+    for bg_threshold, window, tail_len in FALLBACK_LADDER:
+        boundary = _find_boundary_at(bg_frac, bg_threshold, window, tail_len)
+        if boundary is not None:
+            return boundary
     return None
 
 
@@ -78,7 +140,12 @@ def detect_neatline_box(preview_path):
     pixels to trim from each of the four edges (0 if none detected on
     that side) -- the neatline is a rectangle, not just a west-edge
     legend column (per FAA: only the area inside it is accurately
-    georeferenced, see module docstring)."""
+    georeferenced, see module docstring). Each detected boundary gets
+    an extra SAFETY_PAD_FRAC pushed in past it, to swallow small
+    corner artifacts the scan can't otherwise see (see module
+    docstring, 2026-11-23 update) -- padding is skipped on a side
+    where no boundary was found at all, since there's nothing to push
+    past and padding a zero would just eat real content for no reason."""
     img = Image.open(preview_path).convert('RGB')
     arr = np.array(img).astype(int)
     h, w, _ = arr.shape
@@ -91,10 +158,15 @@ def detect_neatline_box(preview_path):
     col_bg_frac = is_bg.mean(axis=0)   # length w, for left/right scans
     row_bg_frac = is_bg.mean(axis=1)   # length h, for top/bottom scans
 
-    left = _find_boundary(col_bg_frac) or 0
-    right = _find_boundary(col_bg_frac[::-1]) or 0
-    top = _find_boundary(row_bg_frac) or 0
-    bottom = _find_boundary(row_bg_frac[::-1]) or 0
+    left = _find_boundary(col_bg_frac)
+    right = _find_boundary(col_bg_frac[::-1])
+    top = _find_boundary(row_bg_frac)
+    bottom = _find_boundary(row_bg_frac[::-1])
+
+    left = left + int(w * SAFETY_PAD_FRAC) if left else 0
+    right = right + int(w * SAFETY_PAD_FRAC) if right else 0
+    top = top + int(h * SAFETY_PAD_FRAC) if top else 0
+    bottom = bottom + int(h * SAFETY_PAD_FRAC) if bottom else 0
     return left, top, right, bottom
 
 
