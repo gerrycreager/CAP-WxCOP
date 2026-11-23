@@ -225,6 +225,18 @@
     <!-- Left sidebar -->
     <div id="sidebar">
 
+        <!-- Map layer (2026-11-23, ported from EWMC) -->
+        <div class="sb-section">
+            <div class="sb-label">Map Layer</div>
+            <select id="layerSelector" style="width:100%;font-size:12px;padding:3px;">
+                <option value="street">Street Map</option>
+                <option value="aviation">Aviation Chart (resolves to Sectional)</option>
+                <option value="satellite">Satellite</option>
+                <option value="dark">Dark Mode</option>
+                <option value="topo">Topographic</option>
+            </select>
+        </div>
+
         <!-- Operation type -->
         <div class="sb-section">
             <div class="sb-label">Operation Type</div>
@@ -295,6 +307,32 @@
             <label class="toggle-row"><input type="checkbox" id="wwaToggle"> NWS Watches/Warnings</label>
             <label class="toggle-row" style="margin-top:4px;"><input type="checkbox" id="airmetToggle"> AIRMETs/SIGMETs</label>
             <div id="hazardStatus" style="font-size:10px;color:#888;min-height:12px;margin-top:2px;"></div>
+        </div>
+
+        <!-- Aviation Detail (2026-11-23, ported from EWMC) -->
+        <div class="sb-section">
+            <div class="sb-label">Aviation Detail</div>
+            <label class="toggle-row"><input type="checkbox" id="showMilitary" checked> Military Airfields</label>
+            <label class="toggle-row"><input type="checkbox" id="showHubs" checked> Major Hubs</label>
+            <label class="toggle-row"><input type="checkbox" id="showRegional" checked> Regional Airfields (&ge;7000 ft)</label>
+            <label class="toggle-row"><input type="checkbox" id="showLocal" checked> Local Airfields (5000&ndash;6999 ft)</label>
+            <label class="toggle-row"><input type="checkbox" id="showSmall"> Small Airfields (2500&ndash;4999 ft)</label>
+            <label class="toggle-row" style="margin-top:4px;"><input type="checkbox" id="nasrToggle"> NavAids / Fixes / Runways</label>
+            <div id="nasrStatus" style="font-size:10px;color:#888;min-height:12px;"></div>
+            <label class="toggle-row"><input type="checkbox" id="obstructionsToggle"> Obstructions (Towers)</label>
+            <div id="obstructionsStatus" style="font-size:10px;color:#888;min-height:12px;"></div>
+        </div>
+
+        <!-- Airspace (2026-11-23, ported from EWMC) -->
+        <div class="sb-section">
+            <div class="sb-label">Airspace</div>
+            <label class="toggle-row"><input type="checkbox" id="classBcdToggle"> Class B/C/D (Controlled)</label>
+            <label class="toggle-row"><input type="checkbox" id="classEToggle"> Class E (Surface)</label>
+            <div id="airspaceStatus" style="font-size:10px;color:#888;min-height:12px;"></div>
+            <div style="margin-top:4px;font-size:10px;line-height:1.8;">
+                <span style="display:inline-block;width:12px;height:4px;background:rgba(0,70,220,0.9);margin-right:4px;vertical-align:middle;"></span>Class B/C/D &nbsp;
+                <span style="display:inline-block;width:12px;height:4px;background:rgba(120,120,0,0.6);margin-right:4px;vertical-align:middle;"></span>Class E
+            </div>
         </div>
 
         <!-- Wind streamlines -->
@@ -1450,15 +1488,21 @@ function initMap() {
         // capgrids.com -- see data/sectionals/README.md.
         sectional: L.tileLayer('/mapcache/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=sectional_vfr&STYLE=&TILEMATRIXSET=GoogleMapsCompatible&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image/png',
                     { attribution: 'VFR Sectional Charts &copy; FAA &mdash; chart automation by capgrids.com', maxNativeZoom: 12, maxZoom: 15, minZoom: 7 }),
+        // Vector "master" base for the 'aviation' mode's low-zoom side
+        // (2026-11-23, ported from EWMC) -- topo base with NASR/Class
+        // Airspace/Obstructions auto-enabled on top, swapped for real
+        // 'sectional' raster at zoom 12 (where its native resolution
+        // tops out). See the sidebar's layerSelector wiring below.
+        master: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
+                    { attribution: 'Tiles &copy; Esri', maxZoom: 18 }),
     };
     baseLayers.street.addTo(map);
-    L.control.layers({
-        'Street':    baseLayers.street,
-        'Satellite': baseLayers.satellite,
-        'Dark':      baseLayers.dark,
-        'Topo':      baseLayers.topo,
-        'VFR Sectional': baseLayers.sectional,
-    }, {}, { position: 'topright' }).addTo(map);
+    // Native per-layer radio control replaced 2026-11-23 by the sidebar's
+    // #layerSelector dropdown (see the Aviation Mode script block below) --
+    // needed so the 'aviation' mode's automatic master<->sectional zoom
+    // crossover has sole ownership of base-layer switching; a second,
+    // independent picker fighting over the same baseLayers would leave
+    // stale tiles stacked on screen.
 
     L.control.scale({ position: 'bottomleft', imperial: true, metric: false }).addTo(map);
 
@@ -2020,6 +2064,421 @@ window.addEventListener('error', function(e) {
             windFhr = fhr; _cache = {};
             if (windEnabled) loadWind();
         };
+    })();
+    </script>
+
+    <!-- ── Aviation layer: NASR/Class Airspace/Obstructions + zoom-resolving ── -->
+    <!-- "Aviation Chart" map mode (2026-11-23, ported from EWMC's            -->
+    <!-- enhanced_weather_map_complete.html -- see that file for the         -->
+    <!-- original build/verification notes; this is a faithful port, not a   -->
+    <!-- redesign). Self-contained: doesn't touch this page's own existing   -->
+    <!-- stoplight-marker tier system (TIER_SYM_ZOOM/TIER_LBL_ZOOM/          -->
+    <!-- TIER_SYM_PX), which is unrelated (governs the VFR/IFR release-      -->
+    <!-- authority markers, not NASR airfields).                            -->
+    <script>
+    (function() {
+        var NASR_AIRPORTS_API = '/CAP_WxCOP/api/nasr/airports';
+        var NASR_NAVAIDS_API  = '/CAP_WxCOP/api/nasr/navaids';
+        var NASR_FIXES_API    = '/CAP_WxCOP/api/nasr/fixes';
+        var NASR_OBSTRUCTIONS_API = '/CAP_WxCOP/api/nasr/obstructions';
+        function getMap() { return window._capMap || map; }
+
+        // ── Tier classification (same scheme as EWMC) ───────────────────────
+        var TIER_MIN_ZOOM = { 0: 0, 1: 0, 2: 3, 3: 3, 4: 7, 5: 10 };
+
+        var airportTiers = {
+            'KATL': 2, 'KORD': 2, 'KLAX': 2, 'KDFW': 2, 'KDEN': 2, 'KJFK': 2,
+            'KSFO': 2, 'KLAS': 2, 'KPHX': 2, 'KIAH': 2, 'KCLT': 2, 'KMIA': 2,
+            'KSEA': 2, 'KEWR': 2, 'KMSP': 2, 'KDET': 2, 'KBOS': 2, 'KPHL': 2,
+            'KLGA': 2, 'KDCA': 2, 'KMDW': 2, 'KBWI': 2, 'KSLC': 2, 'KSAN': 2,
+            'KTPA': 2, 'KPDX': 2, 'KHON': 2
+        };
+        var MEF_PRIORITY_AIRPORTS = {
+            'KBAK': 1, 'KOVO': 1, 'KMQJ': 1, 'KSER': 1, 'KBFR': 1,
+            'KGEZ': 1, 'KI34': 1, 'KHLB': 1, 'KCEV': 1
+        };
+
+        function nasrAirportTier(a) {
+            if (a.icao_id && MEF_PRIORITY_AIRPORTS[a.icao_id] === 1) return 0;
+            if (/^(MA|MN|MR|CG)$/.test(a.ownership || '')) return 1;
+            if (a.icao_id && airportTiers[a.icao_id]) return airportTiers[a.icao_id];
+            if (a.site_type === 'H') return 5;
+            var longestRwy = 0;
+            (a.runways || []).forEach(function(r) {
+                if (r.length_ft && r.length_ft > longestRwy) longestRwy = r.length_ft;
+            });
+            if (!longestRwy) return 5;
+            if (longestRwy >= 7000) return 3;
+            if (longestRwy >= 5000) return 4;
+            return 5;
+        }
+
+        function nasrTierVisible(tier, zoom) {
+            var showMilitary = document.getElementById('showMilitary').checked;
+            var showHubs     = document.getElementById('showHubs').checked;
+            var showRegional = document.getElementById('showRegional').checked;
+            var showLocal    = document.getElementById('showLocal').checked;
+            var showSmall    = document.getElementById('showSmall').checked;
+            var toggleOn = (tier === 0) ||
+                           (tier === 1 && showMilitary) ||
+                           (tier === 2 && showHubs)     ||
+                           (tier === 3 && showRegional) ||
+                           (tier === 4 && showLocal)    ||
+                           (tier === 5 && showSmall);
+            return toggleOn && zoom >= TIER_MIN_ZOOM[tier];
+        }
+
+        // ── NASR aviation detail: NavAids / Fixes / Runways ─────────────────
+        var nasrLayer = null, nasrMoveTimer = null;
+        var NASR_FIX_MIN_ZOOM = 10;
+        var NAVAID_COLOR = {
+            'VOR':'#1565c0','VOR/DME':'#1565c0','VORTAC':'#00838f','TACAN':'#00838f',
+            'NDB':'#8e24aa','NDB/DME':'#8e24aa','MARINE NDB':'#8e24aa','DME':'#555','VOT':'#555','FAN MARKER':'#999'
+        };
+
+        function nasrBoundsParam(m) {
+            var b = m.getBounds();
+            return b.getWest()+','+b.getSouth()+','+b.getEast()+','+b.getNorth();
+        }
+
+        function loadNasr() {
+            var m = getMap(); if (!m) return;
+            var statusEl = document.getElementById('nasrStatus');
+            if (nasrLayer) { m.removeLayer(nasrLayer); }
+            nasrLayer = L.layerGroup();
+            var bp = nasrBoundsParam(m);
+            var zoom = m.getZoom();
+            var pending = 2, counts = {airports:0, navaids:0, fixes:0};
+
+            function done() {
+                pending--;
+                if (pending === 0 && document.getElementById('nasrToggle').checked) {
+                    nasrLayer.addTo(m);
+                    if (statusEl) statusEl.textContent = counts.airports+' airfields/heliports · '+
+                        counts.navaids+' navaids'+(zoom>=NASR_FIX_MIN_ZOOM ? ' · '+counts.fixes+' fixes' : ' · zoom in for fixes');
+                }
+            }
+
+            fetch(NASR_AIRPORTS_API+'?bounds='+bp)
+                .then(function(r){return r.json();})
+                .then(function(data){
+                    var shown = 0;
+                    (data.airports||[]).forEach(function(a){
+                        var tier = nasrAirportTier(a);
+                        if (!nasrTierVisible(tier, zoom)) return;
+                        shown++;
+                        var isHeli = a.site_type === 'H';
+                        var col = isHeli ? '#e65100' : '#2e7d32';
+                        L.circleMarker([a.lat, a.lon], {
+                            radius: isHeli ? 4 : 5, color: col, weight: 2,
+                            fillColor: '#fff', fillOpacity: 0.85
+                        }).bindTooltip((a.icao_id||a.arpt_id||a.site_no)+(a.name?' — '+a.name:'')+(isHeli?' (Heliport)':''))
+                          .addTo(nasrLayer);
+                        (a.runways||[]).forEach(function(rwy){
+                            if (rwy.ends.length !== 2) return;
+                            var latlngs = [[rwy.ends[0].lat, rwy.ends[0].lon], [rwy.ends[1].lat, rwy.ends[1].lon]];
+                            L.polyline(latlngs, {
+                                color:'#333', weight: rwy.width_ft ? Math.max(2, Math.min(6, rwy.width_ft/25)) : 3,
+                                opacity:0.75
+                            }).bindTooltip('Rwy '+rwy.rwy_id+(rwy.length_ft?' — '+rwy.length_ft+'ft':'')+(rwy.surface?' '+rwy.surface:''))
+                              .addTo(nasrLayer);
+                        });
+                    });
+                    counts.airports = shown;
+                    done();
+                }).catch(function(e){ console.warn('NASR airports load failed', e); done(); });
+
+            fetch(NASR_NAVAIDS_API+'?bounds='+bp)
+                .then(function(r){return r.json();})
+                .then(function(data){
+                    (data.navaids||[]).forEach(function(n){
+                        var col = NAVAID_COLOR[n.nav_type] || '#555';
+                        L.circleMarker([n.lat, n.lon], {
+                            radius: 6, color: col, weight: 2, fillColor: col, fillOpacity: 0.25
+                        }).bindTooltip(n.nav_id+' — '+n.nav_type+(n.name?' ('+n.name+')':'')+(n.freq?' '+n.freq:''))
+                          .addTo(nasrLayer);
+                    });
+                    counts.navaids = data.count||0;
+                    done();
+                }).catch(function(e){ console.warn('NASR navaids load failed', e); done(); });
+
+            if (zoom >= NASR_FIX_MIN_ZOOM) {
+                pending++;
+                fetch(NASR_FIXES_API+'?bounds='+bp)
+                    .then(function(r){return r.json();})
+                    .then(function(data){
+                        (data.fixes||[]).forEach(function(fx){
+                            L.circleMarker([fx.lat, fx.lon], {
+                                radius: 3, color:'#777', weight:1, fillColor:'#aaa', fillOpacity:0.6
+                            }).bindTooltip(fx.fix_id+(fx.use_code?' ('+fx.use_code.trim()+')':''))
+                              .addTo(nasrLayer);
+                        });
+                        counts.fixes = data.count||0;
+                        done();
+                    }).catch(function(e){ console.warn('NASR fixes load failed', e); done(); });
+            } else if (statusEl) {
+                statusEl.textContent = 'zoom in to load fixes/navaids/runways...';
+            }
+        }
+
+        document.getElementById('nasrToggle').addEventListener('change', function(){
+            var m = getMap();
+            if (this.checked) {
+                loadNasr();
+                if (m) m.on('moveend', nasrOnMoveEnd);
+            } else {
+                if (m) { m.off('moveend', nasrOnMoveEnd); if (nasrLayer) m.removeLayer(nasrLayer); }
+                var statusEl = document.getElementById('nasrStatus'); if (statusEl) statusEl.textContent = '';
+            }
+        });
+        function nasrOnMoveEnd() {
+            clearTimeout(nasrMoveTimer);
+            nasrMoveTimer = setTimeout(loadNasr, 400);
+        }
+
+        // All five airport-tier checkboxes refresh NASR if it's on
+        ['Military', 'Hubs', 'Regional', 'Local', 'Small'].forEach(function(type) {
+            document.getElementById('show' + type).addEventListener('change', function() {
+                if (document.getElementById('nasrToggle').checked) loadNasr();
+            });
+        });
+
+        // ── Obstructions (FAA Digital Obstacle File) ────────────────────────
+        var obstructionsLayer = null, obstructionsMoveTimer = null;
+        var OBSTRUCTIONS_MIN_ZOOM = 10;
+
+        function loadObstructions() {
+            var m = getMap(); if (!m) return;
+            var statusEl = document.getElementById('obstructionsStatus');
+            var zoom = m.getZoom();
+            if (zoom < OBSTRUCTIONS_MIN_ZOOM) {
+                if (obstructionsLayer) m.removeLayer(obstructionsLayer);
+                if (statusEl) statusEl.textContent = 'zoom in to load obstructions...';
+                return;
+            }
+            if (obstructionsLayer) m.removeLayer(obstructionsLayer);
+            obstructionsLayer = L.layerGroup();
+            var bp = nasrBoundsParam(m);
+            fetch(NASR_OBSTRUCTIONS_API+'?bounds='+bp)
+                .then(function(r){return r.json();})
+                .then(function(data){
+                    (data.obstructions||[]).forEach(function(o){
+                        var agl = o.agl_ft || 0;
+                        var w = Math.max(8, Math.min(20, agl/60));
+                        var h = w * 1.1;
+                        var isLit = o.lighting && o.lighting !== 'N';
+                        var color = isLit ? '#ff3030' : '#a00000';
+                        L.marker([o.lat, o.lon], {
+                            icon: L.divIcon({
+                                className: '',
+                                html: '<div style="width:'+w+'px;height:'+h+'px;background:'+color+
+                                      ';opacity:0.85;clip-path:polygon(50% 0%,100% 100%,0% 100%);"></div>',
+                                iconSize: [w, h],
+                                iconAnchor: [w/2, h]
+                            })
+                        }).bindTooltip((o.obstacle_type||'Obstruction').trim()+' — '+agl+'ft AGL'+
+                                       (isLit ? ' (lighted)' : ''))
+                          .addTo(obstructionsLayer);
+                    });
+                    if (document.getElementById('obstructionsToggle').checked) {
+                        obstructionsLayer.addTo(m);
+                        if (statusEl) statusEl.textContent = (data.count||0)+' obstructions ≥200ft AGL'+
+                            (data.count >= 2000 ? ' (capped, zoom in for more)' : '');
+                    }
+                }).catch(function(e){ console.warn('Obstructions load failed', e); });
+        }
+
+        document.getElementById('obstructionsToggle').addEventListener('change', function(){
+            var m = getMap();
+            if (this.checked) {
+                loadObstructions();
+                if (m) m.on('moveend', obstructionsOnMoveEnd);
+            } else {
+                if (m) { m.off('moveend', obstructionsOnMoveEnd); if (obstructionsLayer) m.removeLayer(obstructionsLayer); }
+                var statusEl = document.getElementById('obstructionsStatus'); if (statusEl) statusEl.textContent = '';
+            }
+        });
+        function obstructionsOnMoveEnd() {
+            clearTimeout(obstructionsMoveTimer);
+            obstructionsMoveTimer = setTimeout(loadObstructions, 400);
+        }
+
+        // ── Class Airspace (B/C/D/E) ─────────────────────────────────────────
+        var classBcdLayer = null, classELayer = null;
+        var _classAirspaceData = null, _classAirspaceLoading = false;
+
+        function classAirspaceStyle(feature) {
+            var cls = (feature.properties.CLASS || '').toUpperCase();
+            if (cls === 'B') {
+                return { color: '#0046dc', weight: 2, opacity: 0.9, fillColor: '#0046dc', fillOpacity: 0.06 };
+            } else if (cls === 'C') {
+                return { color: '#0046dc', weight: 1.5, opacity: 0.8, fillColor: '#0046dc', fillOpacity: 0.05,
+                         dashArray: '8,4' };
+            } else if (cls === 'D') {
+                return { color: '#0046dc', weight: 1, opacity: 0.7, fillColor: '#0046dc', fillOpacity: 0.04,
+                         dashArray: '4,4' };
+            }
+            return { color: '#787800', weight: 1, opacity: 0.5, fillOpacity: 0, dashArray: '2,4' };
+        }
+
+        function classAirspacePopup(feature) {
+            var p = feature.properties;
+            var cls = (p.CLASS || '').toUpperCase();
+            var name = p.NAME || p.IDENT || '';
+            var floor = (p.LOWER_CODE === 'SFC') ? 'SFC' :
+                        (p.LOWER_VAL !== null && p.LOWER_VAL !== undefined) ? p.LOWER_VAL + ' ' + (p.LOWER_UOM || 'ft') : '?';
+            var ceiling = (p.UPPER_VAL !== null && p.UPPER_VAL !== undefined) ? p.UPPER_VAL + ' ' + (p.UPPER_UOM || 'ft') : '?';
+            var hours = p.WKHR_CODE === 'H24' ? 'Continuous' : (p.WKHR_RMK || 'See chart/NOTAMs');
+            return '<div style="font-size:13px;min-width:180px;">' +
+                   '<strong>' + name + '</strong><br>' +
+                   '<span style="color:#555;">Class ' + cls + '</span><br>' +
+                   'Alt: ' + floor + ' – ' + ceiling + '<br>' +
+                   '<span style="font-size:11px;">⏱ ' + hours + '</span>' +
+                   '</div>';
+        }
+
+        function buildClassAirspaceLayers(data) {
+            var bcdFeatures = { type:'FeatureCollection', features:[] };
+            var eFeatures = { type:'FeatureCollection', features:[] };
+            data.features.forEach(function(f) {
+                var cls = (f.properties.CLASS || '').toUpperCase();
+                if (cls === 'B' || cls === 'C' || cls === 'D') bcdFeatures.features.push(f);
+                else if (cls === 'E') eFeatures.features.push(f);
+            });
+            classBcdLayer = L.geoJSON(bcdFeatures, {
+                style: classAirspaceStyle,
+                onEachFeature: function(f, l) { l.bindPopup(classAirspacePopup(f)); }
+            });
+            classELayer = L.geoJSON(eFeatures, {
+                style: classAirspaceStyle,
+                onEachFeature: function(f, l) { l.bindPopup(classAirspacePopup(f)); }
+            });
+        }
+
+        function setAirspaceStatus(msg) {
+            var el = document.getElementById('airspaceStatus');
+            if (el) el.textContent = msg;
+        }
+
+        function loadClassAirspace(callback) {
+            if (_classAirspaceData) { callback(_classAirspaceData); return; }
+            if (_classAirspaceLoading) { setTimeout(function(){loadClassAirspace(callback);}, 500); return; }
+            _classAirspaceLoading = true;
+            setAirspaceStatus('Loading Class Airspace…');
+            fetch('/CAP_WxCOP/static/geo/class_airspace.geojson')
+                .then(function(r) {
+                    if (!r.ok) throw new Error('Class Airspace fetch failed: ' + r.status);
+                    return r.json();
+                })
+                .then(function(data) {
+                    _classAirspaceData = data;
+                    _classAirspaceLoading = false;
+                    setAirspaceStatus('');
+                    callback(data);
+                })
+                .catch(function(e) {
+                    _classAirspaceLoading = false;
+                    setAirspaceStatus('Class Airspace unavailable');
+                    console.error('Airspace Class load error:', e);
+                });
+        }
+
+        function toggleAirspaceLayer(layerRef, show) {
+            var m = getMap();
+            if (!layerRef || !m) return;
+            if (show) { if (!m.hasLayer(layerRef)) layerRef.addTo(m); }
+            else { if (m.hasLayer(layerRef)) m.removeLayer(layerRef); }
+        }
+
+        document.getElementById('classBcdToggle').addEventListener('change', function() {
+            if (this.checked) {
+                loadClassAirspace(function(data) {
+                    if (!classBcdLayer) buildClassAirspaceLayers(data);
+                    toggleAirspaceLayer(classBcdLayer, true);
+                });
+            } else {
+                toggleAirspaceLayer(classBcdLayer, false);
+            }
+        });
+        document.getElementById('classEToggle').addEventListener('change', function() {
+            if (this.checked) {
+                loadClassAirspace(function(data) {
+                    if (!classELayer) buildClassAirspaceLayers(data);
+                    toggleAirspaceLayer(classELayer, true);
+                });
+            } else {
+                toggleAirspaceLayer(classELayer, false);
+            }
+        });
+
+        // ── Aviation mode: vector "master" at low zoom, real sectional ──────
+        // raster at high zoom, auto-crossing over at AVIATION_CROSSOVER_ZOOM.
+        var AVIATION_CROSSOVER_ZOOM = 12;
+        var aviationModeActive = false;
+        var currentLayerName = 'street';
+
+        function setAviationOverlays(show) {
+            ['nasrToggle', 'classBcdToggle', 'classEToggle', 'obstructionsToggle'].forEach(function(id) {
+                var el = document.getElementById(id);
+                if (el && el.checked !== show) {
+                    el.checked = show;
+                    el.dispatchEvent(new Event('change'));
+                }
+            });
+        }
+
+        function applyAviationLayer() {
+            if (!aviationModeActive) return;
+            var m = getMap(); if (!m) return;
+            var wantSectional = m.getZoom() >= AVIATION_CROSSOVER_ZOOM;
+            var wantKey = wantSectional ? 'sectional' : 'master';
+            if (currentLayerName === wantKey) return;
+            if (m.hasLayer(baseLayers[currentLayerName])) m.removeLayer(baseLayers[currentLayerName]);
+            baseLayers[wantKey].addTo(m);
+            currentLayerName = wantKey;
+            setAviationOverlays(!wantSectional);
+        }
+
+        document.getElementById('layerSelector').addEventListener('change', function(e) {
+            var m = getMap();
+            var newLayer = e.target.value;
+            try {
+                Object.values(baseLayers).forEach(function(layer) {
+                    if (m.hasLayer(layer)) m.removeLayer(layer);
+                });
+                if (newLayer === 'aviation') {
+                    aviationModeActive = true;
+                    var wantSectional = m.getZoom() >= AVIATION_CROSSOVER_ZOOM;
+                    currentLayerName = wantSectional ? 'sectional' : 'master';
+                    baseLayers[currentLayerName].addTo(m);
+                    setAviationOverlays(!wantSectional);
+                } else if (baseLayers[newLayer]) {
+                    if (aviationModeActive) { aviationModeActive = false; setAviationOverlays(false); }
+                    baseLayers[newLayer].addTo(m);
+                    currentLayerName = newLayer;
+                } else {
+                    aviationModeActive = false;
+                    baseLayers['street'].addTo(m);
+                    this.value = 'street';
+                    currentLayerName = 'street';
+                }
+            } catch (error) {
+                aviationModeActive = false;
+                baseLayers['street'].addTo(m);
+                this.value = 'street';
+                currentLayerName = 'street';
+            }
+        });
+
+        document.addEventListener('DOMContentLoaded', function() {
+            var _poll = setInterval(function() {
+                var m = getMap();
+                if (m) {
+                    clearInterval(_poll);
+                    m.on('zoomend moveend', applyAviationLayer);
+                }
+            }, 200);
+        });
     })();
     </script>
 
