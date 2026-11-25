@@ -168,7 +168,9 @@
         <div style="font-size:10px;color:#888;margin-bottom:3px;">MRMS — loop (default)</div>
         <div class="radar-btns">
             <div class="radar-btn active" data-product="composite" data-source="mrms" title="Radar Composite Reflectivity">CMP</div>
-            <div class="radar-btn" data-product="mesh"        data-source="mrms" title="MESH Instantaneous Hail">MESH</div>
+            <!-- MESH button hidden 2026-11-25: render paused on data1 (CPU-bound, see
+                 pqact_mrms_conus.conf) until r815-offload or more cores land. Restore
+                 this button when the PIPE render line is re-enabled. -->
         </div>
         <div style="font-size:10px;color:#888;margin-top:6px;margin-bottom:3px;">Single-Site Decode — nearest WSR-88D, live</div>
         <div class="radar-btns">
