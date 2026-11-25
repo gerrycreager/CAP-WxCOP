@@ -1,51 +1,85 @@
 #!/var/www/cap_winds_app/venv/bin/python3
 """
-ingest_sounding.py — Decode WMO TEMP (TTAA/TTBB/UUAA/UUBB) upper-air
-sounding bulletins into observations.sounding.
+ingest_sounding.py — Decode WMO upper-air BUFR soundings into
+observations.sounding.
 
-Scope: surface through 100mb only (TTAA mandatory levels + TTBB significant
-levels) -- TTCC/TTDD (100mb and above) are explicitly out of scope, per
-Gerry's direction: CAP aircraft never operate anywhere near those altitudes.
-UUAA/UUBB are the wind-only PIBAL equivalent (used when the temperature
-sensor fails but winds are still reported) -- same decoder, temp/dewpoint
-just come back None.
+Scope: surface through 100mb only -- CAP aircraft never operate anywhere
+near those altitudes, same floor the original (abandoned) TTAA/TTBB text
+decoder used.
 
-Real-time PIPE ingest, matching scripts/ingest_wwa_vtec.py's pattern (not
-ingest_taf.py's cron+file-batch pattern) -- IDS|DDPLUS runs independently on
-both r815 and data1 (confirmed 2026-09-19: NOT a relay pair like
-SATELLITE/NGRID), so both hosts' pqact will receive and process the same
-bulletin independently. ON CONFLICT upsert absorbs that safely; a file-based
-approach on shared NFS would not.
+Rewritten 2026-11-24 from a from-scratch (and never-wired, never-validated)
+TTAA/TTBB/UUAA/UUBB text decoder once the real observed feed turned out to
+be BUFR, not WMO alphanumeric TEMP (see memory
+project_soundings_observed_ingest_gap for the full history: the capture
+pqact rule itself had two separate bugs before any real BUFR ever reached
+disk). This version is built and tuned against 2,100+ real captured
+products from the live feed, not guessed from the WMO code tables blind --
+notes below on real-world template quirks found that way.
 
-Called by pqact PIPE action (stdin = raw bulletin text):
-    IDS|DDPLUS  <pattern -- confirmed against real captured headers first>
+Real-world BUFR template quirks found by inspecting actual captured
+traffic (not assumed from documentation):
+  - Two distinct template families are both live on this feed:
+      1. Modern high-resolution individual-station reports (WMO template
+         3-09-052 and variants) -- near-1-second telemetry, thousands of
+         samples per station. Carries `extendedVerticalSoundingSignificance`
+         bit flags (WMO table 0 08 042) marking which samples are actual
+         standard/significant levels -- filtering on that (nonzero) thins
+         the firehose down to a normal-sized profile, the BUFR-native
+         equivalent of TTAA mandatory + TTBB significant levels combined.
+      2. Legacy collective bulletins (edition 3, e.g. the KWBC_IUSV/IUSZ/
+         IUSY/IUSU family) -- each BUFR *subset* in the message is a
+         DIFFERENT station (a regional roll-up), already at moderate
+         resolution (no 1-second firehose), using the older
+         `verticalSoundingSignificance` key. Confirmed by checking
+         block/station numbers per subset -- they differ. No filtering
+         needed/wanted here; nearly every transmitted level already is a
+         reportable one.
+  - A single product can carry MULTIPLE subsets = multiple stations in
+    one message (both of the above families do this) -- the only correct
+    way found to pull them apart is extract-then-re-decode-as-its-own-
+    message (`extractSubset` + `doExtractSubsets` + `codes_get_message` +
+    `codes_new_from_message`), NOT reading key arrays off the original
+    handle by rank index -- that returns values from the WRONG subset.
+  - In the legacy template, wind (`windDirection`/`windSpeed`) is encoded
+    as a SEPARATELY-counted replicated group, shorter than and NOT
+    index-aligned with the pressure/temp array (confirmed: a wind entry's
+    BUFR rank number has no relationship to the pressure entry it
+    logically pairs with). Rather than build unverified positional
+    correlation logic, this decoder only trusts wind when its array
+    length matches the pressure array's length 1:1 (true for the modern
+    high-res template, false for legacy) -- legacy-sourced levels come
+    through as temp/dewpoint only, no wind, which is an honest reflection
+    of what we can safely extract, not a bug.
+  - Products with no `BUFR` magic in the body are real WMO `NIL` reports
+    (station had nothing to transmit this cycle), not malformed BUFR --
+    treated as "nothing to decode", not an error.
+
+Called by pqact PIPE action (stdin = raw captured product: WMO ASCII
+header + full binary BUFR message, same as the FILE capture rule still
+active in pqact_hds_tpw.conf -- not wired to PIPE yet as of this rewrite,
+pending Gerry's sign-off per feedback_explain_before_cross_host_edits):
+    HDS  <pattern>
         PIPE  -close  venv/bin/python3 scripts/ingest_sounding.py
 
 Usage:
-    ingest_sounding.py              # read bulletin from stdin (pqact mode)
+    ingest_sounding.py              # read raw product from stdin (pqact mode)
     ingest_sounding.py --file PATH  # read from a file (backfill/testing)
     ingest_sounding.py --dry-run    # decode and print, don't write to DB
-
-WMO code reference: Manual on Codes (WMO-No. 306), Volume I.1, Part A,
-FM 35-XI TEMP / FM 36-XI TEMP SHIP. Code tables cited inline below.
-
-IMPORTANT: this decoder has NOT yet been validated against real captured
-bulletins (as of 2026-09-19) -- built from the documented WMO code tables,
-but real-world encoding quirks (station-specific habits, missing-data
-conventions, older vs newer code table revisions) are common in practice.
-Per the Soundings feature plan, run decode_ttaa()/decode_ttbb() against a
-real backlog of captured bulletins and spot-check a couple of stations
-against a known-good source (e.g. SPC's own sounding plots) before trusting
-this for anything operational.
 """
 import os
-import re
 import sys
+import json
+import base64
 import argparse
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
 import psycopg2
+from eccodes import (
+    codes_get, codes_set, codes_get_array, codes_release,
+    codes_get_message, codes_new_from_message, CodesInternalError,
+    CODES_MISSING_LONG, CODES_MISSING_DOUBLE,
+)
 
 # ---------------------------------------------------------------------------
 # Database
@@ -65,319 +99,246 @@ logging.basicConfig(
 )
 log = logging.getLogger('ingest_sounding')
 
-# ---------------------------------------------------------------------------
-# WMO header parsing
-# ---------------------------------------------------------------------------
-# TTAA00 KWBC 191200  /  TTBB00 KWBC 191200  /  UUAA00 KWBC 191200 ...
-RE_WMO_HEADER = re.compile(
-    r'^(TT|UU)(AA|BB)(\d{2})\s+([A-Z]{4})\s+(\d{2})(\d{2})(\d{2})',
-    re.MULTILINE,
-)
+PRESSURE_FLOOR_MB = 100  # CAP aircraft scope -- see module docstring
 
-# Mandatory-level ID line: IIiii (5-digit block+station number)
-RE_STATION = re.compile(r'\b(\d{5})\b')
-
-# ---------------------------------------------------------------------------
-# TEMP code tables
-# ---------------------------------------------------------------------------
-# Mandatory-level pressure indicators (TTAA), Code table 0577.
-# Value = pressure in mb. Order as transmitted; height units switch at 500mb.
-TTAA_LEVEL_MB = {
-    '99': 'SFC', '00': 1000, '92': 925, '85': 850, '70': 700, '50': 500,
-    '40': 400, '30': 300, '25': 250, '20': 200, '15': 150, '10': 100,
-}
-# '88' = tropopause, '77' = max wind -- handled separately, not a fixed level.
-
-def _decode_temp_sign(ttt_raw):
-    """TTT is temp*10 with sign folded into the last digit's parity (Code
-    table 0777): even last digit = positive, odd = negative."""
-    if ttt_raw == '///':
-        return None
-    val = int(ttt_raw)
-    sign = -1 if (val % 10) % 2 == 1 else 1
-    return sign * val / 10.0
+# Geographic scope: CAP's own area of operations only -- CONUS, Alaska,
+# Hawaii, the Caribbean, and Guam. Not a global sounding archive; Gerry's
+# explicit call 2026-11-24 once real traffic showed plenty of Europe/Asia
+# stations flowing on this feed. Checked against each subset's own decoded
+# lat/lon when available (covers nearly all individual-station reports).
+REGIONS_LATLON = [
+    (24.0, 50.0, -125.5, -66.5),    # CONUS
+    (51.0, 72.0, -180.0, -129.0),   # Alaska
+    (18.0, 23.0, -161.0, -154.0),   # Hawaii
+    (9.0, 27.5, -85.0, -59.0),      # Caribbean
+    (13.0, 14.0, 144.5, 145.0),     # Guam
+]
+# Fallback for the legacy collective template, which doesn't carry lat/lon
+# at all (see module docstring) -- WMO block numbers assigned to Alaska (70)
+# and the continental/other USA (72, 74). Deliberately NOT including 78
+# (Caribbean/Central America, shared with non-US nations) or 91 (Pacific,
+# shared internationally incl. Hawaii/Guam) here -- without a position to
+# check, those blocks are too ambiguous to trust; such subsets are dropped
+# rather than risk pulling in an out-of-scope station.
+US_BLOCK_FALLBACK = {70, 72, 74}
+# Alaska's eastern border isn't a clean lat/lon rectangle -- the Alaska box
+# above also sweeps up a slice of the Yukon/NWT. Found by real backfill
+# data (71957, 71964 both landed inside that box). Canada's WMO blocks are
+# unambiguous, so exclude them even when lat/lon says "in the box".
+NON_US_BLOCK_EXCLUDE = {71, 73}  # Canada
 
 
-def _decode_dewpoint_depression(dd_raw):
-    """DD dewpoint-depression code (Code table 0777):
-    00-50 -> tenths of a degree (0.0-5.0C); 56-99 -> whole degrees, value-50
-    (6-49C). 51-55 unused/reserved."""
-    if dd_raw == '//':
-        return None
-    val = int(dd_raw)
-    if val <= 50:
-        return val / 10.0
-    if val >= 56:
-        return float(val - 50)
-    return None  # 51-55 reserved, shouldn't appear
+def _in_scope(station_id, lat, lon):
+    block = int(station_id[:2]) if station_id and station_id.isdigit() and len(station_id) == 5 else None
+    if block in NON_US_BLOCK_EXCLUDE:
+        return False
+    if lat is not None and lon is not None:
+        return any(lat_min <= lat <= lat_max and lon_min <= lon <= lon_max
+                   for lat_min, lat_max, lon_min, lon_max in REGIONS_LATLON)
+    if block is not None:
+        return block in US_BLOCK_FALLBACK
+    return False
 
 
-def _decode_wind(ddfff_raw, wind_units_knots):
-    """dddff wind group: ddd = direction, rounded to nearest 5 degrees. If
-    ddd's value needs speeds >=100, a preceding indicator group ('51515')
-    signals +100kt to all following ff speed values in this report -- the
-    caller tracks that flag and passes the adjusted ff separately; here we
-    just split direction/speed out of one 5-digit group where ddd occupies
-    the first 3 digits (tens+units, i.e. already in degrees, a multiple of
-    5) and ff the last 2."""
-    if '/' in ddfff_raw:
-        return None, None
-    raw = int(ddfff_raw)
-    direction = (raw // 100) * 10 // 10  # first 3 digits = ddd directly... see note below
-    # ddd is transmitted as direction in degrees (already a multiple of 5,
-    # e.g. 270 for due west) using 3 digits; speed ff uses the last 2.
-    direction = raw // 100
-    speed = raw % 100
-    return direction, speed
+def _is_missing(v):
+    if v is None:
+        return True
+    if isinstance(v, str):
+        return True  # eccodes returns the literal string on a missing non-numeric key
+    if v in (CODES_MISSING_LONG, CODES_MISSING_DOUBLE):
+        return True
+    return isinstance(v, float) and v > 1e10
 
 
-def decode_ttaa(text):
-    """
-    Decode a TTAA (or UUAA, wind-only) mandatory-level bulletin.
-
-    Returns dict: {station_id, obs_time, wind_units_knots, levels: [...]}
-    or None if the text doesn't look like a parseable TTAA/UUAA bulletin.
-
-    Each level dict: {pressure_mb, height_m, temp_c, dewpoint_c,
-    wind_dir_deg, wind_speed_kt} -- pressure_mb for the surface level is
-    decoded from its own PoPoPo group (see the '99' special-case below),
-    not a fixed value.
-    """
-    m = RE_WMO_HEADER.search(text)
-    if not m:
-        return None
-    report_kind, part, ii_cat, station_wmo_unused, day_raw, hour, minute = m.groups()
-    if part != 'AA':
-        return None
-
-    day = int(day_raw)
-    wind_units_knots = day > 50   # Code table 1855: +50 to day => wind in kt
-    if wind_units_knots:
-        day -= 50
-
-    now = datetime.now(timezone.utc)
+def _get_scalar(handle, key):
     try:
-        obs_time = datetime(now.year, now.month, day, int(hour), 0, tzinfo=timezone.utc)
-        if obs_time > now + timedelta(days=2):
-            obs_time = obs_time.replace(month=now.month - 1 if now.month > 1 else 12,
-                                         year=now.year if now.month > 1 else now.year - 1)
+        v = codes_get(handle, key)
+    except CodesInternalError:
+        return None
+    return None if _is_missing(v) else v
+
+
+def _get_array_safe(handle, key):
+    try:
+        arr = list(codes_get_array(handle, key))
+    except CodesInternalError:
+        return None
+    return arr if arr else None
+
+
+def _station_id_from(handle):
+    block = _get_scalar(handle, 'blockNumber')
+    stn = _get_scalar(handle, 'stationNumber')
+    if block is not None and stn is not None:
+        return f'{int(block):02d}{int(stn):03d}'
+    ident = _get_scalar(handle, 'shipOrMobileLandStationIdentifier')
+    if ident:
+        ident = str(ident).strip()
+        if ident:
+            return ident
+    return None
+
+
+def _obs_time_from(handle):
+    year = _get_scalar(handle, 'year')
+    month = _get_scalar(handle, 'month')
+    day = _get_scalar(handle, 'day')
+    hour = _get_scalar(handle, 'hour')
+    minute = _get_scalar(handle, 'minute') or 0
+    second = _get_scalar(handle, 'second') or 0
+    if year is None or month is None or day is None or hour is None:
+        return None
+    year = int(year)
+    if year < 100:
+        year += 2000
+    try:
+        return datetime(year, int(month), int(day), int(hour), int(minute), int(second),
+                         tzinfo=timezone.utc)
     except ValueError:
         return None
 
-    # Station ID: first 5-digit group after the header line, on the next
-    # "line" (bulletins are whitespace-separated groups, not always real
-    # newlines -- work on the group stream, not literal lines).
-    body = text[m.end():]
-    groups = body.split()
-    if not groups:
+
+def decode_subset(handle):
+    """Decode one already-unpacked, single-subset BUFR handle (one
+    station's sounding) into {station_id, obs_time, lat, lon, levels: [...]}
+    or None if nothing usable was found. See module docstring for the
+    high-res-vs-legacy-template handling this applies."""
+    station_id = _station_id_from(handle)
+    obs_time = _obs_time_from(handle)
+    if not station_id or not obs_time:
         return None
-    station_id = groups[0]
-    if not re.fullmatch(r'\d{5}', station_id):
+
+    lat = _get_scalar(handle, 'latitude')
+    lon = _get_scalar(handle, 'longitude')
+
+    if not _in_scope(station_id, lat, lon):
         return None
+
+    pressure = _get_array_safe(handle, 'pressure')
+    if not pressure:
+        return None
+    n = len(pressure)
+
+    sig = _get_array_safe(handle, 'extendedVerticalSoundingSignificance')
+    high_res = sig is not None
+    if sig is None:
+        sig = _get_array_safe(handle, 'verticalSoundingSignificance')
+
+    height = _get_array_safe(handle, 'nonCoordinateGeopotentialHeight')
+    if height is None:
+        height = _get_array_safe(handle, 'nonCoordinateGeopotential')
+    temp = _get_array_safe(handle, 'airTemperature')
+    dewp = _get_array_safe(handle, 'dewpointTemperature')
+    wdir = _get_array_safe(handle, 'windDirection')
+    wspd = _get_array_safe(handle, 'windSpeed')
+    # Trust wind only when it's (near enough to) the same length as the
+    # pressure array -- confirmed empirically that when it IS close, index 0
+    # of each lines up correctly (wind can run a couple of samples short at
+    # the very end, e.g. a dropped fix near balloon burst); `at()` already
+    # returns None past the end of a shorter array, so this degrades
+    # gracefully. Legacy-template wind arrays are a SEPARATELY-counted
+    # group unrelated by index (confirmed: lengths differ by the hundreds,
+    # not a handful) -- that large a gap means don't even try to pair it.
+    tolerance = max(10, n // 100)
+    if wdir is not None and len(wdir) < n - tolerance:
+        wdir = None
+    if wspd is not None and len(wspd) < n - tolerance:
+        wspd = None
+
+    def at(arr, i):
+        if arr is None or i >= len(arr):
+            return None
+        v = arr[i]
+        return None if _is_missing(v) else v
 
     levels = []
-    i = 0   # tokens already excludes the station-id group (groups[0])
-    tokens = groups[1:]
-    n = len(tokens)
-    while i < n:
-        tok = tokens[i]
-        if len(tok) < 2:
-            i += 1
+    for i in range(n):
+        p_pa = at(pressure, i)
+        if p_pa is None:
             continue
-        level_key = tok[:2]
+        pressure_mb = p_pa / 100.0
+        if pressure_mb < PRESSURE_FLOOR_MB:
+            continue  # out of scope -- see module docstring
 
-        if level_key in ('88', '77', '66'):
-            # Tropopause (88), max wind (77), or a shear/units indicator
-            # (66/51515 etc.) -- skip the group(s); out of scope for a
-            # basic Skew-T/hodograph (tropopause marker isn't a plotted
-            # level, max-wind is informational).
-            i += 2 if level_key == '77' else 3
-            continue
+        if high_res:
+            s = at(sig, i)
+            if s is None or s == 0:
+                continue  # thin the near-1-second firehose to named levels only
 
-        if level_key not in TTAA_LEVEL_MB:
-            i += 1
-            continue
-
-        pressure = TTAA_LEVEL_MB[level_key]
-        hhh = tok[2:]
-        if i + 2 >= n:
-            break
-        ttt_dd = tokens[i + 1]
-        ddfff = tokens[i + 2]
-
-        if level_key == '99':
-            # Surface group is the one exception: hhh is actually surface
-            # PRESSURE (PoPoPo), not height -- station elevation isn't
-            # transmitted here at all. Convention: value >= 500 -> pressure
-            # = value directly (500-999mb); value < 500 -> 1000 + value
-            # (1000-1099mb, the overwhelmingly common case).
-            try:
-                pval = int(hhh)
-                pressure = pval if pval >= 500 else 1000 + pval
-            except ValueError:
-                pressure = None
-            height_m = None
-        else:
-            # Height encoding (Code table 0577 conventions): 1000-700mb
-            # transmitted in meters; 500mb and above in geopotential
-            # decameters. This is the trickiest part of TEMP height decoding
-            # in practice and the most likely thing to need correction
-            # against real bulletins -- treating hhh as meters below 500mb
-            # and decameters at/above 500mb here as a documented first pass.
-            try:
-                hval = int(hhh)
-            except ValueError:
-                hval = None
-            if hval is not None and isinstance(pressure, int) and pressure <= 500:
-                height_m = hval * 10
-            else:
-                height_m = hval
-
-        temp_c = _decode_temp_sign(ttt_dd[:3]) if len(ttt_dd) >= 5 else None
-        dewpoint_depression = _decode_dewpoint_depression(ttt_dd[3:5]) if len(ttt_dd) >= 5 else None
-        dewpoint_c = (temp_c - dewpoint_depression) if (temp_c is not None and dewpoint_depression is not None) else None
-        wind_dir, wind_speed = _decode_wind(ddfff, wind_units_knots) if len(ddfff) == 5 else (None, None)
-        if wind_speed is not None and not wind_units_knots:
-            wind_speed = round(wind_speed * 1.94384)  # m/s -> kt, for a consistent unit in storage
+        t_k = at(temp, i)
+        td_k = at(dewp, i)
+        h_m = at(height, i)
+        wd = at(wdir, i)
+        ws_ms = at(wspd, i)
 
         levels.append({
-            'pressure_mb': pressure,
-            'height_m': height_m,
-            'temp_c': temp_c,
-            'dewpoint_c': dewpoint_c,
-            'wind_dir_deg': wind_dir,
-            'wind_speed_kt': wind_speed,
+            'pressure_mb': round(pressure_mb, 1),
+            'height_m': round(h_m) if h_m is not None else None,
+            'temp_c': round(t_k - 273.15, 1) if t_k is not None else None,
+            'dewpoint_c': round(td_k - 273.15, 1) if td_k is not None else None,
+            'wind_dir_deg': round(wd) if wd is not None else None,
+            'wind_speed_kt': round(ws_ms * 1.94384, 1) if ws_ms is not None else None,
         })
-        i += 3
 
     if not levels:
         return None
 
+    levels.sort(key=lambda lv: -lv['pressure_mb'])  # surface up
     return {
         'station_id': station_id,
         'obs_time': obs_time,
-        'report_type': report_kind + part,
-        'wind_units_knots': wind_units_knots,
+        'lat': lat,
+        'lon': lon,
         'levels': levels,
     }
 
 
-def decode_ttbb(text):
-    """
-    Decode a TTBB (or UUBB) significant-level bulletin: temperature/dewpoint
-    only (no wind -- significant-level winds come in a separate PPBB section
-    this v1 decoder does not yet handle).
+def decode_bufr_product(data: bytes):
+    """Decode every subset of one raw captured product (WMO ASCII header +
+    binary BUFR body) into a list of sounding dicts, one per subset --
+    a single product frequently bundles several stations (a regional
+    collective) or, for an individual high-resolution report, just one --
+    loop generically either way (see module docstring)."""
+    idx = data.find(b'BUFR')
+    if idx < 0:
+        return []  # a real NIL report, or not a BUFR product at all
+    body = data[idx:]
 
-    Returns dict: {station_id, obs_time, report_type, levels: [...]}
-    Each level: {pressure_mb, temp_c, dewpoint_c} (no height -- significant
-    levels are identified by pressure only, not height).
-    """
-    m = RE_WMO_HEADER.search(text)
-    if not m:
-        return None
-    report_kind, part, ii_cat, _unused, day_raw, hour, minute = m.groups()
-    if part != 'BB':
-        return None
-
-    day = int(day_raw)
-    if day > 50:
-        day -= 50
-    now = datetime.now(timezone.utc)
     try:
-        obs_time = datetime(now.year, now.month, day, int(hour), 0, tzinfo=timezone.utc)
-    except ValueError:
-        return None
+        outer = codes_new_from_message(body)
+    except CodesInternalError as e:
+        log.warning('not a decodable BUFR message (%d bytes): %s', len(body), e)
+        return []
+    if outer is None:
+        return []
 
-    body = text[m.end():]
-    groups = body.split()
-    if not groups:
-        return None
-    station_id = groups[0]
-    if not re.fullmatch(r'\d{5}', station_id):
-        return None
-
-    levels = []
-    tokens = groups[1:]
-    i = 0
-    n = len(tokens)
-    while i < n - 1:
-        tok = tokens[i]
-        # Significant-level groups are '11PPP', '22PPP', ... '(N)(N)PPP'
-        # (section-of-10 marker + 3-digit pressure in whole mb, or tenths
-        # for levels below 100mb -- out of scope here) followed by a
-        # TTTDD temp/dewpoint group. A bare 3-digit-prefixed group not
-        # matching this shape ends the significant-level section (e.g. the
-        # '21212' wind-section marker, or '31313' region indicator).
-        if len(tok) == 5 and tok[:2].isdigit() and int(tok[:2]) not in (21, 31, 51):
-            press_raw = tok[2:]
+    results = []
+    try:
+        codes_set(outer, 'unpack', 1)
+        nsub = codes_get(outer, 'numberOfSubsets')
+        for i in range(1, nsub + 1):
+            codes_set(outer, 'extractSubset', i)
+            codes_set(outer, 'doExtractSubsets', 1)
             try:
-                pressure_mb = int(press_raw)
-                if pressure_mb < 100:
-                    pressure_mb += 1000  # e.g. '850' vs a stray '056' -- not fully general, see note below
-            except ValueError:
-                i += 1
+                sub_msg = codes_get_message(outer)
+            except CodesInternalError as e:
+                log.warning('could not extract subset %d: %s', i, e)
                 continue
-            if pressure_mb < 100:
-                # Below our 100mb floor -- stop (TTCC/TTDD territory).
-                break
-            ttt_dd = tokens[i + 1] if i + 1 < n else ''
-            temp_c = _decode_temp_sign(ttt_dd[:3]) if len(ttt_dd) >= 5 else None
-            dd = _decode_dewpoint_depression(ttt_dd[3:5]) if len(ttt_dd) >= 5 else None
-            dewpoint_c = (temp_c - dd) if (temp_c is not None and dd is not None) else None
-            levels.append({'pressure_mb': pressure_mb, 'temp_c': temp_c, 'dewpoint_c': dewpoint_c})
-            i += 2
-        else:
-            i += 1
-
-    return {
-        'station_id': station_id,
-        'obs_time': obs_time,
-        'report_type': report_kind + part,
-        'levels': levels,
-    }
-
-
-def merge_profile(ttaa, ttbb):
-    """Merge TTAA mandatory levels + TTBB significant levels into one
-    surface-to-100mb profile, sorted by decreasing pressure (surface up)."""
-    by_pressure = {}
-    if ttaa:
-        for lv in ttaa['levels']:
-            key = lv['pressure_mb']
-            if key is None:
-                continue  # surface pressure failed to parse
-            by_pressure[key] = {
-                'pressure_mb': key,
-                'height_m': lv['height_m'],
-                'temp_c': lv['temp_c'],
-                'dewpoint_c': lv['dewpoint_c'],
-                'wind_dir_deg': lv['wind_dir_deg'],
-                'wind_speed_kt': lv['wind_speed_kt'],
-            }
-    if ttbb:
-        for lv in ttbb['levels']:
-            key = lv['pressure_mb']
-            if key in by_pressure:
-                # Prefer TTAA's value (has height/wind); TTBB just fills gaps.
-                existing = by_pressure[key]
-                if existing['temp_c'] is None:
-                    existing['temp_c'] = lv['temp_c']
-                if existing['dewpoint_c'] is None:
-                    existing['dewpoint_c'] = lv['dewpoint_c']
-            else:
-                by_pressure[key] = {
-                    'pressure_mb': key,
-                    'height_m': None,
-                    'temp_c': lv['temp_c'],
-                    'dewpoint_c': lv['dewpoint_c'],
-                    'wind_dir_deg': None,
-                    'wind_speed_kt': None,
-                }
-
-    def sort_key(lv):
-        return 10000 if lv['pressure_mb'] is None else lv['pressure_mb']
-
-    return sorted(by_pressure.values(), key=sort_key, reverse=True)
+            sub = codes_new_from_message(sub_msg)
+            try:
+                codes_set(sub, 'unpack', 1)
+                decoded = decode_subset(sub)
+                if decoded:
+                    results.append(decoded)
+            except CodesInternalError as e:
+                log.warning('subset %d failed to decode: %s', i, e)
+            finally:
+                codes_release(sub)
+    except CodesInternalError as e:
+        log.warning('failed to unpack BUFR message: %s', e)
+    finally:
+        codes_release(outer)
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -387,69 +348,65 @@ def db_connect():
     return psycopg2.connect(host=DB_HOST, dbname=DB_NAME, user=DB_USER, password=DB_PASS)
 
 
-def upsert_sounding(conn, station_id, obs_time, report_type, raw_text, profile):
+def upsert_sounding(conn, station_id, obs_time, raw_b64, levels, lat, lon):
+    location = f'SRID=4326;POINT({lon} {lat})' if lat is not None and lon is not None else None
     cur = conn.cursor()
     cur.execute("""
         INSERT INTO observations.sounding
-            (station_id, obs_time, report_type, raw_text, profile)
-        VALUES (%s, %s, %s, %s, %s)
+            (station_id, obs_time, report_type, raw_text, profile, location)
+        VALUES (%s, %s, 'BUFR', %s, %s, %s)
         ON CONFLICT (station_id, obs_time, report_type)
-        DO UPDATE SET raw_text = EXCLUDED.raw_text, profile = EXCLUDED.profile
-    """, (station_id, obs_time, report_type, raw_text, psycopg2_json(profile)))
+        DO UPDATE SET raw_text = EXCLUDED.raw_text, profile = EXCLUDED.profile,
+                      location = EXCLUDED.location
+    """, (station_id, obs_time, raw_b64, json.dumps(levels), location))
     conn.commit()
     cur.close()
-
-
-def psycopg2_json(obj):
-    import json
-    return json.dumps(obj)
 
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
-def process_bulletin(text, dry_run=False):
-    ttaa = decode_ttaa(text)
-    ttbb = None if ttaa else decode_ttbb(text)  # a single bulletin is one or the other
-
-    parsed = ttaa or ttbb
-    if not parsed:
-        log.warning('Could not parse bulletin (not TTAA/TTBB/UUAA/UUBB, or malformed): %r', text[:80])
+def process_product(data: bytes, dry_run=False):
+    decoded_list = decode_bufr_product(data)
+    if not decoded_list:
+        log.info('no decodable sounding subsets in this product (%d bytes)', len(data))
         return False
 
-    profile = merge_profile(ttaa, None) if ttaa else merge_profile(None, ttbb)
-
-    if dry_run:
-        print(f"station={parsed['station_id']} obs_time={parsed['obs_time']} "
-              f"type={parsed['report_type']} levels={len(profile)}")
-        for lv in profile:
-            print(' ', lv)
-        return True
-
-    conn = db_connect()
+    raw_b64 = base64.b64encode(data).decode('ascii') if not dry_run else None
+    conn = None if dry_run else db_connect()
     try:
-        upsert_sounding(conn, parsed['station_id'], parsed['obs_time'],
-                         parsed['report_type'], text, profile)
-        log.info('Ingested %s %s %s (%d levels)', parsed['report_type'],
-                  parsed['station_id'], parsed['obs_time'], len(profile))
+        for d in decoded_list:
+            if dry_run:
+                print(f"station={d['station_id']} obs_time={d['obs_time']} "
+                      f"lat={d['lat']} lon={d['lon']} levels={len(d['levels'])}")
+                for lv in d['levels']:
+                    print(' ', lv)
+                continue
+            upsert_sounding(conn, d['station_id'], d['obs_time'], raw_b64, d['levels'],
+                             d['lat'], d['lon'])
+            log.info('Ingested BUFR %s %s (%d levels)', d['station_id'], d['obs_time'],
+                      len(d['levels']))
     finally:
-        conn.close()
+        if conn:
+            conn.close()
     return True
 
 
 def main():
-    ap = argparse.ArgumentParser(description='Ingest TTAA/TTBB/UUAA/UUBB sounding bulletins')
-    ap.add_argument('--file', type=str, default=None, help='Read bulletin from a file instead of stdin')
+    ap = argparse.ArgumentParser(description='Ingest BUFR upper-air soundings into observations.sounding')
+    ap.add_argument('--file', type=str, default=None,
+                     help='Read a raw captured product (WMO header + BUFR body) from a file, '
+                          'instead of stdin')
     ap.add_argument('--dry-run', action='store_true', help='Decode and print, do not write to DB')
     args = ap.parse_args()
 
     if args.file:
-        with open(args.file, 'r', errors='replace') as f:
-            text = f.read()
+        with open(args.file, 'rb') as f:
+            data = f.read()
     else:
-        text = sys.stdin.read()
+        data = sys.stdin.buffer.read()
 
-    ok = process_bulletin(text, dry_run=args.dry_run)
+    ok = process_product(data, dry_run=args.dry_run)
     sys.exit(0 if ok else 1)
 
 

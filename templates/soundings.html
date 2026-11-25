@@ -149,8 +149,9 @@
         </div>
 
         <div class="sb-section" id="observedSection">
-            <div class="sb-hint" style="margin-top:0;">Decoded from the single most recent WMO TTAA/TTBB radiosonde bulletin received (surface to 100mb). Not a picker — just whatever's freshest right now.</div>
-            <button class="go-btn" id="refreshObservedBtn">Refresh Latest</button>
+            <div class="sb-hint" style="margin-top:0;">Decoded from real radiosonde BUFR launches (surface to 100mb), CONUS/Alaska/Hawaii/Caribbean/Guam. Click a station marker on the map to load its latest sounding, or use the button below for whatever's freshest anywhere.</div>
+            <button class="go-btn" id="refreshObservedBtn">Latest Anywhere</button>
+            <div class="sb-hint" id="stationCountHint"></div>
         </div>
 
         <div class="sb-section" id="forecastSection" style="display:none;">
@@ -237,6 +238,7 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 
 let clickMarker = null;
 let lastPoint = null;  // {lat, lon, label} -- last point picked, by click or site search
+let currentSource = 'observed';
 
 function selectPoint(lat, lon, label) {
     lastPoint = { lat, lon, label };
@@ -248,8 +250,55 @@ function selectPoint(lat, lon, label) {
 }
 
 map.on('click', (e) => {
+    // Only arbitrary-point picking in Forecast mode -- Observed mode is
+    // driven entirely by clicking a station marker (see loadStationMarkers).
+    if (currentSource !== 'forecast') return;
     selectPoint(e.latlng.lat, e.latlng.lng, null);
 });
+
+// ── Observed station markers (map picker) ──
+const stationMarkersLayer = L.layerGroup();
+let selectedStationId = null;
+let selectedStationMarker = null;
+
+const STATION_STYLE = { radius: 6, color: '#2c5f41', weight: 2, fillColor: '#4a7c59', fillOpacity: 0.85 };
+const STATION_STYLE_SELECTED = { radius: 8, color: '#b8860b', weight: 2, fillColor: '#ffd54f', fillOpacity: 0.95 };
+
+async function loadStationMarkers() {
+    try {
+        const resp = await fetch(`${API_BASE}/observed/stations`);
+        const stations = await resp.json();
+        stationMarkersLayer.clearLayers();
+        selectedStationMarker = null;
+        stations.forEach(s => {
+            const m = L.circleMarker([s.lat, s.lon], STATION_STYLE);
+            const obsLabel = s.obs_time.slice(0, 16).replace('T', ' ') + 'Z';
+            m.bindTooltip(`${s.name || s.station_id} — ${obsLabel}`, { direction: 'top' });
+            m.on('click', (e) => {
+                L.DomEvent.stopPropagation(e);
+                selectObservedStation(s.station_id, s.lat, s.lon, m);
+            });
+            m.addTo(stationMarkersLayer);
+            if (s.station_id === selectedStationId) {
+                m.setStyle(STATION_STYLE_SELECTED);
+                selectedStationMarker = m;
+            }
+        });
+        document.getElementById('stationCountHint').textContent =
+            stations.length ? `${stations.length} station${stations.length === 1 ? '' : 's'} available on the map` : 'No geolocated stations yet';
+    } catch (e) {
+        document.getElementById('stationCountHint').textContent = 'Could not load station list';
+    }
+}
+
+function selectObservedStation(stationId, lat, lon, marker) {
+    if (selectedStationMarker) selectedStationMarker.setStyle(STATION_STYLE);
+    marker.setStyle(STATION_STYLE_SELECTED);
+    selectedStationMarker = marker;
+    selectedStationId = stationId;
+    map.panTo([lat, lon]);
+    loadObservedSounding(stationId);
+}
 
 // Re-render for the same point when the forecast hour changes, so a picked
 // site can be stepped through F00-F18 without re-searching or re-clicking.
@@ -333,6 +382,7 @@ document.addEventListener('keydown', (e) => {
 
 // ── Data source toggle ──
 function setSource(src) {
+    currentSource = src;
     const observedOn = src === 'observed';
     document.getElementById('srcObservedBtn').classList.toggle('active', observedOn);
     document.getElementById('srcForecastBtn').classList.toggle('active', !observedOn);
@@ -340,8 +390,11 @@ function setSource(src) {
     document.getElementById('forecastSection').style.display = observedOn ? 'none' : 'block';
     if (forecastPollTimer) { clearInterval(forecastPollTimer); forecastPollTimer = null; }
     if (observedOn) {
-        loadLatestObserved();
+        stationMarkersLayer.addTo(map);
+        if (clickMarker) { map.removeLayer(clickMarker); clickMarker = null; }
+        loadObservedSounding(selectedStationId);
     } else {
+        map.removeLayer(stationMarkersLayer);
         document.getElementById('detailTitle').textContent = 'No sounding selected';
         document.getElementById('detailSub').textContent = 'Enter a site ID or click the map';
         document.getElementById('loading').style.display = 'none';
@@ -353,34 +406,43 @@ function setSource(src) {
 document.getElementById('srcObservedBtn').addEventListener('click', () => setSource('observed'));
 document.getElementById('srcForecastBtn').addEventListener('click', () => setSource('forecast'));
 
-// ── Observed soundings — latest available only, no picker ──
-function loadLatestObserved() {
-    document.getElementById('detailTitle').textContent = 'Latest Observed Sounding';
+// ── Observed soundings — "latest anywhere" or a station picked on the map ──
+function loadObservedSounding(stationId) {
+    const base = stationId ? `${API_BASE}/observed/station/${encodeURIComponent(stationId)}/latest` : `${API_BASE}/observed/latest`;
+    document.getElementById('detailTitle').textContent = stationId ? `Observed — ${stationId}` : 'Latest Observed Sounding (anywhere)';
     document.getElementById('detailSub').textContent = 'Loading…';
     showLoading();
-    const url = `${API_BASE}/observed/latest/skewt.png?_=${Date.now()}`;
+    const url = `${base}/skewt.png?_=${Date.now()}`;
     const img = new Image();
     img.onload = () => {
         showImage(url, '');
-        fetch(`${API_BASE}/observed/latest`).then(r => r.json()).then(d => {
-            document.getElementById('detailTitle').textContent = `Observed — ${d.station_id}`;
-            document.getElementById('detailSub').textContent = `${d.report_type} ${d.obs_time.slice(0, 16).replace('T', ' ')}Z`;
+        fetch(base).then(r => r.json()).then(d => {
+            document.getElementById('detailTitle').textContent = `Observed — ${d.station_name || d.station_id}`;
+            document.getElementById('detailSub').textContent = `${d.station_id} · ${d.report_type} ${d.obs_time.slice(0, 16).replace('T', ' ')}Z`;
         }).catch(() => {});
     };
     img.onerror = async () => {
         try {
-            const r = await fetch(`${API_BASE}/observed/latest`);
+            const r = await fetch(base);
             const d = await r.json();
             document.getElementById('detailSub').textContent = '';
-            showError(d.error || 'Failed to load latest observed sounding');
+            showError(d.error || 'Failed to load observed sounding');
         } catch (e) {
-            showError('Failed to load latest observed sounding');
+            showError('Failed to load observed sounding');
         }
     };
     img.src = url;
 }
-document.getElementById('refreshObservedBtn').addEventListener('click', loadLatestObserved);
-loadLatestObserved();
+document.getElementById('refreshObservedBtn').addEventListener('click', () => {
+    // Deselect any station marker -- this button is explicitly "anywhere".
+    if (selectedStationMarker) selectedStationMarker.setStyle(STATION_STYLE);
+    selectedStationMarker = null;
+    selectedStationId = null;
+    loadObservedSounding(null);
+});
+stationMarkersLayer.addTo(map);
+loadStationMarkers();
+loadObservedSounding(null);
 
 // ── Forecast soundings ──
 // Uses the async job endpoints (start/status/result), not a plain <img src>,

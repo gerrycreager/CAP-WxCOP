@@ -17,8 +17,11 @@ confirmed) and decodes ~5x slower than HRRR — real, open risk that argues
 for keeping a working fallback until RRFS has proven itself in production.
 
 Endpoints:
+  GET /api/soundings/observed/stations            -- all stations w/ a geolocated obs, for the map picker
   GET /api/soundings/observed/latest              -- single most recent observed sounding, any station
   GET /api/soundings/observed/latest/skewt.png
+  GET /api/soundings/observed/station/<id>/latest             -- latest observed sounding for one station
+  GET /api/soundings/observed/station/<id>/latest/skewt.png
   GET /api/soundings/site/<site_id>               -- resolve a site ID (e.g. KBAK) to lat/lon
   GET /api/soundings/forecast                     -- synchronous, JSON profile only
   GET /api/soundings/forecast/skewt.png           -- synchronous, JSON+PNG (may take ~30-90s, see below)
@@ -26,10 +29,13 @@ Endpoints:
   GET /api/soundings/forecast/status/<job_id>
   GET /api/soundings/forecast/result/<job_id>.png
 
-Deliberately simple for now, per Gerry's direction: observed soundings just
-show the single latest one available (no station browser/history picker --
-that can come later once TTAA/TTBB ingest is actually live and there's real
-data to browse). Forecast soundings default to "now" (F00) for a named site
+Observed soundings now have a station picker (added 2026-11-25, once real
+BUFR ingest went live -- see [[project_soundings_observed_ingest_gap]]):
+`/observed/stations` lists every station with at least one geolocated obs
+for the map, `/observed/station/<id>/latest[/skewt.png]` fetches one
+station's latest profile. `/observed/latest[/skewt.png]` (no station)
+remains as "whatever's freshest anywhere" for the default/no-selection
+view. Forecast soundings default to "now" (F00) for a named site
 or clicked point, with the rest of HRRR's own forecast timeframe (through
 F48 on synoptic cycles) reachable via the same site/point. Longer-range
 soundings (GFS, eventually MPAS) are an explicitly out-of-scope future idea
@@ -65,6 +71,28 @@ import psycopg2.extras
 from sounding_render import render_skewt
 from scripts.hrrr_sounding_extract import get_hrrr_sounding
 from scripts.rrfs_sounding_extract import get_rrfs_sounding, _latest_available_rrfs_cycle
+
+def _station_label(station_id):
+    """Human station name, e.g. 'Chanhassen, MN' -- or the bare WMO id if
+    unavailable. TEMPORARILY DISABLED 2026-11-25: a MetPy-table-based
+    lookup here (reading metpy.io.station_data's bundled tables lazily on
+    first request) caused a real production crash -- the live WSGIDaemonProcess
+    (threads=15, single process, see cap_winds.conf) logged
+    "double free or corruption (out)" and one worker aborted the first time
+    this ran under real concurrent load, with the triggering request itself
+    coming back as a 500 with NO Python traceback anywhere (apache error log
+    or this module's own log) -- consistent with a native/C-extension
+    thread-safety bug (pandas/pooch file parsing racing another thread's
+    pyproj/GDAL init; a "pyproj unable to set PROJ database path" warning
+    already appears in this process's startup log, a known-fragile area).
+    Reverted to bare-id-only pending a safer design: precompute the wmo_id
+    -> name table OFFLINE (a one-off script, committed as a static JSON
+    file) and load it synchronously at module import time (single-threaded,
+    before any request thread starts) instead of lazily on a live request
+    thread. Do not re-add a lazy first-use import of metpy.io.station_data
+    (or anything else that triggers pandas/pooch file I/O) on a live request
+    path in this app without that redesign."""
+    return station_id
 
 log = logging.getLogger(__name__)
 if not log.handlers:
@@ -111,55 +139,111 @@ def _latest_available_hrrr_cycle(now=None, fhr=0):
     return cycle_dt.strftime('%Y%m%d'), cycle_dt.strftime('%H')
 
 
-@soundings_api.route('/observed/latest')
-def observed_latest():
-    """The single most recent observed sounding across all stations --
-    deliberately not a browsable history/picker for now, just "what's the
-    latest balloon data we have"."""
+def _fetch_latest_observed(station_id=None):
+    """Latest observations.sounding row, optionally filtered to one station."""
+    conn = db_connect()
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        if station_id:
+            cur.execute("""
+                SELECT station_id, obs_time, report_type, profile
+                FROM observations.sounding
+                WHERE station_id = %s
+                ORDER BY obs_time DESC
+                LIMIT 1
+            """, (station_id,))
+        else:
+            cur.execute("""
+                SELECT station_id, obs_time, report_type, profile
+                FROM observations.sounding
+                ORDER BY obs_time DESC
+                LIMIT 1
+            """)
+        row = cur.fetchone()
+        cur.close()
+        return row
+    finally:
+        conn.close()
+
+
+def _not_found_msg(station_id):
+    return (f'No observed soundings available for {station_id}' if station_id
+            else 'No observed soundings available yet')
+
+
+@soundings_api.route('/observed/stations')
+def observed_stations():
+    """All stations with at least one geolocated observed sounding, each
+    with that station's own latest geolocated obs_time -- feeds the map
+    picker. Stations that have only ever reported via the legacy
+    no-lat/lon BUFR template (collective subset-per-station messages) are
+    omitted; there is no other coordinate source for them in this table."""
     conn = db_connect()
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute("""
-            SELECT station_id, obs_time, report_type, raw_text, profile
+            SELECT DISTINCT ON (station_id)
+                station_id, obs_time,
+                ST_Y(location::geometry) AS lat,
+                ST_X(location::geometry) AS lon
             FROM observations.sounding
-            WHERE report_type IN ('TTAA', 'UUAA')
-            ORDER BY obs_time DESC
-            LIMIT 1
+            WHERE location IS NOT NULL
+            ORDER BY station_id, obs_time DESC
         """)
-        row = cur.fetchone()
+        rows = cur.fetchall()
         cur.close()
     except Exception as e:
-        log.exception('observed_latest failed')
+        log.exception('observed_stations failed')
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
+    for r in rows:
+        r['obs_time'] = r['obs_time'].isoformat() + 'Z'
+        r['name'] = _station_label(r['station_id'])
+    return jsonify(rows)
+
+
+@soundings_api.route('/observed/latest')
+def observed_latest():
+    return _observed_latest_json(None)
+
+
+@soundings_api.route('/observed/station/<station_id>/latest')
+def observed_station_latest(station_id):
+    return _observed_latest_json(station_id)
+
+
+def _observed_latest_json(station_id):
+    try:
+        row = _fetch_latest_observed(station_id)
+    except Exception as e:
+        log.exception('observed_latest failed')
+        return jsonify({'error': str(e)}), 500
     if not row:
-        return jsonify({'error': 'No observed soundings available yet'}), 404
+        return jsonify({'error': _not_found_msg(station_id)}), 404
     row['obs_time'] = row['obs_time'].isoformat() + 'Z'
+    row['station_name'] = _station_label(row['station_id'])
     return jsonify(row)
 
 
 @soundings_api.route('/observed/latest/skewt.png')
 def observed_latest_skewt_png():
-    conn = db_connect()
+    return _observed_skewt_png(None)
+
+
+@soundings_api.route('/observed/station/<station_id>/latest/skewt.png')
+def observed_station_latest_skewt_png(station_id):
+    return _observed_skewt_png(station_id)
+
+
+def _observed_skewt_png(station_id):
     try:
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cur.execute("""
-            SELECT station_id, obs_time, report_type, profile
-            FROM observations.sounding
-            WHERE report_type IN ('TTAA', 'UUAA')
-            ORDER BY obs_time DESC
-            LIMIT 1
-        """)
-        row = cur.fetchone()
-        cur.close()
+        row = _fetch_latest_observed(station_id)
     except Exception as e:
         log.exception('observed_latest_skewt_png failed')
         return jsonify({'error': str(e)}), 500
-    finally:
-        conn.close()
     if not row:
-        return jsonify({'error': 'No observed soundings available yet'}), 404
+        return jsonify({'error': _not_found_msg(station_id)}), 404
     try:
         title = f"{row['station_id']} — {row['report_type']} {row['obs_time'].strftime('%Y-%m-%d %H%MZ')} (Observed)"
         png = render_skewt(row['profile'], title=title)
