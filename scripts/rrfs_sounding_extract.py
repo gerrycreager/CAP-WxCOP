@@ -14,14 +14,22 @@ changes from the HRRR version (confirmed 2026-09-20 against a real pull):
 same cfgrib variable names (gh/t/dpt/u/v, isobaricInhPa coord) work
 unchanged for RRFS's prslev product.
 
-Source: NOMADS para (pre-operational) feed, the only live real-time source
-as of 2026-09-20:
-  https://nomads.ncep.noaa.gov/pub/data/nccf/com/rrfs/para/rrfs.YYYYMMDD/CC/
+Source: NOMADS operational feed:
+  https://nomads.ncep.noaa.gov/pub/data/nccf/com/rrfs/prod/rrfs.YYYYMMDD/CC/
     rrfs.tCCz.prslev.3km.fFFF.conus.grib2  (+ .idx)
+UPDATED 2026-11-25: RRFS/REFS went operational on NOAAPort 2026-10-14 (see
+memory: project_noaaport_sbn_href_retirement) and NOMADS has now retired the
+`para` tree entirely -- every path under it 403s (confirmed: GFS's `prod`
+tree and RRFS's new `prod` tree both 200, old RRFS `para` tree 403 even for
+a bare directory listing, so this was a path removal, not a rate-limit or
+transient block). Moved SOURCE_BASE from `para` to `prod` below. The file
+naming under `prod` is unchanged for the `conus`/3km domain this module
+uses (`prod` also now carries `hi`/`pr`/`ak`/`na` domain variants at other
+resolutions, not used here).
 No S3/NODD Big Data Program bucket exists yet for RRFS/REFS (checked
 2026-09-19/20, ~10 plausible bucket names, all 404) -- SOURCE_BASE below is
 the one line to change if/when one appears (likely named noaa-rrfs-bdp-pds
-if it follows HRRR's convention), worth re-checking around/after 2026-10-14.
+if it follows HRRR's convention).
 
 Confirmed field mapping: prslev has HGT/TMP/DPT/UGRD/VGRD at 25mb steps,
 exactly 37 levels in the 100-1000mb scope this feature cares about -- same
@@ -55,7 +63,7 @@ import requests
 log = logging.getLogger('rrfs_sounding_extract')
 
 # The one line to change once an S3/NODD bucket exists -- see module docstring.
-SOURCE_BASE = 'https://nomads.ncep.noaa.gov/pub/data/nccf/com/rrfs/para'
+SOURCE_BASE = 'https://nomads.ncep.noaa.gov/pub/data/nccf/com/rrfs/prod'
 CACHE_DIR = Path('/tmp/rrfs_soundings')
 CACHE_RETENTION_HOURS = 48
 

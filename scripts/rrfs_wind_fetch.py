@@ -47,7 +47,10 @@ import requests
 
 log = logging.getLogger('rrfs_wind_fetch')
 
-SOURCE_BASE = 'https://nomads.ncep.noaa.gov/pub/data/nccf/com/rrfs/para'
+# UPDATED 2026-11-25: NOMADS retired the `para` tree entirely now that
+# RRFS/REFS is fully operational (see rrfs_sounding_extract.py's docstring
+# for the confirmation); moved to `prod`, same file naming.
+SOURCE_BASE = 'https://nomads.ncep.noaa.gov/pub/data/nccf/com/rrfs/prod'
 CACHE_DIR = Path('/tmp/rrfs_wind_cache')
 CACHE_RETENTION_HOURS = 6
 
