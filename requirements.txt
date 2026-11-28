@@ -67,6 +67,7 @@ mda-xdrlib==0.2.0
 mdurl==0.1.2
 metar==1.11.0
 MetPy==1.7.1
+mgrs==1.7.1
 mod_wsgi==5.0.2
 msgpack==1.2.3
 multidict==6.9.1

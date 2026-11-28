@@ -400,7 +400,7 @@ dl.controls dd{margin:0; color:var(--fg); font-size:13.5px; max-width:620px;}
       <h2>Incident Archive <span class="route">/incident-archive</span></h2>
       <p class="purpose">Builds a downloadable ZIP of weather data around a specific time and place, for reconstructing conditions after an aviation incident — not a routine monitoring tool.</p>
       <ol class="steps">
-        <li><b>Location</b> — three tabs: <b>Airport ID</b> (ICAO identifier, e.g. <span class="field">KCOS</span> — falls back to that station's most recent METAR if the airport itself isn't found), <b>Lat/Lon</b> (decimal degrees or degrees–decimal-minutes, e.g. <span class="field">38 48.348N</span>), or <b>MGRS</b> (10-digit grid coordinate).</li>
+        <li><b>Location</b> — four tabs: <b>Airport ID</b> (ICAO identifier, e.g. <span class="field">KCOS</span> — falls back to that station's most recent METAR if the airport itself isn't found), <b>Lat/Lon</b> (decimal degrees or degrees–decimal-minutes, e.g. <span class="field">38 48.348N</span>), <b>MGRS</b> (10-digit grid coordinate), or <b>USNG</b> (same grid as MGRS, spaces optional, e.g. <span class="field">13T DE 12345 67890</span>).</li>
         <li><b>Incident Time (UTC)</b> — pre-filled to one hour before now as a starting point; all times are UTC.</li>
         <li><b>Collection Radii</b> — METAR/TAF (nm, default 100) and Radar (nm, default 140), each adjustable 10–300.</li>
         <li><b>Preview</b> — queries without downloading; shows station/report counts, radar sites in range, and plots the incident location, METAR/TAF radius (blue circle), and radar radius (orange dashed circle) on the map. <b>Generate ZIP</b> stays disabled until Preview succeeds.</li>

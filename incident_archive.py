@@ -63,9 +63,15 @@ def parse_location(location_data):
       {'type': 'airport', 'value': 'KCOS'}
       {'type': 'latlon',  'value': {'lat': '38.8058', 'lon': '-104.7008'}}
       {'type': 'mgrs',    'value': '13TDE1234567890'}
+      {'type': 'usng',    'value': '13T DE 12345 67890'}
 
     Lat/lon value may also be decimal degrees string or
     degrees-decimal-minutes string: "38 48.348N" / "104 42.048W"
+
+    USNG and MGRS are the same underlying grid (both NAD83/WGS84-based) --
+    USNG just allows space-delimited grouping where MGRS doesn't. Both
+    types share _parse_mgrs_or_usng() below (matching the convention
+    AvTrack's locate.py/sorties.py already use for the same reason).
     """
     loc_type = location_data.get('type')
 
@@ -103,17 +109,30 @@ def parse_location(location_data):
         lon = _parse_coord(str(v.get('lon', '')))
         return lat, lon
 
-    elif loc_type == 'mgrs':
-        try:
-            import mgrs as mgrs_lib
-            m = mgrs_lib.MGRS()
-            lat, lon = m.toLatLon(location_data['value'].encode())
-            return float(lat), float(lon)
-        except ImportError:
-            raise ValueError("mgrs library not installed; use pip install mgrs")
+    elif loc_type in ('mgrs', 'usng'):
+        return _parse_mgrs_or_usng(location_data['value'])
 
     else:
         raise ValueError(f"Unknown location type: {loc_type}")
+
+
+def _parse_mgrs_or_usng(value):
+    """Shared by the 'mgrs' and 'usng' location types -- see parse_location's
+    docstring for why. Strips whitespace so USNG's space-delimited grouping
+    (e.g. '13T DE 12345 67890') parses the same as plain MGRS notation."""
+    try:
+        import mgrs as mgrs_lib
+    except ImportError:
+        raise ValueError("mgrs library not installed; use pip install mgrs")
+    cleaned = re.sub(r'\s+', '', str(value).strip().upper())
+    if not cleaned:
+        raise ValueError("Empty MGRS/USNG coordinate string")
+    try:
+        m = mgrs_lib.MGRS()
+        lat, lon = m.toLatLon(cleaned.encode())
+    except Exception as e:
+        raise ValueError(f"Could not parse MGRS/USNG coordinate '{value}': {e}")
+    return float(lat), float(lon)
 
 
 def _parse_coord(s):

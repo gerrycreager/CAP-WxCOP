@@ -238,6 +238,7 @@
             <div class="loc-tab active" id="tab-airport" onclick="setLocType('airport')">Airport ID</div>
             <div class="loc-tab"        id="tab-latlon"  onclick="setLocType('latlon')">Lat / Lon</div>
             <div class="loc-tab"        id="tab-mgrs"    onclick="setLocType('mgrs')">MGRS</div>
+            <div class="loc-tab"        id="tab-usng"    onclick="setLocType('usng')">USNG</div>
         </div>
 
         <div class="loc-input visible" id="input-airport">
@@ -266,6 +267,13 @@
             <input type="text" id="mgrs" placeholder="13TDE1234567890"
                    oninput="this.value=this.value.toUpperCase()">
             <div class="hint">10-digit precision</div>
+        </div>
+
+        <div class="loc-input" id="input-usng">
+            <label>USNG Coordinate</label>
+            <input type="text" id="usng" placeholder="13T DE 12345 67890"
+                   oninput="this.value=this.value.toUpperCase()">
+            <div class="hint">Same grid as MGRS -- spaces optional</div>
         </div>
 
         <div class="section-title">Incident Time (UTC)</div>
@@ -343,7 +351,7 @@
 
     function setLocType(type) {
         currentLocType = type;
-        ['airport', 'latlon', 'mgrs'].forEach(function(t) {
+        ['airport', 'latlon', 'mgrs', 'usng'].forEach(function(t) {
             document.getElementById('tab-' + t).classList.toggle('active', t === type);
             document.getElementById('input-' + t).classList.toggle('visible', t === type);
         });
@@ -370,10 +378,15 @@
             if (!lat || !lon) throw new Error('Latitude and longitude are required');
             location = { type: 'latlon', value: { lat: lat, lon: lon } };
 
-        } else {
+        } else if (currentLocType === 'mgrs') {
             var mgrs = document.getElementById('mgrs').value.trim();
             if (!mgrs) throw new Error('MGRS coordinate is required');
             location = { type: 'mgrs', value: mgrs };
+
+        } else {
+            var usng = document.getElementById('usng').value.trim();
+            if (!usng) throw new Error('USNG coordinate is required');
+            location = { type: 'usng', value: usng };
         }
 
         return {
