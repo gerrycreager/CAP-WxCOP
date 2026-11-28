@@ -716,8 +716,17 @@
     function mrmsMakeTileLayer(ts) {
         var eff = getEffectiveProduct();
         var url = mapcacheTileUrl(eff, ts);
+        // composite/CONUS only renders up to z8 server-side as of 2026-11-28
+        // (data1 couldn't keep up at z9/z10 -- see mrms_tile_renderer.py's
+        // PRODUCTS['composite']['max_zoom_conus']). maxNativeZoom makes
+        // Leaflet upscale the z8 tile instead of requesting a nonexistent
+        // z9/z10 one. The MESH button is currently hidden (see the HTML
+        // comment where it was removed) so 'composite' is the only product
+        // this layer serves right now -- if MESH comes back, this needs to
+        // be conditional on eff, since MESH/lightning/azshear still render
+        // natively to z10.
         return L.tileLayer(url, {
-            opacity:0, zIndex:400,
+            opacity:0, zIndex:400, maxNativeZoom:8,
             attribution:'MRMS &copy; NOAA/CIMSS',
             errorTileUrl:'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
         });

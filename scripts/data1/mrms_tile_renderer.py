@@ -173,6 +173,14 @@ PRODUCTS = {
         'units': 'dBZ',
         'cb_labels': ['-30', '0', '20', '40', '60', '80'],
         'missing': -99,
+        # Added 2026-11-28: z9+z10 alone measured at 120s of a 169s total
+        # frame render (71%) against a real CONUS grid -- the ZOOM_MAX_SECTOR
+        # override below had drifted to z10 despite its own comment saying
+        # "cap at z8", and that drift was the actual cause of data1 falling
+        # behind its own 2-min posting cadence (1000+ frame backlog by the
+        # time this was found). z8 keeps total render time ~49s. Frontend
+        # (radar_map.html mrmsMakeTileLayer) must set maxNativeZoom to match.
+        'max_zoom_conus': 8,
     },
     'mesh': {
         'stops': _MESH_STOPS,
@@ -593,9 +601,18 @@ def render(product_key, sector, grib_path):
 
     lut = build_lut(pdef['stops'], pdef['vmin'], pdef['vmax'])
 
-    # Per-sector zoom cap: CONUS has a huge grid, cap at z8 to keep render time <30s.
-    # OCONUS sectors are smaller — z9 is fine. All sectors floor at ZOOM_MIN.
-    ZOOM_MAX_SECTOR = 10 if sector == 'CONUS' else ZOOM_MAX
+    # Per-sector zoom cap: CONUS has a huge grid. Products can set
+    # 'max_zoom_conus' in PRODUCTS to cap it (see composite's entry, fixed
+    # 2026-11-28 -- this had drifted to z10 for every CONUS product, which
+    # is what actually caused data1's composite backlog). Falls back to
+    # ZOOM_MAX for any CONUS product that doesn't set it (mesh/lightning/
+    # azshear -- untouched, not part of the backlog problem). OCONUS
+    # sectors are smaller grids, always get ZOOM_MAX. All sectors floor at
+    # ZOOM_MIN.
+    if sector == 'CONUS':
+        ZOOM_MAX_SECTOR = pdef.get('max_zoom_conus', ZOOM_MAX)
+    else:
+        ZOOM_MAX_SECTOR = ZOOM_MAX
 
     # Pre-compute 1-D lat/lon arrays once (used for tile range and bbox checks)
     if lats.ndim == 2:
